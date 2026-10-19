@@ -48,6 +48,32 @@ final class AccessibilityLanguageTests: XCTestCase {
         }
     }
 
+    func testHeldAFAdmissionCannotBeOverriddenByExternalEnablement() {
+        let button = AccessibleFocusButton(type: .system)
+        var activations = 0
+        button.activation = { activations += 1 }
+        button.setControlAdmission(false, environmentEnabled: true)
+        button.isEnabled = true
+        XCTAssertFalse(button.isEnabled)
+        XCTAssertFalse(button.accessibilityActivate())
+        XCTAssertEqual(activations, 0)
+        button.setControlAdmission(true, environmentEnabled: true)
+        XCTAssertTrue(button.isEnabled)
+        XCTAssertTrue(button.accessibilityActivate())
+        XCTAssertEqual(activations, 1)
+        button.isEnabled = false
+        XCTAssertFalse(button.isEnabled)
+        button.setControlAdmission(true, environmentEnabled: false)
+        button.isEnabled = true
+        XCTAssertFalse(button.isEnabled)
+        button.setControlAdmission(true, environmentEnabled: true)
+        XCTAssertTrue(button.isEnabled)
+        button.setControlAdmission(false, environmentEnabled: true)
+        XCTAssertFalse(button.isEnabled)
+        button.isEnabled = true
+        XCTAssertFalse(button.isEnabled)
+    }
+
     func testMagnificationAndAllCameraFocusStatusesResolveInBothSelectedBundles() throws {
         let language = AppLanguageStore(defaults: makeDefaults())
         for choice in [AppLanguage.english, .traditionalChinese] {

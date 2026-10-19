@@ -21,7 +21,19 @@ final class ShortShutterRecoveryStateTests: XCTestCase {
         XCTAssertNil(state.cameraFocusInfo)
         await peer.release("old-focus")
         try await waitUntil { state.cameraFocusInfo == nil }
+        try await waitUntil { !state.liveViewRetiring }
+        let framesBeforeForeground = await peer.frameReadCount()
+        let focusBeforeForeground = await peer.focusReadCount()
         state.setApplicationActive(true)
+        try await Task.sleep(for: .milliseconds(300))
+        let framesAfterForeground = await peer.frameReadCount()
+        let focusAfterForeground = await peer.focusReadCount()
+        XCTAssertEqual(framesAfterForeground, framesBeforeForeground, "Foregrounding cannot restart a retired reader")
+        XCTAssertEqual(focusAfterForeground, focusBeforeForeground)
+        XCTAssertNil(state.cameraFocusInfo)
+        XCTAssertNil(state.activeLiveViewSource)
+        try await waitUntil { state.canResumeRetiredLiveView }
+        await state.startLiveView() // Explicit user Start after the captured Stop has settled.
         try await waitUntil { state.cameraFocusInfo?.frames.first?.status == .focused }
         XCTAssertNil(state.focusMarker, "Optical telemetry must not synthesize a command-acceptance marker")
 
@@ -147,6 +159,75 @@ final class ShortShutterRecoveryStateTests: XCTestCase {
         XCTAssertTrue(focusButton(in: host.view) === button)
         let commands = await peer.commands()
         XCTAssertTrue(commands.isEmpty, "Capability rendering must not synthesize an autofocus press")
+    }
+
+    func testHeldAFCoordinatorCanReleaseItsOwnerWhileButtonIsDisabled() async throws {
+        let peer = ShortShutterPeer(control: .autofocus)
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connect(state)
+        let coordinator = HeldAutofocusButton.Coordinator(camera: state)
+        coordinator.down()
+        let owner = try XCTUnwrap(coordinator.owner)
+        try await waitUntil { state.shutterReleaseRequired && !state.shutterReleaseUnconfirmed }
+        let button = AccessibleFocusButton(type: .system)
+        button.activation = { coordinator.activate() }
+        button.setControlAdmission(true, environmentEnabled: false)
+        XCTAssertFalse(button.accessibilityActivate())
+        XCTAssertTrue(state.ownsHeldAutofocus(owner))
+        coordinator.releaseHold()
+        try await waitUntil { !state.isBusy(.focus) }
+        XCTAssertNil(coordinator.owner)
+        XCTAssertFalse(state.heldAutofocusPressed)
+        XCTAssertFalse(state.shutterReleaseRequired)
+        let commands = await peer.commands()
+        XCTAssertEqual(commands.map(\.action), ["start", "stop"])
+    }
+
+    func testHostedHeldAFRespectsDisabledEnvironmentAcrossCapabilityAndLanguageUpdates() async throws {
+        let peer = ShortShutterPeer(control: .autofocus)
+        let state = makeState([peer])
+        let suite = "HeldAFDisabledHosted.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let language = AppLanguageStore(defaults: defaults)
+        try await connect(state)
+        XCTAssertTrue(state.canStartHeldAutofocus)
+        let host = UIHostingController(rootView: HeldAutofocusButton(camera: state)
+            .disabled(true).environmentObject(language))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            state.requestDisconnect()
+            Task { await peer.releaseAll() }
+        }
+        func focusButton(in view: UIView) -> AccessibleFocusButton? {
+            if let button = view as? AccessibleFocusButton { return button }
+            return view.subviews.lazy.compactMap { focusButton(in: $0) }.first
+        }
+        host.loadViewIfNeeded()
+        host.view.layoutIfNeeded()
+        try await waitUntil { focusButton(in: host.view)?.accessibilityLabel == language.string("held_autofocus") }
+        let button = try XCTUnwrap(focusButton(in: host.view))
+        XCTAssertFalse(button.isEnabled)
+        language.select(.traditionalChinese)
+        try await waitUntil { button.accessibilityLabel == language.string("held_autofocus") }
+        XCTAssertFalse(button.isEnabled)
+        state.setApplicationActive(false)
+        state.setApplicationActive(true)
+        XCTAssertTrue(state.canStartHeldAutofocus)
+        language.select(.english)
+        try await waitUntil { button.accessibilityLabel == language.string("held_autofocus") }
+        XCTAssertFalse(button.isEnabled)
+        XCTAssertTrue(focusButton(in: host.view) === button)
+        XCTAssertFalse(button.accessibilityActivate())
+        let commands = await peer.commands()
+        XCTAssertTrue(commands.isEmpty)
     }
 
     func testHeldAFRequiresCapabilityAndReleasesOnBackgroundWithoutRepress() async throws {
@@ -570,6 +651,7 @@ private struct ShortShutterCommand: Equatable, Sendable {
 }
 
 private actor ShortShutterPeer: CameraHTTPTransport {
+    private static let frame = try! JPEGOriginalTestVectors.bytes("rgb-baseline")
     enum Outcome: Sendable { case normal, lost }
     private struct Plan { let outcome: Outcome; let gate: String? }
     nonisolated let control: ShortShutterControl
@@ -578,6 +660,7 @@ private actor ShortShutterPeer: CameraHTTPTransport {
     private let owner: String
     private let telemetry: Bool
     private var focusReads = 0
+    private var frameReads = 0
     private let version = "ver130"
     private var plans: [String: [Plan]] = [:]
     private var gates: [String: CheckedContinuation<Void, Never>] = [:]
@@ -599,6 +682,7 @@ private actor ShortShutterPeer: CameraHTTPTransport {
     func commands() -> [ShortShutterCommand] { recorded }
     func mutations() -> [String] { writes }
     func focusReadCount() -> Int { focusReads }
+    func frameReadCount() -> Int { frameReads }
     func waiting(_ gate: String) -> Bool { gates[gate] != nil }
     func release(_ gate: String) { gates.removeValue(forKey: gate)?.resume() }
     func releaseAll() {
@@ -637,8 +721,9 @@ private actor ShortShutterPeer: CameraHTTPTransport {
         if telemetry, path.hasSuffix("/shooting/liveview") {
             return CameraHTTPResponse(statusCode: 200, body: Data("{}".utf8))
         }
-        if telemetry, path.hasSuffix("/flip") {
-            return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: Data([0xff, 0xd8, 0x21, 0xff, 0xd9]))
+        if telemetry, method == "GET", path == "/ccapi/\(version)/shooting/liveview/flip" {
+            frameReads += 1
+            return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: Self.frame)
         }
         if path == "/ccapi/events" { throw CancellationError() }
         if route == "press" || route == "stop" {

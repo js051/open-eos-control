@@ -601,6 +601,12 @@ final class ShutterReleaseRecoveryTests: XCTestCase {
         let backgroundFrames = await transport.count("GET /ccapi/liveview/frame")
         XCTAssertEqual(backgroundFrames, frames)
         state.setApplicationActive(true)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let foregroundFrames = await transport.count("GET /ccapi/liveview/frame")
+        XCTAssertEqual(foregroundFrames, frames, "Foregrounding alone must not restart the retired reader")
+        XCTAssertNil(state.activeLiveViewSource)
+        try await waitForLiveViewRestartAdmission(state)
+        await state.startLiveView() // Explicit user Start after shutter and Live View cleanup.
         try await waitForRequest("GET /ccapi/liveview/frame", count: frames + 1, on: transport)
         await state.disconnect()
     }
@@ -767,6 +773,15 @@ final class ShutterReleaseRecoveryTests: XCTestCase {
         throw URLError(.timedOut)
     }
 
+    private func waitForLiveViewRestartAdmission(_ state: CameraAppState) async throws {
+        for _ in 0..<2_000 {
+            if state.canResumeRetiredLiveView { return }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTFail("The retired Live View did not become eligible for explicit Start")
+        throw URLError(.timedOut)
+    }
+
     private func waitForRequest(
         _ key: String, count: Int = 1, on transport: SuspendedShutterTransport
     ) async throws {
@@ -782,6 +797,7 @@ final class ShutterReleaseRecoveryTests: XCTestCase {
 // Independent camera model: a lost Start response still opens the shutter. Failed
 // release leaves it open. Gates deliberately ignore Task cancellation to expose races.
 private actor SuspendedShutterTransport: CameraHTTPTransport {
+    private static let frame = try! JPEGOriginalTestVectors.bytes("rgb-baseline")
     private struct Plan {
         let json: String?
         let error: URLError.Code?
@@ -841,6 +857,9 @@ private actor SuspendedShutterTransport: CameraHTTPTransport {
             try await Task.sleep(nanoseconds: 60_000_000_000)
         }
         if let error = plan?.error { throw URLError(error) }
+        if method == "GET", path == "/ccapi/liveview/frame", plan?.json == nil {
+            return CameraHTTPResponse(statusCode: 200, headers: ["Content-Type": "image/jpeg"], body: Self.frame)
+        }
         return CameraHTTPResponse(statusCode: 200, headers: ["Content-Type": path.hasSuffix("/frame") ? "image/jpeg" : "application/json"], body: Data(reply.utf8))
     }
 

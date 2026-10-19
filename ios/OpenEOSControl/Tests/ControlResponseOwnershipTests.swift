@@ -68,10 +68,12 @@ final class ControlResponseOwnershipTests: XCTestCase {
                     let startsAfter = await newPeer.count(.liveViewStart)
                     let eventStopsAfter = await newPeer.count(.stopEvents)
                     let closed = await newPeer.count(.close)
+                    let maintenanceClosed = await newPeer.count(.maintenanceClose)
                     let oldReadsAfter = await oldPeer.count(.info)
                     XCTAssertEqual(startsAfter, starts, "Retired \(action) must not start B's Live View")
                     XCTAssertEqual(eventStopsAfter, eventStops)
                     XCTAssertEqual(closed, 0, "Retired \(action) must not disconnect B")
+                    XCTAssertEqual(maintenanceClosed, 0, "Retired \(action) must not close B's maintenance session")
                     XCTAssertEqual(oldReadsAfter, oldReads, "A must not begin a recovery snapshot after retirement")
 
                     // A new event and its subsequent poll prove B's original event
@@ -83,7 +85,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
                     XCTAssertEqual(state.status?.mode, "B event delivered")
                     XCTAssertEqual(state.info?.model, "Synthetic control B")
                     XCTAssertEqual(state.lastError, saved.error)
-                    await assertOriginalClose(oldPeer, bridge: bridge)
+                    await assertOriginalClose(oldPeer, bridge: bridge, maintenance: true)
                 }
             }
         }
@@ -135,7 +137,9 @@ final class ControlResponseOwnershipTests: XCTestCase {
                     XCTAssertNil(state.activeLiveViewSource)
                     XCTAssertTrue(state.maintenanceControlsPaused)
                     let closed = await peer.count(.close)
+                    let maintenanceClosed = await peer.count(.maintenanceClose)
                     XCTAssertEqual(closed, 0, "Sleep evidence must not trigger automatic DELETE")
+                    XCTAssertEqual(maintenanceClosed, 0, "Sleep evidence must not trigger maintenance DELETE")
                 case .clean:
                     XCTAssertTrue(state.connected)
                     XCTAssertEqual(state.maintenanceRecord?.outcome.commandEvidence, .responded)
@@ -197,15 +201,35 @@ final class ControlResponseOwnershipTests: XCTestCase {
                 await state.latestMediaTask?.value
                 let original = state.snapshot
                 await peer.enqueue(action.wire(bridge: bridge), gate: "command")
-                let operation = Task { await perform(action, state: state) }
+                let operation = Task { () -> Bool? in
+                    if bridge, action == .setting {
+                        return await state.setSetting(key: "iso", value: "800")
+                    }
+                    await perform(action, state: state)
+                    return nil
+                }
                 try await waitForGate("command", peer: peer)
                 let readback = action == .directory && bridge ? ControlOwnerWire.directoryReadback : boundary
                 await peer.enqueue(readback, error: .networkConnectionLost)
                 await peer.release("command")
-                await operation.value
+                let consumed = await operation.value
 
                 XCTAssertTrue(state.connected)
-                XCTAssertNotNil(state.lastError, "Current \(action) must report \(boundary) failure")
+                if bridge, action == .setting {
+                    // Bridge reports a received write with unavailable readback
+                    // as a valid evidence receipt, not a transport exception.
+                    XCTAssertEqual(consumed, false, "Unavailable readback cannot consume the setting draft")
+                    let record = try XCTUnwrap(state.shootingSettingRecord)
+                    XCTAssertEqual(record.outcome.writeEvidence, .responded)
+                    XCTAssertEqual(record.outcome.readbackEvidence, .unavailable)
+                    XCTAssertNil(record.outcome.observedSetting)
+                    XCTAssertFalse(record.running)
+                    XCTAssertEqual(record.statusKey, "shooting_setting_responded")
+                    XCTAssertEqual(record.readbackKey, "shooting_setting_unavailable")
+                    XCTAssertTrue(state.canRecoverShootingSetting(record.id))
+                } else {
+                    XCTAssertNotNil(state.lastError, "Current \(action) must report \(boundary) failure")
+                }
                 XCTAssertFalse(state.isBusy(action.category))
                 XCTAssertEqual(state.snapshot, original)
                 let commands = await peer.count(action.wire(bridge: bridge))
@@ -696,7 +720,9 @@ final class ControlResponseOwnershipTests: XCTestCase {
         XCTAssertTrue(replacementHeld)
         XCTAssertFalse(replacement.isCancelled)
         let closed = await newPeer.count(.close)
+        let maintenanceClosed = await newPeer.count(.maintenanceClose)
         XCTAssertEqual(closed, 0)
+        XCTAssertEqual(maintenanceClosed, 0)
         if readback == nil {
             let capabilitiesAfter = await oldPeer.count(.capabilities)
             let infoAfter = await oldPeer.count(.info)
@@ -711,7 +737,8 @@ final class ControlResponseOwnershipTests: XCTestCase {
             XCTAssertEqual(oldReleases, 1, "Retirement must preserve A's guaranteed shutter release")
             XCTAssertEqual(newReleases, 0)
         }
-        await assertOriginalClose(oldPeer, bridge: bridge)
+        await assertOriginalClose(oldPeer, bridge: bridge,
+                                  maintenance: action == .sleep || action == .clean || action == .cleanAndPowerOff)
         await newPeer.release("new-command")
         await replacement.value
         XCTAssertFalse(state.isBusy(action.category))
@@ -863,7 +890,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
 
     private func waitForImage(_ data: Data, state: CameraAppState) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while state.liveViewData != data {
+        while state.liveViewData != data || state.lastFrameAt == nil {
             guard ContinuousClock.now < deadline else { throw URLError(.timedOut) }
             await Task.yield()
         }
@@ -901,10 +928,14 @@ final class ControlResponseOwnershipTests: XCTestCase {
         XCTAssertEqual(state.lastError, saved.error, file: file, line: line)
     }
 
-    private func assertOriginalClose(_ peer: ControlOwnerPeer, bridge: Bool) async {
+    private func assertOriginalClose(_ peer: ControlOwnerPeer, bridge: Bool, maintenance: Bool) async {
         if bridge {
             let closed = await peer.count(.close)
-            XCTAssertEqual(closed, 1, "The original Bridge session must still receive its own DELETE")
+            let maintenanceClosed = await peer.count(.maintenanceClose)
+            XCTAssertEqual(closed, maintenance ? 0 : 1,
+                           "Maintenance teardown must never fall back to the generic session DELETE")
+            XCTAssertEqual(maintenanceClosed, maintenance ? 1 : 0,
+                           "The original Bridge session must receive exactly its owned DELETE")
         }
     }
 
@@ -1002,7 +1033,7 @@ private enum ControlOwnerAction: CaseIterable {
 }
 
 private enum ControlOwnerWire: Hashable, Sendable {
-    case health, open, close, info, status, capabilities, events, stopEvents, media, liveViewStart, liveViewStop, frame
+    case health, open, close, maintenanceClose, info, status, capabilities, events, stopEvents, media, liveViewStart, liveViewStop, frame
     case clock, clockRead, directory, naming, directoryReadback, namingReadback, sleep, clean, autofocus, halfPress, shutterRelease
     case recordingStart, recordingStop, tap, whiteBalance, drive, magnification, setting
 }
@@ -1144,7 +1175,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             object = ["active": true, "source": "CCAPI_JPEG_POLLING", "size": "MEDIUM", "requestedFps": 6]
         case .liveViewStop:
             object = ["active": false, "liveViewStopUnconfirmed": false]
-        case .close, .stopEvents, .shutterRelease, .frame:
+        case .close, .maintenanceClose, .stopEvents, .shutterRelease, .frame:
             break
         }
         if request.url!.path.contains("/maintenance/control/liveview/") {
@@ -1175,7 +1206,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             if let gate = readback.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
             if let error = readback.error { throw URLError(error) }
         }
-        let empty = wire == .close || wire == .stopEvents || (simulator && (wire == .clean || wire == .sleep))
+        let empty = wire == .close || wire == .maintenanceClose || wire == .stopEvents || (simulator && (wire == .clean || wire == .sleep))
         return CameraHTTPResponse(statusCode: empty ? 204 : 200, body: empty ? Data() : try JSONSerialization.data(withJSONObject: object))
     }
 
@@ -1191,6 +1222,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         let suffix = String(path.dropFirst(prefix.count))
         switch (method, suffix) {
         case ("DELETE", ""): return .close
+        case ("DELETE", "/maintenance/control/session") where !simulator: return .maintenanceClose
         case ("GET", "/info"): return .info
         case ("GET", "/status"), ("GET", "/recording/observation"): return .status
         case ("GET", "/capabilities"), ("GET", "/settings/iso"): return .capabilities

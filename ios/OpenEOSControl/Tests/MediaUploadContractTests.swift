@@ -7,6 +7,29 @@ import XCTest
 /// Runs the shared corpus through production decisions and strict receipt decoder.
 /// App/HTTP and actual document-picker journeys live in the adjoining suites.
 final class MediaUploadContractTests: XCTestCase {
+    func testUploadJourneyFixtureConfirmsOnlyItsExactSessionRetirement() async throws {
+        let peer = BridgeUploadJourneyFixture(mode: "success")
+        let client = try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: peer)
+        try await client.initialize()
+        await client.close()
+        let firstUnconfirmed = await client.connectionRetirementUnconfirmed
+        XCTAssertFalse(firstUnconfirmed)
+        try await client.initialize()
+        for path in ["/v1/session/unknown", "/v1/session/upload-ui-1", "/v1/session/upload-ui-2/events"] {
+            var request = URLRequest(url: try XCTUnwrap(URL(string: "http://127.0.0.1:18181" + path)))
+            request.httpMethod = "DELETE"
+            do {
+                _ = try await peer.send(request)
+                XCTFail("Only the exact active synthetic session can retire")
+            } catch let error as URLError {
+                XCTAssertEqual(error.code, .unsupportedURL)
+            }
+        }
+        await client.close()
+        let secondUnconfirmed = await client.connectionRetirementUnconfirmed
+        XCTAssertFalse(secondUnconfirmed)
+    }
+
     private func vectors(_ group: String) throws -> [[String: Any]] {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "upload-outcome-vectors", withExtension: "json"))
         let data = try Data(contentsOf: url)

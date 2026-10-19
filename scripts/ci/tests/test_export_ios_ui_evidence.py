@@ -255,8 +255,8 @@ class IOSEvidenceTests(unittest.TestCase):
             evidence.write_summary(self.output, report)
         summary = (self.output / "summary.md").read_text()
         self.assertIn("incomplete", summary)
-        self.assertIn("Manual export only", summary)
-        self.assertIn("does not run tests or arrange artifact uploads", summary)
+        self.assertIn("does not run tests or change their results", summary)
+        self.assertIn("retains the original xcresult", summary)
         self.assertEqual((self.root / "step.md").read_text(), summary)
 
     def test_fake_tool_exports_scoped_attachments_and_reports_test_failure_separately(self):
@@ -278,8 +278,11 @@ class IOSEvidenceTests(unittest.TestCase):
                 name = "previous-warning-and-current-stop"
             elif evidence.TESTS[1] in test:
                 name = evidence.MATRIX_SAMPLES[0]
-            else:
+            elif evidence.TESTS[2] in test:
                 name = "shutter-recovery-sheet-stop-" + evidence.HIT_TARGET_CASES[0]
+            else:
+                method = next(name for name in evidence.MEDIA_PHASES if name in test)
+                name = "media-ui-" + evidence.MEDIA_PHASES[method] + "-english"
             (directory / "synthetic.png").write_bytes(PNG)
             (directory / "manifest.json").write_text(json.dumps([{"attachments": [
                 {"exportedFileName": "synthetic.png", "suggestedHumanReadableName": name}
@@ -295,6 +298,23 @@ class IOSEvidenceTests(unittest.TestCase):
         self.assertIn(evidence.TESTS[2], first_export[-1])
         evidence.write_summary(self.output, report)
         self.assertLessEqual(sum(p.stat().st_size for p in self.output.iterdir()), evidence.MAX_ARTIFACT_BYTES)
+
+    def test_media_diagnostics_are_exact_test_phase_and_field_allowlisted(self):
+        for method, phase in evidence.MEDIA_PHASES.items():
+            name = f"media-ui-{phase}-english"
+            self.assertEqual(evidence.attachment_name(name + ".png", method), name)
+            self.assertIsNone(evidence.attachment_name(name, evidence.TESTS[0]))
+            self.assertIsNone(evidence.attachment_name(name.replace(phase, "unknown"), method))
+            data = (f"[OEC_MEDIA_UI_GEOMETRY] {phase}-english\n"
+                    "window=(0.0, 0.0, 402.0, 874.0)\n"
+                    "media-date-apply count=1\n"
+                    "media-date-apply[0] enabled=false hittable=true frame=(20.0, 40.0, 44.0, 44.0)\n"
+                    "synthetic-photo-exists=false\n").encode()
+            self.assertEqual(evidence.geometry_text(data), data)
+            for extra in (b"url=https://example.invalid\n", b"label=private value\n",
+                          b"unknown-control count=1\n"):
+                with self.assertRaises(evidence.EvidenceError):
+                    evidence.geometry_text(data + extra)
 
     def test_attempts_remaining_tests_after_an_export_failure(self):
         exports = []

@@ -57,11 +57,15 @@ class IOSAccessibilityLanguageSourceTests(unittest.TestCase):
 
     def test_authored_native_test_hosts_real_representable_and_reuses_button(self):
         source = (ROOT / 'ios/OpenEOSControl/Tests/AccessibilityLanguageTests.swift').read_text()
-        self.assertEqual(len(re.findall(r'^    func test', source, re.M)), 2)
+        self.assertEqual(len(re.findall(r'^    func test', source, re.M)), 3)
         for token in ['UIHostingController(rootView: HeldAutofocusButton(camera: state).environmentObject(language))',
                       'AppLanguage.english, .traditionalChinese, .english', 'button.accessibilityHint == hint',
                       'focusButton(in: host.view) === button', 'XCTAssertFalse(state.heldAutofocusPressed)',
-                      'CameraFocusStatus.allCases', 'window.rootViewController = nil']:
+                      'CameraFocusStatus.allCases', 'window.rootViewController = nil',
+                      'func testHeldAFAdmissionCannotBeOverriddenByExternalEnablement()',
+                      'button.setControlAdmission(false, environmentEnabled: true)',
+                      'button.setControlAdmission(true, environmentEnabled: false)',
+                      'XCTAssertEqual(activations, 0)', 'XCTAssertEqual(activations, 1)']:
             self.assertIn(token, source)
 
 
