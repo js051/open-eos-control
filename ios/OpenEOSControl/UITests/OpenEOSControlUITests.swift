@@ -489,10 +489,10 @@ final class OpenEOSControlUITests: XCTestCase {
             _ = try XCTUnwrap(menuReady ? true : nil)
             try tapForAsyncTest(menu)
             let ratingMenu = app.buttons["media-mutation-rating-menu"]
-            _ = try XCTUnwrap(waitForInteraction(ratingMenu, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(waitForMenuInteraction(ratingMenu, in: app, language: language, timeout: 5) ? true : nil)
             try tapForAsyncTest(ratingMenu)
             let ratingAction = app.buttons["media-mutation-action-rating-5"]
-            _ = try XCTUnwrap(waitForInteraction(ratingAction, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(waitForMenuInteraction(ratingAction, in: app, language: language, timeout: 5) ? true : nil)
             try tapForAsyncTest(ratingAction)
             let cancel = app.buttons["media-mutation-review-cancel"]
             _ = try XCTUnwrap(waitForInteraction(cancel, timeout: 5) ? true : nil)
@@ -505,9 +505,9 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertFalse(app.buttons["media-mutation-cancel"].exists)
             _ = try XCTUnwrap(scrollToInteraction(menu, in: app, timeout: 8) ? true : nil)
             try tapForAsyncTest(menu)
-            _ = try XCTUnwrap(waitForInteraction(ratingMenu, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(waitForMenuInteraction(ratingMenu, in: app, language: language, timeout: 5) ? true : nil)
             try tapForAsyncTest(ratingMenu)
-            _ = try XCTUnwrap(waitForInteraction(ratingAction, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(waitForMenuInteraction(ratingAction, in: app, language: language, timeout: 5) ? true : nil)
             try tapForAsyncTest(ratingAction)
             let confirm = app.buttons["media-mutation-confirm"]
             _ = try XCTUnwrap(waitForInteraction(confirm, timeout: 5) ? true : nil)
@@ -1202,7 +1202,9 @@ final class OpenEOSControlUITests: XCTestCase {
             let picker = app.otherElements["media-upload-document-picker"]
             XCTAssertTrue(picker.waitForExistence(timeout: 8), "This must be the actual OS document picker")
             let cancelButton = app.buttons[cancel].firstMatch
-            XCTAssertTrue(waitForInteraction(cancelButton, timeout: 8))
+            let cancelReady = waitForInteraction(cancelButton, timeout: 8)
+            if !cancelReady { recordPickerUIEvidence(in: app, phase: "picker-cancel", language: language) }
+            XCTAssertTrue(cancelReady)
             cancelButton.tap()
             XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
             XCTAssertFalse(app.staticTexts["media-upload-complete"].exists)
@@ -1211,7 +1213,9 @@ final class OpenEOSControlUITests: XCTestCase {
             openUploadFixtureGallery(app)
             app.buttons["upload-media-button"].tap()
             XCTAssertTrue(picker.waitForExistence(timeout: 8))
-            XCTAssertTrue(waitForInteraction(cancelButton, timeout: 8))
+            let reopenedCancelReady = waitForInteraction(cancelButton, timeout: 8)
+            if !reopenedCancelReady { recordPickerUIEvidence(in: app, phase: "picker-cancel", language: language) }
+            XCTAssertTrue(reopenedCancelReady)
             cancelButton.tap()
             XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
             XCTAssertFalse(app.staticTexts["media-upload-complete"].exists)
@@ -1234,7 +1238,9 @@ final class OpenEOSControlUITests: XCTestCase {
                 // The DEBUG fixture seeds only this synthetic app-owned file and
                 // asks the real picker to open that directory. No delegate injection.
                 let source = app.cells.containing(NSPredicate(format: "label CONTAINS %@", "SYNTHETIC-UPLOAD")).firstMatch
-                XCTAssertTrue(source.waitForExistence(timeout: 8), "The OS provider must expose the seeded directory; missing provider access is a failed native gate")
+                let sourceReady = source.waitForExistence(timeout: 8)
+                if !sourceReady { recordPickerUIEvidence(in: app, phase: "picker-selection", language: language) }
+                XCTAssertTrue(sourceReady, "The OS provider must expose the seeded directory; missing provider access is a failed native gate")
                 source.tap()
                 if scenario == "cancel" {
                     let cancel = app.buttons["cancel-media-upload-status"]
@@ -1844,6 +1850,7 @@ final class OpenEOSControlUITests: XCTestCase {
             let photo = mode.buttons[language == "english" ? "Photo" : "拍照"]
             XCTAssertTrue(photo.isSelected, "The mode switch starts with the Photo segment selected")
             XCTAssertFalse(mode.buttons[videoMode].isSelected)
+            recordMediaUIEvidence(in: app, phase: "recording-review", language: language)
             try tapForAsyncTest(mode.buttons[videoMode])
             let selectedVideo = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 mode.buttons[videoMode].isSelected && !photo.isSelected
@@ -2208,6 +2215,21 @@ final class OpenEOSControlUITests: XCTestCase {
         app.launchEnvironment.merge(environment) { _, newValue in newValue }
         app.launch()
         return app
+    }
+
+    // Native menu descendants can exist before UIKit publishes a usable frame.
+    // Keep the original budget and require a real enabled/hittable target.
+    private func waitForMenuInteraction(_ element: XCUIElement, in app: XCUIApplication, language: String, timeout: TimeInterval) -> Bool {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard element.exists else { return false }
+            let frame = element.frame
+            guard frame.origin.x.isFinite, frame.origin.y.isFinite,
+                  frame.width.isFinite, frame.height.isFinite, !frame.isEmpty else { return false }
+            return element.isEnabled && element.isHittable
+        }, object: nil)
+        let ready = XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+        if !ready { recordMediaUIEvidence(in: app, phase: "metadata-menu", language: language) }
+        return ready
     }
 
     private func waitForInteraction(
@@ -3038,6 +3060,7 @@ final class OpenEOSControlUITests: XCTestCase {
             "live-view-interaction-surface", "live-view-decoded-frame", "live-view-start-again-button",
             "more-actions-button", "live-view-tap-action-control",
             "capture-mode-picker", "capture-mode-apply",
+            "shooting-setting-open-result", "shooting-setting-outcome", "shooting-setting-new",
         ] {
             let matches = app.descendants(matching: .any).matching(identifier: identifier)
             lines.append("\(identifier) count=\(matches.count)")
@@ -3045,10 +3068,52 @@ final class OpenEOSControlUITests: XCTestCase {
                 lines.append("\(identifier)[\(index)] enabled=\(element.isEnabled) hittable=\(element.isHittable) frame=\(element.frame)")
             }
         }
+        if phase == "recording-review" {
+            let mode = app.segmentedControls["capture-mode-picker"]
+            for (identifier, label) in [("capture-segment-photo", language == "english" ? "Photo" : "拍照"),
+                                        ("capture-segment-video", language == "english" ? "Video" : "錄影")] {
+                let matches = mode.buttons.matching(identifier: label)
+                lines.append("\(identifier) count=\(matches.count)")
+                for (index, element) in matches.allElementsBoundByIndex.prefix(4).enumerated() {
+                    lines.append("\(identifier)[\(index)] selected=\(element.isSelected)")
+                    lines.append("\(identifier)[\(index)] enabled=\(element.isEnabled) hittable=\(element.isHittable) frame=\(element.frame)")
+                }
+            }
+        }
         lines.append("synthetic-photo-exists=\(app.staticTexts["R6M3_0001.JPG"].exists)")
         lines.append("synthetic-video-exists=\(app.staticTexts["R6M3_0002.MP4"].exists)")
         lines.append("date-start-exists=\(app.datePickers["media-date-start"].exists)")
         lines.append("date-end-exists=\(app.datePickers["media-date-end"].exists)")
+        let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
+        attachment.name = "media-ui-\(phase)-\(language)-geometry"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        addScreenshot(name: "media-ui-\(phase)-\(language)")
+    }
+
+    private func recordPickerUIEvidence(in app: XCUIApplication, phase: String, language: String) {
+        guard ["picker-cancel", "picker-selection"].contains(phase),
+              ["english", "traditionalChinese"].contains(language) else { return }
+        var lines = ["[OEC_MEDIA_UI_GEOMETRY] \(phase)-\(language)", "window=\(app.windows.firstMatch.frame)"]
+        let queries: [(String, XCUIElementQuery)] = [
+            ("picker-cancel-en", app.buttons.matching(identifier: "Cancel")),
+            ("picker-cancel-zh", app.buttons.matching(identifier: "取消")),
+            ("picker-browse-en", app.buttons.matching(identifier: "Browse")),
+            ("picker-browse-zh", app.buttons.matching(identifier: "瀏覽")),
+            ("picker-synthetic-cell", app.cells.containing(NSPredicate(format: "label CONTAINS %@", "SYNTHETIC-UPLOAD"))),
+            ("picker-synthetic-text", app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "SYNTHETIC-UPLOAD"))),
+            ("picker-synthetic-folder", app.staticTexts.matching(identifier: "Synthetic Upload Journey")),
+            ("media-upload-document-picker", app.otherElements.matching(identifier: "media-upload-document-picker")),
+        ]
+        for (identifier, matches) in queries {
+            lines.append("\(identifier) count=\(matches.count)")
+            for (index, element) in matches.allElementsBoundByIndex.prefix(4).enumerated() {
+                let frame = element.frame
+                let finite = frame.origin.x.isFinite && frame.origin.y.isFinite && frame.width.isFinite && frame.height.isFinite
+                let hittable = finite && !frame.isEmpty && element.isHittable
+                lines.append("\(identifier)[\(index)] enabled=\(element.isEnabled) hittable=\(hittable) frame=\(frame)")
+            }
+        }
         let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
         attachment.name = "media-ui-\(phase)-\(language)-geometry"
         attachment.lifetime = .keepAlways
@@ -3089,7 +3154,9 @@ final class OpenEOSControlUITests: XCTestCase {
         guard result.exists else { return }
         try tapForAsyncTest(result)
         let prepare = app.buttons["shooting-setting-new"]
-        _ = try XCTUnwrap(waitForInteraction(prepare, timeout: 8) ? true : nil)
+        let prepareReady = waitForInteraction(prepare, timeout: 8)
+        if !prepareReady { recordMediaUIEvidence(in: app, phase: "white-balance-tap", language: "english") }
+        _ = try XCTUnwrap(prepareReady ? true : nil)
         try tapForAsyncTest(prepare)
         try tapForAsyncTest(app.buttons["Done"])
     }

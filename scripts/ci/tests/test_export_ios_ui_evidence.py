@@ -331,12 +331,35 @@ class IOSEvidenceTests(unittest.TestCase):
     def test_recording_mode_diagnostics_keep_fixed_controls_and_reject_labels(self):
         data = ("[OEC_MEDIA_UI_GEOMETRY] recording-review-traditionalChinese\n"
                 "capture-mode-picker count=1\n"
+                "capture-segment-photo count=1\n"
+                "capture-segment-photo[0] selected=true\n"
+                "capture-segment-video[0] enabled=true hittable=true frame=(200, 20, 180, 44)\n"
+                "shooting-setting-new count=0\n"
                 "capture-mode-apply count=1\n"
                 "capture-mode-apply[0] enabled=false hittable=true frame=(0, 20, 44, 44)\n").encode()
         self.assertEqual(evidence.geometry_text(data), data)
         for extra in (b"capture-mode-label=private\n", b"capture-mode-url=https://example.invalid\n"):
             with self.assertRaises(evidence.EvidenceError):
                 evidence.geometry_text(data + extra)
+
+    def test_picker_diagnostics_remain_exact_test_phase_and_fixed_fields(self):
+        cases = (
+            ("testRealDocumentPickerCancellationAndReopeningAfterReconnectInBothLanguages", "picker-cancel"),
+            ("testRealPickerSelectionCancelOrLostAckKeepsUncertaintyAcrossReconnect", "picker-selection"),
+        )
+        for method, phase in cases:
+            name = f"media-ui-{phase}-traditionalChinese"
+            self.assertEqual(evidence.attachment_name(name + ".png", method), name)
+            self.assertIsNone(evidence.attachment_name(name, evidence.TESTS[3]))
+            data = (f"[OEC_MEDIA_UI_GEOMETRY] {phase}-traditionalChinese\n"
+                    "picker-cancel-en count=1\n"
+                    "picker-cancel-zh count=0\n"
+                    "picker-synthetic-cell count=0\n"
+                    "picker-synthetic-text[0] enabled=true hittable=false frame=(0, 20, 44, 44)\n").encode()
+            self.assertEqual(evidence.geometry_text(data), data)
+            for extra in (b"label=private\n", b"path=/Documents/private\n", b"picker-unknown count=1\n"):
+                with self.assertRaises(evidence.EvidenceError):
+                    evidence.geometry_text(data + extra)
 
     def test_attempts_remaining_tests_after_an_export_failure(self):
         exports = []

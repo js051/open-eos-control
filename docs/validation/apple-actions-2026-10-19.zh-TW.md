@@ -105,3 +105,11 @@
 - Source `a260dedbf2954c0d550e0bcd9cc58d16cde88023`，run https://github.com/js051/open-eos-control/actions/runs/39202203898 。secret-scan 與 Core 通過；普通 App build 在 05:00 UTC 回報 Info.plist 重複產物，App/UI tests 尚未執行。
 - XcodeGen 對間接 `INFOPLIST_FILE` 輸入未自動排除原 App/Info.plist，造成 Copy Bundle Resources 與 ProcessInfoPlistFile 同時產生 app Info.plist。App sources 明確排除該單一 plist 的 resource copy，仍由原 ProcessInfoPlist 處理；未刪除檔案、改 keys 或放寬隔離驗證。新增 source guard，57 CI helper tests 通過；仍待 Xcode 真建置。
 - always 隔離 verifier 因前置 build 失敗、test plist 尚未建立而一併失敗，保留此結果，未以跳過 verifier 掩蓋未驗證狀態。
+
+## 第十輪結果與第十一輪有界補證
+
+- Source `e9881e174954ae7f74584c2ed0bac7cfb9e5745a`，run https://github.com/js051/open-eos-control/actions/runs/39202760803 。普通 App build／資源、Core、安全及 test plist 隔離驗證皆通過；App **825/825** 通過，含四個新日期 owner/model 案，日期英繁中 UI 旅程亦通過。UI 43 案仍有 **5 個失敗案例／5 個斷言**。
+- 白平衡的原單次 count／click 狀態已通過，後續設定結果 sheet 的「開始新設定」互動失敗；不把它誤報為原白平衡仍失敗。錄影 canonical 繁中在單次 Video tap 後仍為 Photo draft，尚未到 Apply／寫入。metadata 第一輪英語 XXXL 在 submenu 無有效 activation frame 時，isHittable 查詢本身失敗。
+- metadata 僅該兩個 native menu 的等待先核 exists／finite 非空 frame，再核 enabled／hittable，維持原 5 秒與業務斷言；不是放寬全域 helper。若仍失敗，沿既有固定 phase 收圖。錄影補單次 tap 前後固定兩 segment 幾何／selected；設定結果 sheet 補原失敗後固定控件幾何，皆不重 tap、不改相機狀態。
+- OS picker 英文 Cancel 與重連再取消已通過，繁中查找「取消」失敗；選檔 case 仍找不到 synthetic cell。隔離 plist 真驗過不代表 provider 選檔完成。增加這兩個原合成案例的 exact test／phase allowlist、八個固定 OS／synthetic 查詢計數及圖；不輸出任意 label、URL、路徑或全 AX。
+- 小型 artifact `12165039456`：4,696,566 bytes，SHA256 `c695b647cb747158898da18cf40ef0fe3c943e06759d3e5ca11e09815bc74e36`，保留第十輪失敗圖。第十一輪 58 個 CI helper tests、Swift syntax parse 與 diff 檢查通過；其餘缺陷仍待原 Apple 流程，沒有把補證當完成。
