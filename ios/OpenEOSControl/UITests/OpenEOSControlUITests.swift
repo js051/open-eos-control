@@ -1209,7 +1209,9 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertTrue(picker.waitForExistence(timeout: 8), "This must be the actual OS document picker")
             XCTAssertTrue(waitForNativePickerProvider(in: app, phase: "picker-cancel", language: language))
             let cancelButton = app.buttons[cancel].firstMatch
-            let cancelReady = waitForInteraction(cancelButton, timeout: 8)
+            let cancelReady = waitForInteraction(cancelButton, timeout: 8) { phase in
+                print("[OEC_PICKER_INTERACTION] cancel-\(language) \(phase)")
+            }
             if !cancelReady { recordPickerUIEvidence(in: app, phase: "picker-cancel", language: language) }
             XCTAssertTrue(cancelReady)
             cancelButton.tap()
@@ -1221,7 +1223,9 @@ final class OpenEOSControlUITests: XCTestCase {
             app.buttons["upload-media-button"].tap()
             XCTAssertTrue(picker.waitForExistence(timeout: 8))
             XCTAssertTrue(waitForNativePickerProvider(in: app, phase: "picker-cancel", language: language))
-            let reopenedCancelReady = waitForInteraction(cancelButton, timeout: 8)
+            let reopenedCancelReady = waitForInteraction(cancelButton, timeout: 8) { phase in
+                print("[OEC_PICKER_INTERACTION] reopen-cancel-\(language) \(phase)")
+            }
             if !reopenedCancelReady { recordPickerUIEvidence(in: app, phase: "picker-cancel", language: language) }
             XCTAssertTrue(reopenedCancelReady)
             cancelButton.tap()
@@ -1246,7 +1250,8 @@ final class OpenEOSControlUITests: XCTestCase {
                 XCTAssertTrue(waitForNativePickerProvider(in: app, phase: "picker-selection", language: language))
                 // directoryURL is a starting-location hint. The real provider may
                 // show Documents first; navigate its existing synthetic folder. No delegate injection.
-                let folder = app.staticTexts["Synthetic Upload Journey"]
+                let folders = app.cells.containing(.staticText, identifier: "Synthetic Upload Journey")
+                let folder = folders.element
                 let source = app.cells.containing(NSPredicate(format: "label CONTAINS %@", "SYNTHETIC-UPLOAD")).firstMatch
                 let locationReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                     source.exists || folder.exists
@@ -1256,6 +1261,7 @@ final class OpenEOSControlUITests: XCTestCase {
                 XCTAssertTrue(locationVisible, "The real provider must expose the synthetic file or its app-owned folder")
                 if !source.exists {
                     XCTAssertTrue(waitForInteraction(folder, timeout: 8))
+                    XCTAssertEqual(folders.count, 1)
                     folder.tap()
                 }
                 let sourceReady = source.waitForExistence(timeout: 8)
@@ -2241,17 +2247,30 @@ final class OpenEOSControlUITests: XCTestCase {
     // Keep the original budget and require a real enabled/hittable target.
     private func waitForMenuInteraction(_ element: XCUIElement, in app: XCUIApplication, language: String, timeout: TimeInterval) -> Bool {
         var capturedMenu = false
+        var previousFrame: CGRect?
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            guard element.exists else { return false }
+            guard element.exists else { previousFrame = nil; return false }
             let frame = element.frame
             guard frame.origin.x.isFinite, frame.origin.y.isFinite,
-                  frame.width.isFinite, frame.height.isFinite, !frame.isEmpty else { return false }
+                  frame.width.isFinite, frame.height.isFinite, !frame.isEmpty else {
+                previousFrame = nil
+                return false
+            }
+            let stable = previousFrame.map { Self.sameGenericScrollGeometry($0, frame) } ?? false
+            previousFrame = frame
             // A native menu AX activation-point exception can abort the waiter.
             // Preserve its synthetic popup before the risky hittability query.
             if !capturedMenu {
                 capturedMenu = true
                 self.addScreenshot(name: "media-ui-metadata-menu-\(language)")
+                let evidence = XCTAttachment(string: "[OEC_MEDIA_UI_GEOMETRY] metadata-menu-\(language)\nmedia-native-menu-target[0] frame=\(frame)")
+                evidence.name = "media-ui-metadata-menu-\(language)-geometry"
+                evidence.lifetime = .keepAlways
+                self.add(evidence)
             }
+            // One finite frame did not imply a valid native activation point.
+            // Require two settled observations inside the original five seconds.
+            guard stable else { return false }
             return element.isEnabled && element.isHittable
         }, object: nil)
         let ready = XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
@@ -3153,11 +3172,16 @@ final class OpenEOSControlUITests: XCTestCase {
             ("picker-synthetic-cell", app.cells.containing(NSPredicate(format: "label CONTAINS %@", "SYNTHETIC-UPLOAD"))),
             ("picker-synthetic-text", app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "SYNTHETIC-UPLOAD"))),
             ("picker-synthetic-folder", app.staticTexts.matching(identifier: "Synthetic Upload Journey")),
+            ("picker-synthetic-folder-cell", app.cells.containing(.staticText, identifier: "Synthetic Upload Journey")),
             ("media-upload-document-picker", app.otherElements.matching(identifier: "media-upload-document-picker")),
         ]
         for (identifier, matches) in queries {
-            lines.append("\(identifier) count=\(matches.count)")
-
+            let count = matches.count
+            lines.append("\(identifier) count=\(count)")
+            // Only stable, unique controls; never enumerate changing file text.
+            if count == 1 && ["picker-cancel-en", "picker-cancel-zh", "picker-synthetic-folder-cell"].contains(identifier) {
+                lines.append("\(identifier)[0] frame=\(matches.element.frame)")
+            }
         }
         let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
         attachment.name = "media-ui-\(phase)-\(language)-geometry"
