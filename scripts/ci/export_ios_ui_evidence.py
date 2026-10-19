@@ -30,8 +30,10 @@ TESTS = (
     "testOfflineMediaDateRangeApplyCancelAndClearInBothLanguages",
     "testOfflineMediaGridFiltersPhotosAndVideos",
     "testDirectCCAPIControlsReachTheRunningCameraSimulator",
+    "testRealDocumentPickerCancellationAndReopeningAfterReconnectInBothLanguages",
+    "testRealPickerSelectionCancelOrLostAckKeepsUncertaintyAcrossReconnect",
 )
-MEDIA_PHASES = dict(zip(TESTS[3:], ("metadata-menu", "recording-review", "date-reopen", "grid-initial", "white-balance-tap")))
+MEDIA_PHASES = dict(zip(TESTS[3:], ("metadata-menu", "recording-review", "date-reopen", "grid-initial", "white-balance-tap", "picker-cancel", "picker-selection")))
 MEDIA_CONTROLS = (
     "media-mutation-menu", "media-date-range", "media-date-apply", "media-date-cancel",
     "media-filter", "capture-review-status", "capture-review-retry", "latest-media-button",
@@ -39,6 +41,10 @@ MEDIA_CONTROLS = (
     "live-view-interaction-surface", "live-view-decoded-frame", "live-view-start-again-button",
     "more-actions-button", "live-view-tap-action-control",
     "capture-mode-picker", "capture-mode-apply",
+    "shooting-setting-open-result", "shooting-setting-outcome", "shooting-setting-new",
+    "capture-segment-photo", "capture-segment-video",
+    "picker-cancel-en", "picker-cancel-zh", "picker-browse-en", "picker-browse-zh",
+    "picker-synthetic-cell", "picker-synthetic-text", "picker-synthetic-folder", "media-upload-document-picker",
 )
 
 HIT_TARGET_CASES = (
@@ -207,6 +213,7 @@ def geometry_text(data: bytes) -> bytes:
             rf"(?:{controls}) count=\d+",
             rf"(?:{controls})\[[0-3]\] enabled=(?:true|false) hittable=(?:true|false) frame={rect}",
             r"(?:synthetic-photo|synthetic-video|date-start|date-end)-exists=(?:true|false)",
+            r"capture-segment-(?:photo|video)\[[0-3]\] selected=(?:true|false)",
         )
     if not lines or len(lines) > 128 or any(
         not any(re.fullmatch(pattern, line) for pattern in patterns) for line in lines
