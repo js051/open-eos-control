@@ -175,7 +175,7 @@ final class RTPNativeLutRenderingTests: XCTestCase {
         let context = nativeRTPPreviewContext(device: device)
         let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
         let samples: [[UInt8]] = [[64, 128, 192], [128, 128, 128], [192, 128, 64], [0, 255, 255]]
-        let source = samples.flatMap { $0 + [255] }
+        let source: [UInt8] = samples.flatMap { sample -> [UInt8] in sample + [255] }
         let input = CIImage(bitmapData: Data(source), bytesPerRow: samples.count * 4,
             size: CGSize(width: CGFloat(samples.count), height: 1), format: .RGBA8, colorSpace: space)
         let transform = lut { [2 * $0 - 0.5, 0.25, 1.5 - 2 * $2] }

@@ -337,6 +337,10 @@ private actor MagnificationPeer: CameraHTTPTransport {
             chunks: pair.stream, cancel: { pair.continuation.finish(throwing: CancellationError()) })
     }
 
+    func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse {
+        throw URLError(.unsupportedURL)
+    }
+
     private func json(_ body: String, status: Int = 200) -> CameraHTTPResponse {
         CameraHTTPResponse(statusCode: status, headers: ["content-type": "application/json"], body: Data(body.utf8))
     }
