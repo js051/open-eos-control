@@ -92,6 +92,18 @@ async function fixture(browser, origin, language = "en", mode = "confirmed") {
   await page.click("#media-select-filtered");
   return { context, page, errors, writes, reads, gate, setListing: (next) => { listing = next; }, getListing: () => listing };
 }
+async function retireFixtureSession(f) {
+  // A closed browser context does not release the real Bridge's camera owner.
+  const closed = f.page.waitForResponse(response =>
+    response.request().method() === "DELETE" &&
+    /^\/v1\/session\/[^/]+$/.test(new URL(response.url()).pathname))
+    .then(async response => ({ status: response.status(), bytes: (await response.body()).length }));
+  const [, receipt] = await Promise.all([f.page.click("#disconnect-button"), closed]);
+  assert.equal(receipt.status, 204);
+  assert.equal(receipt.bytes, 0);
+  await f.page.waitForSelector("#connection-view:not([hidden])");
+  assert.equal(await f.page.locator("#connection-error").isHidden(), true);
+}
 async function waitRows(page, statuses) {
   await page.waitForFunction((expected) => {
     const rows = Array.from(document.querySelectorAll("#media-mutation-list li"), (row) => row.dataset.status);
@@ -121,6 +133,7 @@ async function confirmedChoices(browser, origin, language) {
     assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await f.page.screenshot({ path: path.join(RESULTS, `desktop-media-mutations-${language}.png`), fullPage: true });
     assert.deepEqual(f.errors, []);
+    await retireFixtureSession(f);
   } finally { await f.context.close(); }
 }
 async function frozenRoster(browser, origin) {
@@ -139,6 +152,7 @@ async function frozenRoster(browser, origin) {
     assert.deepEqual(await f.page.locator("#media-mutation-list li").evaluateAll((rows) => rows.map((row) => row.dataset.mediaId)),
       ["synthetic:a", "synthetic:b", "synthetic:c"]);
     assert.deepEqual(f.errors, []);
+    await retireFixtureSession(f);
   } finally { await f.context.close(); }
 }
 async function stoppedBatch(browser, origin, mode) {
@@ -158,6 +172,7 @@ async function stoppedBatch(browser, origin, mode) {
     assert.deepEqual(f.writes.map((row) => row.id), ["synthetic:a", "synthetic:b"]);
     assert.match(await f.page.locator("#media-mutation-summary").innerText(), /1 confirmed.*1 uncertain.*1 not started/);
     assert.deepEqual(f.errors, []);
+    await retireFixtureSession(f);
   } finally { f.gate.resolve(); await f.context.close(); }
 }
 async function disconnectedOwner(browser, origin) {
@@ -173,6 +188,7 @@ async function disconnectedOwner(browser, origin) {
     assert.equal(await f.page.locator("#media-mutation-panel").isHidden(), true);
     assert.equal(f.writes.length, 1, "disconnect prevents writes for every later selected ID");
     assert.deepEqual(f.errors, []);
+    await retireFixtureSession(f);
   } finally { f.gate.resolve(); await f.context.close(); }
 }
 async function run() {
