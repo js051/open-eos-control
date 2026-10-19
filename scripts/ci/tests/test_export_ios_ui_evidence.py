@@ -361,6 +361,20 @@ class IOSEvidenceTests(unittest.TestCase):
                 with self.assertRaises(evidence.EvidenceError):
                     evidence.geometry_text(data + extra)
 
+    def test_native_target_frame_diagnostics_are_fixed_and_noninteractive(self):
+        for phase, control in (("metadata-menu", "media-native-menu-target"),
+                               ("picker-cancel", "picker-cancel-en"),
+                               ("picker-cancel", "picker-cancel-zh"),
+                               ("picker-selection", "picker-synthetic-folder-cell")):
+            data = (f"[OEC_MEDIA_UI_GEOMETRY] {phase}-english\n"
+                    f"{control}[0] frame=(0, 20, 44, 44)\n").encode()
+            self.assertEqual(evidence.geometry_text(data), data)
+            for extra in (f"{control}[1] frame=(0, 20, 44, 44)\n",
+                          "unknown-target[0] frame=(0, 20, 44, 44)\n",
+                          f"{control}[0] label=private\n"):
+                with self.assertRaises(evidence.EvidenceError):
+                    evidence.geometry_text(data + extra.encode())
+
     def test_attempts_remaining_tests_after_an_export_failure(self):
         exports = []
 

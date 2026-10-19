@@ -45,6 +45,7 @@ MEDIA_CONTROLS = (
     "capture-segment-photo", "capture-segment-video",
     "picker-cancel-en", "picker-cancel-zh", "picker-browse-en", "picker-browse-zh",
     "picker-synthetic-cell", "picker-synthetic-text", "picker-synthetic-folder", "media-upload-document-picker",
+    "picker-synthetic-folder-cell", "media-native-menu-target",
 )
 
 HIT_TARGET_CASES = (
@@ -211,6 +212,7 @@ def geometry_text(data: bytes) -> bytes:
             rf"\[OEC_MEDIA_UI_GEOMETRY\] (?:{phases})-(?:english|traditionalChinese)",
             rf"window={rect}",
             rf"(?:{controls}) count=\d+",
+            rf"(?:picker-cancel-en|picker-cancel-zh|picker-synthetic-folder-cell|media-native-menu-target)\[0\] frame={rect}",
             rf"(?:{controls})\[[0-3]\] enabled=(?:true|false) hittable=(?:true|false) frame={rect}",
             r"(?:synthetic-photo|synthetic-video|date-start|date-end)-exists=(?:true|false)",
             r"capture-segment-(?:photo|video)\[[0-3]\] selected=(?:true|false)",

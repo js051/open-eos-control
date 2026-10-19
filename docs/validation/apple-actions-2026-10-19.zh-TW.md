@@ -134,3 +134,11 @@
 - 日期 Apply／重開／rating／known-folder Apply 已過，最後由照片區回到 folder 控制的 8 秒導航僅完成兩次長距離 seek，目標距可見邊界仍差約 156pt。只對此已確認屬 MediaView 內容的回返呼叫，延後離屏 enabled／hittable 查詢到 fresh surface／target frame 已相交；首輪快捷、無容器 fallback、原最後完整互動檢查、8 秒及手勢計畫不變。其他所有呼叫維持原路徑；此為減少已證昂貴 AX round trips 的候選，仍待真執行。
 - 原生 picker host view 先存在，而 OS provider 仍可為空白；第十三輪 screenshot-first 保存了此狀態，幾秒後固定 query 才見真控制。增加獨立 30 秒 provider 啟動上限，整段旅程因此可多等待 30 秒，要求 exact Cancel／Browse 各一；之後仍執行原語言 Cancel、8 秒互動／選檔及 5 秒 dismiss，所有 mutation／不確定性／重連斷言不變。不把 provider 啟動當上傳成功，也無 delegate 注入。Apple 官方 directoryURL 僅是嘗試採用的起點：https://developer.apple.com/documentation/uikit/uidocumentpickerviewcontroller/directoryurl 。
 - 第十三輪 artifact `12169515826`，6,388,855 bytes，SHA256 `3f9772493da9d9185f24b7d5bb9760143f2e0bf65056fa0773b03df1a5b644b9`。本批完整 219 source guards、58 CI helpers、Swift parse／diffcheck 通過，尚待下一輪 Apple，沒有放寬影像 oracle 或相機 deadline。
+
+## 第十四輪結果與第十五輪有界補證
+
+- Source `4e3aaacdfc98337749f223a123e0004f8d5f3c6f`，run https://github.com/js051/open-eos-control/actions/runs/39216067619 。安全／Core／建置及隔離驗證通過；App **825/825**，UI 43 案剩 **3 案／3 斷言失敗**。日期完整雙語／XXXL、資料夾往返已通過，WB 與雙模式錄影維持通過。
+- metadata 的 localized query 仍解析原 native Rating 節點；第一個 finite frame 後 isHittable 記錄 activation-point 錯誤，後一輪 poll 卻可通過，說明第一個有限 frame 不足代表可互動。候選在原 5 秒內要求兩次穩定 frame，再查原 enabled／hittable；消失或 invalid 會重置，沒有額外 sleep、延時或座標代點。第一個已讀 frame 以固定欄位保存，仍待 Apple 驗證，不把候選當已證根因。
+- OS provider 啟動 gate 本輪通過。選檔 case 對 folder StaticText 的真 tap 後仍停在 parent；候選改點唯一含該 exact 合成標籤的 Cell，保持原 8 秒與唯一性、真正 picker／delegate 路徑及後續全部斷言。Cancel 已有完整可見畫面卻未通過原互動 waiter，尚未確證是 hittable／enabled 結果或兩次 AX Find 耗完 8 秒；加入既有 trace 回呼只記固定查詢階段與 Bool，不增加 AX 查詢，不增加 timeout 或刪互動門檻。
+- 診斷僅增加唯一 Cancel／folder Cell 的 frame，以及 menu 已讀 frame；不遍歷會變動的檔案文字、不再於失敗診斷呼叫 hittable。固定四種 frame 欄位只接受 index 0，未知 ID／文字／多 index 均拒絕；原 24 MiB、64 檔、PNG/text/symlink 防護不變。完整 219 source guards、59 CI helpers、Swift parse 與 diffcheck 過。
+- 第十四輪 artifact `12171790417`，6,704,769 bytes，SHA256 `bfb175c67ca5a6c69f26615dca94db88c1ba6b49548d00195aebc11bd5dd7a73`。上述三個剩餘 UI gate 仍未完成，不宣稱 Apple-only 或三平台全綠。
