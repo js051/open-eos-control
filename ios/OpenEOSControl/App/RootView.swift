@@ -7,21 +7,24 @@ struct RootView: View {
     @State private var controlRotation = 0.0
 
     var body: some View {
-        Group {
-            if !camera.connected {
-                ConnectionView()
-            } else {
-                switch camera.screen {
-                case .control:
-                    CameraControlView(controlRotation: controlRotation)
-                case .media:
-                    MediaView(controlRotation: controlRotation)
-                case .debug:
-                    DebugView(controlRotation: controlRotation)
+        VStack(spacing: 0) {
+            Group {
+                if !camera.connected {
+                    ConnectionView()
+                } else {
+                    switch camera.screen {
+                    case .control:
+                        CameraControlView(controlRotation: controlRotation)
+                    case .media:
+                        MediaView(controlRotation: controlRotation)
+                    case .debug:
+                        DebugView(controlRotation: controlRotation)
+                    }
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Reserve actual sibling space so short landscape connection scrolling
+            // cannot start beneath the persistent recovery warning.
             VStack(spacing: 0) {
                 ForegroundMediaBanner(controller: camera.foregroundMedia, delivery: camera.foregroundFiles)
                 ShutterReleaseRecoveryView()

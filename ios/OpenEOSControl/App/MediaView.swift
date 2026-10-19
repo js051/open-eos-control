@@ -742,10 +742,24 @@ struct MediaView: View {
         NavigationStack {
             Form {
                 Section {
-                    DatePicker(language.string("media_date_start"), selection: $dateFilterStart, displayedComponents: .date)
-                        .accessibilityIdentifier("media-date-start")
-                    DatePicker(language.string("media_date_end"), selection: $dateFilterEnd, displayedComponents: .date)
-                        .accessibilityIdentifier("media-date-end")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(language.string("media_date_start"))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityHidden(true)
+                        DatePicker(language.string("media_date_start"), selection: $dateFilterStart, displayedComponents: .date)
+                            .labelsHidden()
+                            .accessibilityLabel(language.string("media_date_start"))
+                            .accessibilityIdentifier("media-date-start")
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(language.string("media_date_end"))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityHidden(true)
+                        DatePicker(language.string("media_date_end"), selection: $dateFilterEnd, displayedComponents: .date)
+                            .labelsHidden()
+                            .accessibilityLabel(language.string("media_date_end"))
+                            .accessibilityIdentifier("media-date-end")
+                    }
                     Text(language.format("media_date_timezone", camera.mediaDateDisplayZone.identifier))
                     if dateFilterDraft == nil {
                         Text(language.string("media_date_invalid"))

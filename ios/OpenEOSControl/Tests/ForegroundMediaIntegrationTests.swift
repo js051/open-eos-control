@@ -600,12 +600,22 @@ final class ForegroundMediaIntegrationTests: XCTestCase {
             XCTAssertEqual(fixture.state.activeLiveViewSource, .ccapiJPEGPolling)
             XCTAssertEqual(fixture.state.liveViewSize, .small)
             let restarted = await fixture.peer.requests()
-            XCTAssertEqual(Array(restarted.dropFirst(settled.count)).map(\.method), ["DELETE", "POST"])
+            // Start validates one first frame even when automatic frame polling is disabled.
+            // Keep the complete request sequence: no inventory, original or extra frame is allowed.
+            XCTAssertEqual(Array(restarted.dropFirst(settled.count)), [
+                .init(method: "DELETE", path: "/ccapi/ver140/shooting/liveview", foreground: false),
+                .init(method: "POST", path: "/ccapi/ver140/shooting/liveview", foreground: false),
+                .init(method: "GET", path: "/ccapi/ver140/shooting/liveview/flip?t=0", foreground: false)
+            ])
             await fixture.state.setLiveViewSource(.auto)
             XCTAssertEqual(fixture.state.selectedLiveViewSource, .auto)
             XCTAssertEqual(fixture.state.activeLiveViewSource, .ccapiJPEGPolling)
             let changedSource = await fixture.peer.requests()
-            XCTAssertEqual(Array(changedSource.dropFirst(restarted.count)).map(\.method), ["DELETE", "POST"])
+            XCTAssertEqual(Array(changedSource.dropFirst(restarted.count)), [
+                .init(method: "DELETE", path: "/ccapi/ver140/shooting/liveview", foreground: false),
+                .init(method: "POST", path: "/ccapi/ver140/shooting/liveview", foreground: false),
+                .init(method: "GET", path: "/ccapi/ver140/shooting/liveview/flip?t=0", foreground: false)
+            ])
             XCTAssertNil(fixture.state.lastError)
         }
     }
@@ -673,7 +683,10 @@ final class ForegroundMediaIntegrationTests: XCTestCase {
             XCTAssertEqual(fixture.state.activeLiveViewSource, .ccapiJPEGPolling)
             XCTAssertNil(fixture.state.lastError)
             let restarted = await fixture.peer.requests()
-            XCTAssertEqual(Array(restarted.dropFirst(before.count)).map(\.method), ["POST"])
+            XCTAssertEqual(Array(restarted.dropFirst(before.count)), [
+                .init(method: "POST", path: "/ccapi/ver140/shooting/liveview", foreground: false),
+                .init(method: "GET", path: "/ccapi/ver140/shooting/liveview/flip?t=0", foreground: false)
+            ])
             try await fixture.tickAndWait(seconds: 1)
             XCTAssertEqual(fixture.state.foregroundMedia.state, .watching)
             let resumed = await fixture.peer.requests()

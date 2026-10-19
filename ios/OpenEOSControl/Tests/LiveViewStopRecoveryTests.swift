@@ -207,6 +207,72 @@ final class LiveViewStopRecoveryTests: XCTestCase {
         XCTAssertNil(state.activeLiveViewSource)
     }
 
+    func testBackgroundDuringPendingStartWithConfirmedCleanupStillNeedsExplicitNewStart() async throws {
+        let peer = AppLiveViewPeer(), state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect(); await peer.holdNextStart()
+        let start = Task { await state.startLiveView() }
+        defer { start.cancel() }
+        try await wait { await peer.waiting }
+        state.setApplicationActive(false); state.setApplicationActive(true)
+        await peer.releaseAll(); await start.value
+        try await wait { !state.liveViewRetiring }
+        XCTAssertNil(state.activeLiveViewSource)
+        XCTAssertEqual(state.liveViewStopState, .idle)
+        XCTAssertTrue(state.canResumeRetiredLiveView)
+        let retired = await peer.actions()
+        XCTAssertEqual(retired, ["start", "stop"])
+        state.setApplicationActive(false); state.setApplicationActive(true)
+        let foregrounded = await peer.actions()
+        XCTAssertEqual(foregrounded, retired, "Foreground cannot replay Stop or restore the retired view")
+        await state.startLiveView()
+        XCTAssertEqual(state.activeLiveViewSource, .desktopBridgeStream)
+        let restarted = await peer.actions()
+        XCTAssertEqual(restarted, ["start", "stop", "start"])
+    }
+
+    func testSettledFailedStartCompensationCannotBeRetriedByDelayedRetirementOrRestart() async throws {
+        for restarting in [false, true] {
+            let peer = AppLiveViewPeer(), admission = LiveViewStopAdmissionGate()
+            let state = makeState([peer], stopAdmissionDelay: { await admission.wait() })
+            defer {
+                state.requestDisconnect()
+                Task { await admission.release(); await peer.releaseAll() }
+            }
+            await state.connect(); await peer.holdNextStart(); await peer.failNextStop()
+            let start = Task { await state.startLiveView() }
+            defer { start.cancel() }
+            try await wait { await peer.waiting }
+            let cleanup = Task {
+                if restarting { await state.restartLiveView() }
+                else { state.setApplicationActive(false); state.setApplicationActive(true) }
+            }
+            defer { cleanup.cancel() }
+            try await wait { await admission.waiting }
+            // Let Core compensation and the App Start finish before the cleanup
+            // caller can admit Stop. This fixes the formerly timing-dependent gap.
+            await peer.releaseAll(); await start.value
+            await state.refresh()
+            XCTAssertTrue(state.liveViewStopState.stopRequired)
+            XCTAssertTrue(state.liveViewStopState.stopUnconfirmed)
+            let compensated = await peer.actions()
+            XCTAssertEqual(compensated, ["start", "stop"])
+            await admission.release(); await cleanup.value
+            try await wait { !state.liveViewRetiring && !state.isBusy(.liveView) }
+            XCTAssertNil(state.activeLiveViewSource)
+            XCTAssertTrue(state.liveViewStopState.stopRequired)
+            XCTAssertTrue(state.liveViewStopState.stopUnconfirmed)
+            XCTAssertTrue(state.canRetryLiveViewStop)
+            let retired = await peer.actions()
+            XCTAssertEqual(retired, compensated, "Cleanup cannot retry the failed Stop from its cancelled Start")
+            await state.retryLiveViewStop()
+            XCTAssertEqual(state.liveViewStopState, .idle)
+            XCTAssertNil(state.activeLiveViewSource)
+            let retried = await peer.actions()
+            XCTAssertEqual(retried, ["start", "stop", "stop"], "Only the new explicit recovery may retry Stop")
+        }
+    }
+
     func testRuntimeLossClearsLastImageStopsOnceAndDoesNotLoopTerminalReader() async throws {
         let peer = AppLiveViewPeer(), state = makeState([peer])
         defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
@@ -270,16 +336,31 @@ final class LiveViewStopRecoveryTests: XCTestCase {
         throw URLError(.timedOut)
     }
 
-    private func makeState(_ peers: [AppLiveViewPeer]) -> CameraAppState {
+    private func makeState(_ peers: [AppLiveViewPeer],
+                           stopAdmissionDelay: (@Sendable () async -> Void)? = nil) -> CameraAppState {
         var remaining = peers
         let suite = "LiveViewStopRecoveryTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         let state = CameraAppState(defaults: defaults, sessionFactory: {
             .desktopBridge(try DesktopBridgeClient(baseURL: "http://192.0.2.1:18181", transport: remaining.removeFirst()))
-        })
+        }, liveViewStopAdmissionDelay: stopAdmissionDelay)
         state.autoRefresh = false
         return state
+    }
+}
+
+private actor LiveViewStopAdmissionGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+    var waiting: Bool { continuation != nil }
+    func wait() async {
+        guard !released else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func release() {
+        released = true
+        continuation?.resume(); continuation = nil
     }
 }
 

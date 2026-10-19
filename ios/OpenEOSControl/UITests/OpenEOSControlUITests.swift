@@ -976,12 +976,20 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertTrue(app.datePickers["media-date-start"].waitForExistence(timeout: 5))
             XCTAssertTrue(app.datePickers["media-date-end"].exists)
             app.buttons["media-date-cancel"].tap()
+            XCTAssertTrue(app.datePickers["media-date-start"].waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.datePickers["media-date-end"].waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["media-date-apply"].waitForNonExistence(timeout: 5))
             XCTAssertFalse(app.staticTexts["media-date-range-applied"].exists)
 
             XCTAssertTrue(scrollToInteraction(range, in: app, timeout: 8))
             range.tap()
             let apply = app.buttons["media-date-apply"]
-            let applyReady = waitForInteraction(apply, timeout: 5)
+            let applyMatches = app.buttons.matching(identifier: "media-date-apply")
+            let uniqueApply = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                applyMatches.count == 1 && apply.isEnabled && apply.isHittable
+            }, object: nil)
+            let applyReady = XCTWaiter.wait(for: [uniqueApply], timeout: 5) == .completed
+            XCTAssertEqual(applyMatches.count, 1)
             recordMediaUIEvidence(in: app, phase: "date-reopen", language: language)
             XCTAssertTrue(applyReady)
             apply.tap()
@@ -1115,7 +1123,7 @@ final class OpenEOSControlUITests: XCTestCase {
         let item = app.staticTexts["R6M3_0001.JPG"]
         let actions = app.buttons["media-actions-preview-002"]
         let delete = app.buttons["delete-media-preview-002"]
-        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        XCTAssertTrue(scrollToInteraction(item, in: app, timeout: 5))
         XCTAssertTrue(scrollToInteraction(actions, in: app, timeout: 5))
         actions.tap()
         XCTAssertTrue(scrollToInteraction(delete, in: app, timeout: 8))
@@ -1285,14 +1293,16 @@ final class OpenEOSControlUITests: XCTestCase {
 
         let filter = app.segmentedControls["media-filter"]
         XCTAssertTrue(filter.waitForExistence(timeout: 5))
-        let initialPhotoExists = app.staticTexts["R6M3_0001.JPG"].exists
+        let initialPhotoExists = scrollToInteraction(app.staticTexts["R6M3_0001.JPG"], in: app, timeout: 5)
         recordMediaUIEvidence(in: app, phase: "grid-initial", language: "english")
         XCTAssertTrue(initialPhotoExists)
+        XCTAssertTrue(scrollToInteraction(filter, in: app, timeout: 5))
         filter.buttons["Videos"].tap()
-        XCTAssertTrue(app.staticTexts["R6M3_0002.MP4"].waitForExistence(timeout: 3))
+        XCTAssertTrue(scrollToInteraction(app.staticTexts["R6M3_0002.MP4"], in: app, timeout: 3))
         XCTAssertFalse(app.staticTexts["R6M3_0001.JPG"].exists)
+        XCTAssertTrue(scrollToInteraction(filter, in: app, timeout: 5))
         filter.buttons["All"].tap()
-        XCTAssertTrue(app.staticTexts["R6M3_0001.JPG"].waitForExistence(timeout: 3))
+        XCTAssertTrue(scrollToInteraction(app.staticTexts["R6M3_0001.JPG"], in: app, timeout: 3))
         addScreenshot(name: "media-grid-filtered")
     }
 
@@ -1401,9 +1411,14 @@ final class OpenEOSControlUITests: XCTestCase {
         try tapForAsyncTest(app.buttons["Done"])
         _ = try XCTUnwrap((waitForInteraction(liveViewInteraction, timeout: 8)) ? true : nil)
         try tapForAsyncTest(liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)))
-        try await waitForSimulatorState { state in
-            (state["click_white_balance"] as? [String: Any])?["count"] as? Int == 1 &&
-                (state["exposure"] as? [String: Any])?["white_balance"] as? String == "click"
+        do {
+            try await waitForSimulatorState { state in
+                (state["click_white_balance"] as? [String: Any])?["count"] as? Int == 1 &&
+                    (state["exposure"] as? [String: Any])?["white_balance"] as? String == "click"
+            }
+        } catch {
+            recordMediaUIEvidence(in: app, phase: "white-balance-tap", language: "english")
+            throw error // Preserve the original count/state assertion and deadline.
         }
 
         try openMoreActionsForAsyncTest(in: app)
@@ -1785,6 +1800,7 @@ final class OpenEOSControlUITests: XCTestCase {
             throw XCTSkip("Start the synthetic camera for the recording review UI journey")
             #endif
         }
+        for usesObservedSimulatorStatus in [false, true] {
         for (language, apple, locale, videoMode, stopLabel, notReady, available, previousVideo, visibleVideo, retryLabel, limitedLabel) in [
             ("english", "en", "en_US", "Video", "Stop recording", "No newly visible video", "video is ready",
              "previous video", "newly visible video", "Check again · no new recording",
@@ -1805,7 +1821,7 @@ final class OpenEOSControlUITests: XCTestCase {
                                            "OEC_CAPTURE_MODE_TRACE": "1",
                                            "OEC_MEDIA_DOWNLOAD_TRACE": "1"])
             defer { app.terminate() }
-            try tapForAsyncTest(app.buttons["preset-http-button"])
+            try tapForAsyncTest(app.buttons[usesObservedSimulatorStatus ? "preset-simulator-button" : "preset-http-button"])
             _ = try XCTUnwrap(scrollConnectionButtonIntoView(in: app, timeout: 8) ? true : nil)
             try tapForAsyncTest(app.buttons["connect-button"])
             let latest = app.buttons["latest-media-button"]
@@ -1871,6 +1887,24 @@ final class OpenEOSControlUITests: XCTestCase {
                     (state["record_stop_count"] as? NSNumber)?.intValue == 1
             }
             let status = app.staticTexts["capture-review-status"]
+            if !usesObservedSimulatorStatus {
+                // Canon exposes no proven REC GET. An ACK is not fresh stopped
+                // status, so this path must not claim a newly visible recording.
+                let refresh = app.buttons["recording-readback-refresh"]
+                _ = try XCTUnwrap(waitForInteraction(refresh, timeout: 5) ? true : nil)
+                XCTAssertTrue(app.staticTexts["recording-readback-status"].exists)
+                XCTAssertFalse(status.exists)
+                XCTAssertFalse(app.buttons["capture-review-retry"].exists)
+                try tapForAsyncTest(refresh)
+                _ = try XCTUnwrap(waitForInteraction(refresh, timeout: 5) ? true : nil)
+                XCTAssertTrue(app.staticTexts["recording-readback-status"].exists)
+                XCTAssertFalse(status.exists)
+                let stopped = try await simulatorRequest(path: "/ccapi/test/state")
+                XCTAssertEqual((stopped["record_start_count"] as? NSNumber)?.intValue, 1)
+                XCTAssertEqual((stopped["record_stop_count"] as? NSNumber)?.intValue, 1)
+                XCTAssertEqual((stopped["capture_count"] as? NSNumber)?.intValue, 0)
+                continue
+            }
             let reviewReady = waitForLabel(status, containing: notReady, timeout: 15)
             recordMediaUIEvidence(in: app, phase: "recording-review", language: language)
             _ = try XCTUnwrap(reviewReady ? true : nil)
@@ -1901,7 +1935,7 @@ final class OpenEOSControlUITests: XCTestCase {
             let videoName = app.staticTexts.matching(NSPredicate(format: "label == %@", "NEWLY_VISIBLE_RECORDING.MP4")).firstMatch
             _ = try XCTUnwrap(videoName.waitForExistence(timeout: 5) ? true : nil)
             _ = try XCTUnwrap(!app.images["media-preview-image"].exists ? true : nil)
-            let mediaID = "/ccapi/ver100/contents/card1/100CANON/NEWLY_VISIBLE_RECORDING.MP4"
+            let mediaID = "NEWLY_VISIBLE_RECORDING.MP4"
             let download = app.buttons["media-preview-download-\(mediaID)"]
             _ = try XCTUnwrap(waitForInteraction(download, timeout: 10) ? true : nil)
             XCTAssertGreaterThanOrEqual(download.frame.width, 44, "Preview download exposes a full touch target")
@@ -1938,6 +1972,7 @@ final class OpenEOSControlUITests: XCTestCase {
             try openMoreActionsForAsyncTest(in: app, context: "\(language): after recording video review")
             guard try tapCameraActionForAsyncTest(app.buttons["disconnect-menu-button"], in: app) else { return }
             _ = try XCTUnwrap(waitForConnectionScreen(in: app, timeout: 15) ? true : nil)
+        }
         }
     }
 
@@ -2969,13 +3004,15 @@ final class OpenEOSControlUITests: XCTestCase {
     }
 
     private func recordMediaUIEvidence(in app: XCUIApplication, phase: String, language: String) {
-        guard ["metadata-menu", "recording-review", "date-reopen", "grid-initial"].contains(phase),
+        guard ["metadata-menu", "recording-review", "date-reopen", "grid-initial", "white-balance-tap"].contains(phase),
               ["english", "traditionalChinese"].contains(language) else { return }
         var lines = ["[OEC_MEDIA_UI_GEOMETRY] \(phase)-\(language)", "window=\(app.windows.firstMatch.frame)"]
         for identifier in [
             "media-mutation-menu", "media-date-range", "media-date-apply", "media-date-cancel",
             "media-filter", "capture-review-status", "capture-review-retry", "latest-media-button",
             "media-library-summary-complete", "media-library-summary-failed",
+            "live-view-interaction-surface", "live-view-decoded-frame", "live-view-start-again-button",
+            "more-actions-button", "live-view-tap-action-control",
         ] {
             let matches = app.descendants(matching: .any).matching(identifier: identifier)
             lines.append("\(identifier) count=\(matches.count)")
