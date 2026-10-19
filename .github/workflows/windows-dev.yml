@@ -1,0 +1,96 @@
+# Supplemental Windows-only dev validation; never substitutes for PR ci-complete.
+name: Windows dev validation
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'bridge/**'
+      - '.github/workflows/windows-dev.yml'
+      - '.github/workflows/android.yml'
+      - '.gitleaks.toml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository history for secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="gitleaks_8.30.1_linux_x64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/$archive"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/$archive" \
+            | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git . \
+            --config .gitleaks.toml \
+            --redact \
+            --no-banner \
+            --no-color \
+            --timeout 300
+
+      - name: Validate GitHub Actions workflows
+        run: bash scripts/ci/run-actionlint.sh
+
+  desktop-windows-bundle:
+    needs: secret-scan
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: bridge
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install standalone bundle dependencies
+        run: python -m pip install -e ".[bundle]"
+
+      - name: Record resolved build dependencies
+        run: python -m pip freeze
+
+      - name: Build Windows standalone Desktop Bridge
+        run: python scripts/build_standalone.py --output-dir ../dist --work-dir build/standalone
+
+      - name: Launch and verify Windows standalone Desktop Bridge
+        shell: pwsh
+        run: |
+          $artifact = Get-ChildItem ../dist/open-eos-control-bridge-windows-x64-*.exe |
+            Select-Object -First 1
+          if (-not $artifact) {
+            throw "Windows standalone Desktop Bridge artifact was not created."
+          }
+          python scripts/verify_standalone.py $artifact.FullName
+          & $artifact.FullName --version
+
+      - name: Upload Windows standalone release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-desktop-windows
+          path: dist/open-eos-control-bridge-windows-x64-*.exe
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          overwrite: true
+
