@@ -56,3 +56,16 @@
 
 - 第四輪 source `da26c6840a1fe3184d438a6b8e54873c859cea10`，run https://github.com/js051/open-eos-control/actions/runs/39189147670 在 Python source guard 結束：219 項中 1 項仍要求舊 raw cube/direct-clamp 字串，Apple jobs 尚未執行。
 - guard 更新為檢查原表保留、in-range bytes、affine encode、cube 後 restore／alpha 不變、最後 clamp 的順序與 finite 拒絕。既有真 GPU 測試名字／oracle 保留。本地完整 219 項重新執行通過，仍需重啟 Apple gate。
+
+## 第五輪與後續修正準備
+
+- Source `6696e5eef4cd70c3a32cb91734cfb27e33db7783`，run https://github.com/js051/open-eos-control/actions/runs/39189586059 已通過完整 secret-scan job；Apple Core 於 02:25:18 UTC 實跑 669 / 669，0 failures。App build/resource checks 通過；02:48 UTC terminal，App 805 個案例中 20 個案例共 92 個失敗斷言，UI 43 個案例中 10 個案例共 11 個失敗斷言。
+- 第三輪 ImageIO 確實接受四個 premature-entropy EOI 檔。新增 decode-admission 的 sequential Huffman／MCU 完整性檢查，原 marker 結構 API 與 71 個固定向量／hash 不變。依 ITU-T T.81 B.2.1、E.2.3–5、F.2.2/F.2.3，驗 DC amplitude、AC run/EOB/ZRL、stuffing、restart 間隔與 padding；沿原輸入／尺寸上限，每 MCU 可取消，不配置像素陣列。
+- JPEG 本地真 Swift 證據：71 個原結構結果一致；15 個結構有效檔中 11 個正向通過、四個截斷拒絕；七個新 direct XCTest 方法通過，含 odd-dimension interleaved padded MCU 及分開 component scans。原生 ImageIO 仍需下輪；progressive 仍是原結構加原生解碼路徑，不宣稱完整 progressive entropy 驗真。
+- 測試契約修正：ACK Stop 無 observation 的 duty 依原 shared lifecycle 向量為 false，readback recovery 仍保留；RTP 的假時鐘維持 5 秒，等待已通過現行 epoch guard 的 stalled 發布，避免讀到 watchdog 尚未發布或舊 epoch 的事件。
+- Media fake metadata 保留 Bridge folder identity，simulator 不虛構未宣告的 folder；兩個 listing fake 遵守原請求 limit，原超量拒絕與 60-item／1000-row 斷言不改。
+
+- 第五輪真 Apple：CubeLutImportRead 7/7、CubeLutNumericContract 8/8、RTPNativeLutRendering 12/12 全過，原 PNG／JPEG／Metal／H264 oracle 與容差未變。LUT 數值及 CRLF 修正已取得原生證據。
+- Manual clear 修正以實際 store epoch／clear 成功與同批次 row UUID 判斷工作清單是否失去持久保存；不讓晚回覆蓋掉已完成批次警告，也不讓提交前失敗虛構 worklist 失效。補失敗清除仍保留 plan／ticket 並完成原始檔的負例。
+- 前連線警告 UI fixture 改成舊 Stop 失敗但 DELETE 204 已確認退役，再明確啟動新連線的 owned shutter；另留 DELETE 502 禁止重連負例。strict retirement guard 不變。
+- Bounded UI artifact 共 17 個 allowlisted 檔、2,069,730 bytes；Stop／Disconnect 幾何無重疊，仍有 unknown／重連旅程失敗待修，不能用診斷成功當 UI 全過。

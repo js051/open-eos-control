@@ -2075,6 +2075,42 @@ final class MediaBatchDeliveryTests: XCTestCase {
         }
     }
 
+    func testFailedManualClearPreservesCommittedWorklistWithoutInventingWorklistWarning() async throws {
+        let root = singleDeliveryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fault = SingleDeliveryFault()
+        let store = MediaDeliveryStore(root: root, faultInjector: { try fault.check($0) })
+        let gate = DeliveryReplyGate(stage: .batchPlanned)
+        let peer = BatchMediaPeer(items: [item("A"), item("B")])
+        let state = makeState([peer], deliveryStore: store, deliveryDelay: { await gate.enter($0) })
+        defer { state.requestDisconnect(); Task { await gate.release(); await peer.releaseAll() } }
+        try await connectAndLoad(state)
+        state.selectMediaItems(state.mediaItems)
+        XCTAssertTrue(state.startMediaBatchDownload())
+        let task = try XCTUnwrap(state.mediaBatchTask)
+        try await waitUntil { await gate.waiting }
+        let before = await store.snapshot()
+        XCTAssertEqual(before.plannedBatches.count, 1)
+        fault.arm(.beforeManifestReplace)
+        await state.clearMediaDeliveryHistory()
+        fault.disarm()
+        let afterClear = await store.snapshot()
+        XCTAssertEqual(afterClear.epoch, before.epoch)
+        XCTAssertEqual(afterClear.plannedBatches.map(\.id), before.plannedBatches.map(\.id))
+        XCTAssertTrue(state.mediaDeliveryHistoryWarning, "The failed clear must remain visible")
+        XCTAssertFalse(state.mediaBatchWorklistWarning, "The committed plan was not revoked")
+        await gate.release()
+        try await awaitContinuationTask(task)
+        XCTAssertEqual(state.mediaBatchState, .completed)
+        XCTAssertEqual(state.mediaBatchResults.map(\.status), [.ready, .ready])
+        XCTAssertFalse(state.mediaBatchWorklistWarning)
+        let final = await store.snapshot()
+        XCTAssertEqual(final.epoch, before.epoch)
+        XCTAssertEqual(final.plannedBatches.first?.rows.map { $0.receipt?.status }, [.prepared, .prepared])
+        let downloads = await peer.downloadIDs()
+        XCTAssertEqual(downloads, [Data("A".utf8), Data("B".utf8)])
+    }
+
     func testManualClearBeforeTaskOrAtAdmissionNeverRecreatesHistoryAndStillFinishesSelectedOriginals() async throws {
         for stage in [nil, MediaDeliveryReplyStage.batchStarted, .batchPlanned, .itemStarted] as [MediaDeliveryReplyStage?] {
             let root = singleDeliveryRoot()
@@ -2439,7 +2475,9 @@ private actor BatchMediaPeer: CameraHTTPTransport {
         } else if path == "/v1/session" {
             object = ["id": "synthetic-batch", "engine": "ccapi"]
         } else if path.hasSuffix("/media") {
-            let snapshot = items
+            let limit = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first { $0.name == "limit" }?.value.flatMap(Int.init)
+            let snapshot = limit.map { Array(items.prefix($0)) } ?? items
             if !draining, let gate = listingGate {
                 listingGate = nil
                 await withCheckedContinuation { gates[gate] = $0 }
@@ -2589,6 +2627,8 @@ private final class SingleDeliveryFault: @unchecked Sendable {
     func arm(_ point: MediaDeliveryStore.FaultPoint, failure: Failure = .write) {
         lock.lock(); self.point = point; self.failure = failure; lock.unlock()
     }
+
+    func disarm() { lock.lock(); point = nil; lock.unlock() }
 
     func check(_ point: MediaDeliveryStore.FaultPoint) throws {
         lock.lock()

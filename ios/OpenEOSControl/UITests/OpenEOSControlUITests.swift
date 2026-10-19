@@ -737,6 +737,9 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
         assertConnectionButtonHitFrame(in: app)
         connect.tap()
+        let shutter = app.buttons["shutter-button"]
+        XCTAssertTrue(waitForInteraction(shutter, timeout: 8))
+        shutter.tap()
         XCTAssertTrue(waitForInteraction(app.buttons["release-shutter-button"], timeout: 8))
         openMoreActions(in: app)
         let disconnect = app.buttons["disconnect-menu-button"]
@@ -755,6 +758,8 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(waitForInteraction(connect, timeout: 5))
         assertConnectionButtonHitFrame(in: app)
         connect.tap()
+        XCTAssertTrue(waitForInteraction(shutter, timeout: 8))
+        shutter.tap()
         let stop = app.buttons["release-shutter-button"]
         XCTAssertTrue(waitForInteraction(stop, timeout: 8))
         let confirm = app.buttons["confirm-previous-shutter-release-button"]

@@ -138,8 +138,13 @@ final class RTPAudioLifecycleTests: XCTestCase {
         }
         XCTAssertEqual(f.status.decodedSampleFrames, 0)
         f.clock.set(5)
-        XCTAssertEqual(f.status.outputProgress, .stalled)
-        XCTAssertFalse(f.status.requested)
+        // A watchdog may retire under its lock before publishing the new epoch.
+        // Keep the deadline fixed at 5 seconds and wait only for its delivery.
+        await eventually { f.acceptedStatus?.outputProgress == .stalled }
+        let stopped = try XCTUnwrap(f.acceptedStatus)
+        XCTAssertEqual(stopped.outputProgress, .stalled)
+        XCTAssertFalse(stopped.requested)
+        XCTAssertEqual(stopped.decodedSampleFrames, 0)
         XCTAssertEqual(f.output.count, 0)
         f.assertVideoStillWorks()
         f.decoder.producesPCM = true
@@ -474,6 +479,14 @@ private final class AudioLifecycleFixture {
         try await AudioLifecycleFixture(supportsRenderProgress: supportsRenderProgress)
     }
 
+    var acceptedStatus: IOSCcapiRTPAudioStatus? {
+        controller.pollAudioProgress()
+        for delivery in deliveries.snapshot.reversed() where controller.accepts(delivery) {
+            if case let .audioStatus(status) = delivery.event { return status }
+        }
+        return nil
+    }
+
     var status: IOSCcapiRTPAudioStatus {
         controller.pollAudioProgress()
         guard let delivery = deliveries.last, case let .audioStatus(status) = delivery.event else {
@@ -513,6 +526,7 @@ private final class AudioTestDeliveries: @unchecked Sendable {
     private let lock = NSLock()
     private var values: [IOSCcapiRTPDelivery] = []
     var last: IOSCcapiRTPDelivery? { lock.audioLocked { values.last } }
+    var snapshot: [IOSCcapiRTPDelivery] { lock.audioLocked { values } }
     func append(_ value: IOSCcapiRTPDelivery) { lock.audioLocked { values.append(value) } }
 }
 

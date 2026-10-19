@@ -28,8 +28,9 @@ struct OpenEOSControlApp: App {
         } else if let scenario = ProcessInfo.processInfo.environment["OEC_SHUTTER_RECOVERY_FIXTURE"],
            ["unknown", "active", "previous-and-current", "pending-start", "pending-start-lost-stop"].contains(scenario) {
             let transport = BridgeShutterRecoveryFixture(
-                unknown: scenario == "unknown", failFirstClose: scenario == "previous-and-current",
-                pendingStart: scenario.hasPrefix("pending-start"), failFirstStop: scenario == "pending-start-lost-stop"
+                unknown: scenario == "unknown",
+                pendingStart: scenario.hasPrefix("pending-start") || scenario == "previous-and-current",
+                failFirstStop: scenario == "pending-start-lost-stop" || scenario == "previous-and-current"
             )
             _camera = StateObject(wrappedValue: CameraAppState(language: language, sessionFactory: {
                 .desktopBridge(try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: transport))
