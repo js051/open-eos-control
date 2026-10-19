@@ -1,6 +1,7 @@
 """Source guards only; actual segmented-control behavior needs Apple UI tests."""
-from pathlib import Path
+
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -11,7 +12,7 @@ class IOSCaptureModeLayoutSourceTests(unittest.TestCase):
         picker = source.split("private struct CaptureModePicker: View", 1)[1]
         self.assertIn("if let selected = draft", picker)
         for guard in (
-            '.hidden()\n                .overlay {\n                    if let selected = draft',
+            ".hidden()\n                .overlay {\n                    if let selected = draft",
             ".frame(minHeight: 44)",
             ".disabled(!camera.canStartShootingSetting || selected == camera.captureMode",
             "revision == submittedRevision, owner == editorOwner",

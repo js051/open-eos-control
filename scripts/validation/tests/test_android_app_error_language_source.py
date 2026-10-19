@@ -1,8 +1,9 @@
 """App-error ownership/resource wiring only; not an Android build or native locale test."""
-from pathlib import Path
+
 import re
 import unittest
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 MAIN = ROOT / "android/app/src/main"
@@ -23,7 +24,9 @@ class AndroidAppErrorLanguageSourceTests(unittest.TestCase):
 
     def test_only_typed_top_level_failures_produce_app_tokens(self):
         source = (UI / "CameraViewModel.kt").read_text()
-        formatter = source.split("    private fun formatException(", 1)[1].split("    private fun startLiveViewLoopIfNeeded()", 1)[0]
+        formatter = source.split("    private fun formatException(", 1)[1].split(
+            "    private fun startLiveViewLoopIfNeeded()", 1
+        )[0]
         self.assertIn("if (exception is CameraAppException)", formatter)
         self.assertIn("exception.error.messageToken", formatter)
         self.assertIn('append(exception.message ?: "Unknown error")', formatter)
@@ -65,7 +68,10 @@ class AndroidAppErrorLanguageSourceTests(unittest.TestCase):
         typed = "?: throw CameraAppException(CameraAppError.DOWNLOAD_DESTINATION_UNAVAILABLE)"
         self.assertEqual(2, source.count(typed))
         self.assertIn(typed, single)
-        self.assertIn("MediaOutputFinalization(cleanupIncomplete = { deleteIncompleteMediaDocument(resolver, destination) })", single)
+        self.assertIn(
+            "MediaOutputFinalization(cleanupIncomplete = { deleteIncompleteMediaDocument(resolver, destination) })",
+            single,
+        )
         self.assertIn("else MediaSaveFeedback.Failed(formatException(it))", single)
         self.assertIn("download.confirm {", single)
         self.assertIn("withMediaOutputFinalization(", batch)
@@ -84,7 +90,7 @@ class AndroidAppErrorLanguageSourceTests(unittest.TestCase):
     def test_folder_creation_keeps_filename_and_provider_arguments(self):
         source = (UI / "CameraViewModel.kt").read_text()
         body = source.split("private fun createMediaDocument(", 1)[1].split("internal fun mergeRecentMedia(", 1)[0]
-        self.assertIn('item.name.substringAfterLast(\'/\').ifBlank { "camera-media" }', body)
+        self.assertIn("item.name.substringAfterLast('/').ifBlank { \"camera-media\" }", body)
         self.assertIn("DocumentsContract.createDocument(resolver, parent, contentType, filename)", body)
         self.assertIn("?: throw CameraAppException(CameraAppError.DOWNLOAD_DOCUMENT_CREATE_FAILED)", body)
         gallery = (UI / "MediaGalleryComponents.kt").read_text()
@@ -92,22 +98,33 @@ class AndroidAppErrorLanguageSourceTests(unittest.TestCase):
 
     def test_gallery_checks_and_publication_boundary_remain_fail_closed(self):
         body = (UI / "CameraMediaGalleryStore.kt").read_text()
-        for reason in ("GALLERY_CREATE_FAILED", "GALLERY_OUTPUT_UNAVAILABLE", "DOWNLOAD_INCOMPLETE",
-                       "DOWNLOAD_LENGTH_MISMATCH", "GALLERY_PUBLISH_FAILED"):
+        for reason in (
+            "GALLERY_CREATE_FAILED",
+            "GALLERY_OUTPUT_UNAVAILABLE",
+            "DOWNLOAD_INCOMPLETE",
+            "DOWNLOAD_LENGTH_MISMATCH",
+            "GALLERY_PUBLISH_FAILED",
+        ):
             self.assertIn(f"throw CameraAppException(CameraAppError.{reason})", body)
         self.assertIn("counted.bytes <= 0 || result.bytesTransferred != counted.bytes", body)
         self.assertIn("listOfNotNull(item.sizeBytes, result.item.sizeBytes)", body)
         self.assertIn("if (expected != counted.bytes)", body)
-        self.assertLess(body.index("if (publishOutput(destination, published) != 1)"), body.index("finalization.confirm {"))
+        self.assertLess(
+            body.index("if (publishOutput(destination, published) != 1)"), body.index("finalization.confirm {")
+        )
         self.assertIn("created?.let { destination ->", body)
         self.assertIn("onCleanupFailure()", body)
 
     def test_automatic_fallback_preserves_receipt_and_cancellation_priority(self):
         source = (UI / "CameraViewModel.kt").read_text()
         body = source.split("val feedback = when {", 1)[1].split("publishMediaSave(request, item, feedback)", 1)[0]
-        self.assertLess(body.index("receipt.published -> MediaSaveFeedback.Saved(owner.location)"),
-                        body.index("failure is CancellationException -> MediaSaveFeedback.Cancelled"))
-        self.assertIn("else -> MediaSaveFeedback.Failed(CameraAppError.AUTOMATIC_JPEG_NOT_PUBLISHED.messageToken)", body)
+        self.assertLess(
+            body.index("receipt.published -> MediaSaveFeedback.Saved(owner.location)"),
+            body.index("failure is CancellationException -> MediaSaveFeedback.Cancelled"),
+        )
+        self.assertIn(
+            "else -> MediaSaveFeedback.Failed(CameraAppError.AUTOMATIC_JPEG_NOT_PUBLISHED.messageToken)", body
+        )
         runner = (UI / "ForegroundJpegImportRunner.kt").read_text()
         self.assertIn("policy.finishTransfer(receipt.published, failed, receipt.cleanupConfirmed)", runner)
         self.assertIn("if (!receipt.published) throw failure", runner)

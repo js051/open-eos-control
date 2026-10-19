@@ -1,10 +1,12 @@
 """Localized restore-unavailable wiring only; production lifecycle runs in the JVM host suite."""
-from pathlib import Path
+
 import unittest
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 MAIN = ROOT / "android/app/src/main"
+
 
 class AndroidMaintenanceRestoreTokenSourceTests(unittest.TestCase):
     def test_both_supported_locales_explain_unavailable_owned_restore(self):
@@ -21,4 +23,6 @@ class AndroidMaintenanceRestoreTokenSourceTests(unittest.TestCase):
 
     def test_typed_restore_receipt_selects_localized_resource(self):
         screen = (MAIN / "java/dev/openeos/control/ui/CameraControlScreen.kt").read_text()
-        self.assertIn("MaintenanceRestoreEvidence.BRIDGE_UNAVAILABLE -> R.string.maintenance_restore_bridge_unavailable", screen)
+        self.assertIn(
+            "MaintenanceRestoreEvidence.BRIDGE_UNAVAILABLE -> R.string.maintenance_restore_bridge_unavailable", screen
+        )

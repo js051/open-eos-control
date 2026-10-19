@@ -26,9 +26,7 @@ def main():
     repo = Path(__file__).resolve().parents[2]
     ref = args.ref or ("27e6e3cb" if args.phase == "baseline" else "WORKTREE")
     if ref != "WORKTREE":
-        ref = subprocess.check_output(
-            ["git", "rev-parse", ref], cwd=repo, text=True
-        ).strip()
+        ref = subprocess.check_output(["git", "rev-parse", ref], cwd=repo, text=True).strip()
     output = args.out.resolve()
     output.mkdir(parents=True, exist_ok=True)
     jars = args.jars.resolve()
@@ -118,9 +116,9 @@ def main():
         ).decode()
         for name in ("DRIVE", "COORDINATES", "COMMAND"):
             begin, end = markers[name]
-            assert (
-                methods[name] == begin + baseline.split(begin, 1)[1].split(end, 1)[0]
-            ), name + " must remain byte-for-byte unchanged"
+            assert methods[name] == begin + baseline.split(begin, 1)[1].split(end, 1)[0], (
+                name + " must remain byte-for-byte unchanged"
+            )
         # This gate changes receipt classification only, not any client, reader or owner.
         begin = "            // Focus receipt integrity is independent of bounded-body/strict-client flags."
         end = "                // A partial representation cannot acknowledge the original physical control."
@@ -132,13 +130,9 @@ def main():
         )
         start, stop = markers["REQUEST_OK"]
         original = start + baseline.split(start, 1)[1].split(stop, 1)[0]
-        assert restored == original, (
-            "Only the isolated receipt gate may change requestOk"
-        )
+        assert restored == original, "Only the isolated receipt gate may change requestOk"
     fixture_hashes = {}
-    for fixture in sorted(
-        (repo / "scripts/validation/fixtures/android-focus-ack-host").glob("*.kt")
-    ):
+    for fixture in sorted((repo / "scripts/validation/fixtures/android-focus-ack-host").glob("*.kt")):
         data = fixture.read_text()
         fixture_hashes[fixture.name] = digest(data.encode())
         for name, method in methods.items():
@@ -161,9 +155,7 @@ def main():
         str(output / "tests.jar"),
         *map(str, files),
     ]
-    compiled = subprocess.run(
-        command, check=False, capture_output=True, text=True, timeout=180
-    )
+    compiled = subprocess.run(command, check=False, capture_output=True, text=True, timeout=180)
     (output / "compile.log").write_text(compiled.stdout + compiled.stderr)
     receipt = {
         "phase": args.phase,
@@ -179,7 +171,12 @@ def main():
         "fixture_sha256": fixture_hashes,
         "verified_tools": verified,
         "compile_exit": compiled.returncode,
-        "boundary": "Exact production driveFocus, tapFocus, clickWhiteBalance, commandOk and requestOk. Call/Response/InputStream, discovery, geometry and status are synthetic. This is not full Android/OkHttp, socket, browser or device execution. Native MockWebServer tests are authored separately and NOT_RUN.",
+        ("boundary"): (
+            "Exact production driveFocus, tapFocus, clickWhiteBalance, commandOk and reques"
+            "tOk. Call/Response/InputStream, discovery, geometry and status are synthetic. "
+            "This is not full Android/OkHttp, socket, browser or device execution. Native M"
+            "ockWebServer tests are authored separately and NOT_RUN."
+        ),
         "jvm_heap_limit_mb": 256,
         "active_processor_count": 1,
     }

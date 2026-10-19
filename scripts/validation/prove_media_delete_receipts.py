@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import quote, urlsplit
 
 from fastapi.testclient import TestClient
+
 from open_eos_bridge.app import create_app
 from open_eos_bridge.ccapi import CcapiEngine, CcapiResponse, UrllibCcapiTransport
 from tests.test_ccapi import FakeCcapiTransport
@@ -48,9 +49,7 @@ class Peer(FakeCcapiTransport):
             and parsed.query == "page=1&order=desc"
             and not self.exists
         ):
-            return CcapiResponse(
-                200, {"content-type": "application/json"}, b'{"path":[]}'
-            )
+            return CcapiResponse(200, {"content-type": "application/json"}, b'{"path":[]}')
         return super().request(method, url, **kwargs)
 
 
@@ -92,8 +91,7 @@ for name, code, headers, apply in cases:
         cache_removed = item["id"] not in session._media_cache
         assert len(peer.deletes) == 1
         confirmed = code == 204 and (
-            args.phase == "baseline"
-            or not any(key.casefold() == "content-range" for key in headers)
+            args.phase == "baseline" or not any(key.casefold() == "content-range" for key in headers)
         )
         expected = 204 if confirmed else 403 if code == 403 else 502
         assert result.status_code == expected, result.text

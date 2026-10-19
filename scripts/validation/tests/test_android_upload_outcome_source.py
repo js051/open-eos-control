@@ -1,4 +1,5 @@
 """Android upload integration guards. These do not execute Android, HTTP, USB, or Compose."""
+
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -12,13 +13,13 @@ UI = MAIN / "java/dev/openeos/control/ui"
 def upload_section(path, next_method="    suspend fun deleteMedia("):
     source = path.read_text()
     start = source.index("    suspend fun uploadMedia(")
-    return source[start:source.index(next_method, start)]
+    return source[start : source.index(next_method, start)]
 
 
 class AndroidUploadOutcomeSourceTests(unittest.TestCase):
     def test_no_inventory_guess_or_automatic_cancel_reconciliation(self):
         vm = (UI / "CameraViewModel.kt").read_text()
-        section = vm[vm.index("    fun uploadMedia("):vm.index("    fun deleteMedia(")]
+        section = vm[vm.index("    fun uploadMedia(") : vm.index("    fun deleteMedia(")]
         self.assertNotIn("reconcileCancelledBridgeUpload", vm)
         self.assertNotIn("items.any", section)
         self.assertNotIn("firstOrNull", section)
@@ -39,14 +40,20 @@ class AndroidUploadOutcomeSourceTests(unittest.TestCase):
             self.assertLess(section.index("validUploadReceipt("), section.index("evidence.onConfirmed(it)"))
         bridge = upload_section(DATA / "DesktopBridgeClient.kt")
         self.assertIn("MAX_UPLOAD_RESPONSE_BYTES", bridge)
-        self.assertGreater(bridge.rindex("session?.let(::requireCurrentSession)"), bridge.index("JSONObject(responseBody)"))
+        self.assertGreater(
+            bridge.rindex("session?.let(::requireCurrentSession)"), bridge.index("JSONObject(responseBody)")
+        )
 
     def test_usb_dispatch_is_before_send_object_info_and_exact_handle_verification_is_retained(self):
         ptp = (DATA / "PtpProtocol.kt").read_text()
-        section = ptp[ptp.index("    suspend fun uploadObject("):ptp.index("    suspend fun executeOperation(")]
+        section = ptp[ptp.index("    suspend fun uploadObject(") : ptp.index("    suspend fun executeOperation(")]
         self.assertLess(section.index("beforeDispatch()"), section.index("transport.send("))
         backend = (DATA / "UsbPtpCameraBackend.kt").read_text()
-        section = backend[backend.index("    override suspend fun uploadMedia("):backend.index("    private suspend fun abortUploadSession")]
+        section = backend[
+            backend.index("    override suspend fun uploadMedia(") : backend.index(
+                "    private suspend fun abortUploadSession"
+            )
+        ]
         self.assertIn("beforeDispatch = { evidence.beforeDispatch(); dispatchStarted = true }", section)
         self.assertIn("if (dispatchStarted) abortUploadSession(ptp)", section)
         self.assertIn("ptp.objectInfo(sent.objectHandle)", section)
@@ -58,9 +65,11 @@ class AndroidUploadOutcomeSourceTests(unittest.TestCase):
 
     def test_all_callback_publications_and_finally_share_owner_and_attempt_fence(self):
         vm = (UI / "CameraViewModel.kt").read_text()
-        section = vm[vm.index("    fun uploadMedia("):vm.index("    fun deleteMedia(")]
+        section = vm[vm.index("    fun uploadMedia(") : vm.index("    fun deleteMedia(")]
         self.assertIn("ownsMediaUpload(", section)
-        self.assertIn("attempt, mediaUploadAttempt, state.info, current.info, generation, cameraSessionGeneration", section)
+        self.assertIn(
+            "attempt, mediaUploadAttempt, state.info, current.info, generation, cameraSessionGeneration", section
+        )
         self.assertEqual(1, section.count("_uiState.update"))
         self.assertIn("_uiState.update { if (owns(it)) transform(it) else it }", section)
         self.assertIn("onConfirmed = attempt::confirm", section)
@@ -78,7 +87,7 @@ class AndroidUploadOutcomeSourceTests(unittest.TestCase):
 
     def test_optional_refresh_cannot_demote_or_confirm_upload(self):
         vm = (UI / "CameraViewModel.kt").read_text()
-        section = vm[vm.index("    fun uploadMedia("):vm.index("    fun deleteMedia(")]
+        section = vm[vm.index("    fun uploadMedia(") : vm.index("    fun deleteMedia(")]
         self.assertIn("repository.listMedia(maximumItemsFor(state.mediaLibraryScope))", section)
         self.assertIn("mediaUploadRefreshFailed = outcome == MediaUploadStatus.CONFIRMED && !refreshed", section)
         self.assertLess(section.index("attempt.confirmedResult()"), section.index("repository.listMedia("))
@@ -86,8 +95,14 @@ class AndroidUploadOutcomeSourceTests(unittest.TestCase):
 
     def test_receipts_require_201_and_integer_wire_tokens_without_unicode_folding(self):
         source = (DATA / "MediaUploadAttempt.kt").read_text()
-        for guard in ("httpStatus == 201", "bytesTransferred == expectedSize", "sizeToken.toLongOrNull() == expectedSize",
-                      'Regex("[1-9][0-9]*")', "expectedAttempt === currentAttempt", "expectedConnection === currentConnection"):
+        for guard in (
+            "httpStatus == 201",
+            "bytesTransferred == expectedSize",
+            "sizeToken.toLongOrNull() == expectedSize",
+            'Regex("[1-9][0-9]*")',
+            "expectedAttempt === currentAttempt",
+            "expectedConnection === currentConnection",
+        ):
             self.assertIn(guard, source)
         self.assertNotIn("ignoreCase", source)
         self.assertNotIn("lowercase", source)
@@ -100,14 +115,28 @@ class AndroidUploadOutcomeSourceTests(unittest.TestCase):
         self.assertIn("request.generation == generation && request.connection === connection", source)
         self.assertIn("pending = null", source)
         vm = (UI / "CameraViewModel.kt").read_text()
-        picker = vm[vm.index("    internal fun completeMediaPicker("):vm.index("    internal fun", vm.index("    internal fun completeMediaPicker(") + 5)]
+        picker = vm[
+            vm.index("    internal fun completeMediaPicker(") : vm.index(
+                "    internal fun", vm.index("    internal fun completeMediaPicker(") + 5
+            )
+        ]
         self.assertLess(picker.index("mediaPickerRequests.consume("), picker.index("uploadMedia(context, uri)"))
 
     def test_bilingual_ui_distinguishes_preparing_not_sent_unknown_and_manual_inspection(self):
-        required = {"preparing_media_upload", "media_upload_not_sent", "media_upload_uncertain",
-                    "media_upload_usb_uncertain", "media_upload_refresh_failed", "media_upload_inspect"}
+        required = {
+            "preparing_media_upload",
+            "media_upload_not_sent",
+            "media_upload_uncertain",
+            "media_upload_usb_uncertain",
+            "media_upload_refresh_failed",
+            "media_upload_inspect",
+        }
         for folder in ("values", "values-zh-rTW"):
-            values = {item.attrib["name"]: item.text for item in ET.parse(MAIN / "res" / folder / "strings.xml").getroot() if item.tag == "string"}
+            values = {
+                item.attrib["name"]: item.text
+                for item in ET.parse(MAIN / "res" / folder / "strings.xml").getroot()
+                if item.tag == "string"
+            }
             self.assertTrue(required <= values.keys())
         screen = (UI / "MediaScreen.kt").read_text()
         self.assertIn("TextButton(onClick = actions.refreshMedia", screen)

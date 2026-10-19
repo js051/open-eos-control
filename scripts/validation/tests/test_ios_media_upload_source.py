@@ -1,4 +1,5 @@
 """iOS upload wiring guards only: not compilation or native runtime evidence."""
+
 import re
 import unittest
 from pathlib import Path
@@ -18,7 +19,9 @@ class IOSMediaUploadSourceTests(unittest.TestCase):
         self.assertIn("let selection: MediaUploadSelection", picker)
         self.assertIn("guard !delivered else { return }", picker)
         self.assertIn("delivered = true", picker)
-        self.assertIn("func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}", picker)
+        self.assertIn(
+            "func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}", picker
+        )
 
     def test_app_releases_grant_once_and_never_confirms_by_listing(self):
         app = (APP / "CameraAppState.swift").read_text()
@@ -37,9 +40,15 @@ class IOSMediaUploadSourceTests(unittest.TestCase):
     def test_staging_precedes_dispatch_and_receipt_precedes_final_progress(self):
         source = (CORE / "DesktopBridgeClient.swift").read_text()
         block = source.split("    public func uploadMedia(", 1)[1].split("    public func deleteMedia", 1)[0]
-        ordered = ["validateMutation", "CameraMediaUploadStagedFile.create", "attempt.markDispatched()",
-                   "transport.upload(request, from: staged.url)", "guard generation == sessionGeneration",
-                   "CameraMediaUploadReceipt.mediaItem", "attempt.recordVerified(item)"]
+        ordered = [
+            "validateMutation",
+            "CameraMediaUploadStagedFile.create",
+            "attempt.markDispatched()",
+            "transport.upload(request, from: staged.url)",
+            "guard generation == sessionGeneration",
+            "CameraMediaUploadReceipt.mediaItem",
+            "attempt.recordVerified(item)",
+        ]
         self.assertEqual([block.index(value) for value in ordered], sorted(block.index(value) for value in ordered))
         self.assertNotIn("Self.parseMediaItem", block)
         self.assertIn("guard response.statusCode == 201", block)
@@ -56,9 +65,16 @@ class IOSMediaUploadSourceTests(unittest.TestCase):
 
     def test_receipt_has_strict_attempt_ascii_and_raw_integer_boundaries(self):
         text = (CORE / "CameraMediaUpload.swift").read_text()
-        for guard in ["responseAttemptID == expectedAttemptID", "response.statusCode == 201", "size <= 4_294_967_295",
-                      "decodeForegroundJSONObject(response.body)", "token.allSatisfy", "currentOwner: Owner?",
-                      "guard !cancelled, !dispatched", "guard dispatched, verifiedItem == nil"]:
+        for guard in [
+            "responseAttemptID == expectedAttemptID",
+            "response.statusCode == 201",
+            "size <= 4_294_967_295",
+            "decodeForegroundJSONObject(response.body)",
+            "token.allSatisfy",
+            "currentOwner: Owner?",
+            "guard !cancelled, !dispatched",
+            "guard dispatched, verifiedItem == nil",
+        ]:
             self.assertIn(guard, text)
         self.assertNotIn("caseInsensitiveCompare", text)
         self.assertNotIn("lowercased()", text)
@@ -76,8 +92,14 @@ class IOSMediaUploadSourceTests(unittest.TestCase):
             self.assertIn(group, tests)
 
     def test_bilingual_terminal_recovery_and_previous_owner_labels_exist(self):
-        keys = ["media_upload_not_sent", "media_upload_uncertain", "media_upload_manual_recovery",
-                "media_upload_previous_connection", "media_upload_refresh_failed", "media_upload_review_files"]
+        keys = [
+            "media_upload_not_sent",
+            "media_upload_uncertain",
+            "media_upload_manual_recovery",
+            "media_upload_previous_connection",
+            "media_upload_refresh_failed",
+            "media_upload_review_files",
+        ]
         for locale in ["en", "zh-Hant"]:
             text = (APP / f"Resources/{locale}.lproj/Localizable.strings").read_text()
             for key in keys:
