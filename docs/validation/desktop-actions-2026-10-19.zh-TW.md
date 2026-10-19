@@ -67,3 +67,11 @@ The exact ISO receipt and normal editor completion now pass in Chromium, followe
 - 診斷 DOM 查詢若失敗只記 unavailable=true，仍重拋原錯誤。沒有新增 request、重試、相機命令或 timeout。
 
 The sixth run confirms successful HTTP statuses for the two preceding Bridge control routes, but no cleaning response. Additional fixed booleans distinguish strict representation validation from subsequent admission. They describe Bridge responses only. A failed diagnostic query cannot replace the original test error.
+
+## 第七輪：清理中的 route handler 遮蔽原失敗
+
+- Source `874ba55b5c7b4fcb753616840a00a9485f33ccdb`，[run39268510760](https://github.com/js051/open-eos-control/actions/runs/39268510760) 尚未到 maintenance 診斷，main journey 清理 browser 時仍有 `/capabilities` route.fetch 執行，拋出未處理 TargetClosedError（原1318行），原始旅程錯誤未印出。
+- 最小 harness 修正：成功 close 前與失敗清理前，等待該 main page 原 route handlers 結束；先保留／重拋原 scenario error，cleanup error 也保留且不得變成功。
+- 使用 [Playwright page.unrouteAll](https://playwright.dev/docs/api/class-page#page-unroute-all) 的 `behavior: wait`，不使用會忽略後續錯誤的 `ignoreErrors`。原互動、相機命令、timeout 與斷言全留。
+
+An in-flight capability route handler failed during browser teardown and concealed the primary journey failure. The harness now reports that primary error and drains its existing page routes before closure. Cleanup failures remain failures. This correction does not establish the underlying maintenance cause.

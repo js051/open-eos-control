@@ -1294,6 +1294,8 @@ async function run() {
   const simulator = spawnUvicorn(python, SIMULATOR_ROOT, "main:app", simulatorPort);
   let bridge = null;
   let browser = null;
+  let mainPage = null;
+  let scenarioError = null;
   try {
     await waitForServer(`${simulatorOrigin}/health`, simulator.process, simulator.stderr);
     const reset = await fetch(`${simulatorOrigin}/ccapi/test/reset`, { method: "POST" });
@@ -1310,6 +1312,7 @@ async function run() {
       viewport: { width: 1440, height: 900 },
     });
     const page = await context.newPage();
+    mainPage = page;
     const pageErrors = [];
     const boundedMediaRequests = [];
     const shutterRequests = [];
@@ -2190,14 +2193,27 @@ async function run() {
     await page.waitForTimeout(1100);
     assert.deepEqual(await page.evaluate(() => window.__objectUrlRevocationViolations), []);
     assert.deepEqual(pageErrors, []);
+    await page.unrouteAll({ behavior: "wait" });
     await context.close();
+    mainPage = null;
     await verifyConnectionRecoveryJourneys(browser, bridgeOrigin, simulatorOrigin);
     await verifyCapabilityResponseOwnership(browser, bridgeOrigin);
     await verifyMediaDeleteResponseOwnership(browser, bridgeOrigin);
     await verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin);
     await verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOrigin);
     await verifyHeldAutofocusAndFocusFrames(browser, bridgeOrigin);
+  } catch (error) {
+    scenarioError = error;
+    console.error("OEC_PRIMARY_JOURNEY_ERROR", error);
+    throw error;
   } finally {
+    if (mainPage && !mainPage.isClosed()) {
+      try { await mainPage.unrouteAll({ behavior: "wait" }); }
+      catch (error) {
+        console.error("CCAPI route cleanup also failed", error);
+        if (!scenarioError) process.exitCode = 1;
+      }
+    }
     if (browser) await browser.close();
     await stopProcess(bridge?.process);
     await stopProcess(simulator.process);
