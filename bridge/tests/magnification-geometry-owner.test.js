@@ -123,3 +123,25 @@ for (const action of ["focus", "whiteBalance"]) test(`${action}: current decoded
   assert.ok(h.calls[1].url.endsWith(action === "focus" ? "/focus/tap" : "/whitebalance/click"));
   h.pending[1].resolve({ accepted: true }); await tap;
 });
+
+test("decoded frame replacement does not replay serialized inline style under strict CSP", async () => {
+  const h = setup(), copied = [];
+  h.ui.liveImage.attributes = [
+    { name: "id", value: "live-image" }, { name: "class", value: "live-image" },
+    { name: "aria-label", value: "Synthetic live frame" },
+    { name: "src", value: "old-frame" },
+    { name: "style", value: "left: 12px; top: 24px; width: 100px; height: 80px;" },
+  ];
+  const image = { style: {}, setAttribute(name, value) { copied.push([name, value]); }, removeAttribute() {} };
+  h.readDecodedLiveFrame = async () => ({ image, url: "fresh-frame", blob: { size: 6, type: "image/jpeg" } });
+  h.expireLiveFrame = () => {};
+  vm.runInContext(production("positionMonitorLayer"), h);
+  h.renderMonitoringFrame = () => h.positionMonitorLayer(h.ui.liveImage, { left: 2, top: 4, width: 60, height: 40 });
+  h.renderFrameIndicator = () => { h.state.livePollingSuspended = true; };
+  vm.runInContext(production("pollLiveView"), h);
+  await h.pollLiveView(1);
+  assert.deepEqual(copied, [["id", "live-image"], ["class", "live-image"], ["aria-label", "Synthetic live frame"]]);
+  assert.equal(h.writes[0], image);
+  assert.equal(h.state.liveDecodedImage, image);
+  assert.deepEqual(image.style, { left: "2px", top: "4px", width: "60px", height: "40px" });
+});
