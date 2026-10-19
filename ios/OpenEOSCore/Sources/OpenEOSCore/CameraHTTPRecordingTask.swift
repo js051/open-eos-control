@@ -11,7 +11,7 @@ final class CameraHTTPRecordingTask: NSObject, URLSessionDataDelegate, @unchecke
     private let configuration: URLSessionConfiguration
     private let onResponseHeaders: (@Sendable (Int) -> Void)?
     private var session: URLSession?
-    private var task: URLSessionUploadTask?
+    private var task: URLSessionTask?
     private var deadline: Task<Void, Never>?
     private var continuation: CheckedContinuation<CameraHTTPRecordingResponse, Error>?
     private var response: HTTPURLResponse?
@@ -31,6 +31,7 @@ final class CameraHTTPRecordingTask: NSObject, URLSessionDataDelegate, @unchecke
     func run(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse {
         guard ["GET", "POST", "PUT"].contains(request.httpMethod ?? ""), request.httpBodyStream == nil,
               request.timeoutInterval > 0, request.timeoutInterval.isFinite,
+              (request.httpMethod != "GET" || (request.httpBody?.isEmpty ?? true)),
               (request.httpBody?.count ?? 0) <= Self.maximumBytes else {
             throw CCAPIError.invalidResponse("Invalid recording exchange.")
         }
@@ -54,10 +55,14 @@ final class CameraHTTPRecordingTask: NSObject, URLSessionDataDelegate, @unchecke
                 value.timeoutInterval = seconds
                 value.httpBody = nil
                 value.cachePolicy = .reloadIgnoringLocalCacheData
-                value.setValue(String(source.count), forHTTPHeaderField: "Content-Length")
+                value.setValue(method == "GET" ? nil : String(source.count), forHTTPHeaderField: "Content-Length")
                 value.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
                 let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-                let task = session.uploadTask(withStreamedRequest: value)
+                // Apple URLSession rejects streamed upload tasks for GET before dispatch.
+                // Keep read-only requests on this same strict delegate/session.
+                let task: URLSessionTask = method == "GET"
+                    ? session.dataTask(with: value)
+                    : session.uploadTask(withStreamedRequest: value)
                 self.session = session
                 self.task = task
                 deadline = Task { [weak self] in

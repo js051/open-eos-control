@@ -89,6 +89,8 @@ final class ShutterAutofocusTests: XCTestCase {
             let captures = await transport.writes().filter { $0.path.hasSuffix("/capture/still") }
             XCTAssertEqual(captures.map(\.autofocus), capability == "true" ? [false, true] : [true])
             await client.close()
+            let unconfirmed = await client.connectionRetirementUnconfirmed
+            XCTAssertFalse(unconfirmed)
             try await client.initialize()
             let reopened = await transport.requests()
             do {
@@ -312,6 +314,9 @@ private actor ShutterAutofocusTransport: CameraHTTPTransport {
         let record = ShutterRecoveryRequest(method: request.httpMethod ?? "GET", path: request.url!.path,
             body: request.httpBody ?? Data(), taskWasCancelled: Task.isCancelled)
         recorded.append(record)
+        if record.method == "DELETE", record.path == "/v1/session/af-session" {
+            return CameraHTTPResponse(statusCode: 204, body: Data())
+        }
         if record.path == "/v1/session/af-session/capture/still", let failure = bridgeCaptureFailure {
             switch failure {
             case let .http(code, status):

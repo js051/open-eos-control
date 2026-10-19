@@ -102,7 +102,12 @@ final class BridgeMediaListingTests: XCTestCase {
             try await wait { await peer.count() == 1 }
             for value in frames().prefix(2) { await peer.feed(0, try line(value)) }
             try await wait { await progress.values().count == 1 }
-            if cancel { listing.cancel() } else { await client.close(); try await client.initialize() }
+            if cancel { listing.cancel() } else {
+                await client.close()
+                let unconfirmed = await client.connectionRetirementUnconfirmed
+                XCTAssertFalse(unconfirmed)
+                try await client.initialize()
+            }
             await peer.feed(0, try line(record("snapshot", 2, ["revision": 2, "offset": 0, "total": 1,
                 "items": [item("stale")], "last": true])))
             await peer.feed(0, try line(record("complete", 3, ["revision": 2, "count": 1, "scopeComplete": true])))
@@ -243,6 +248,9 @@ private actor ListingPeer: CameraHTTPTransport {
     private var requests = [URLRequest]()
     init(contentType: String = BridgeMediaListingDecoder.mediaType) { self.contentType = contentType }
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        if request.httpMethod == "DELETE", request.url?.path == "/v1/session/session" {
+            return .init(statusCode: 204, body: Data())
+        }
         if request.url?.path == "/health" {
             return .init(statusCode: 200, body: Data("{\"service\":\"open-eos-control-bridge\"}".utf8))
         }

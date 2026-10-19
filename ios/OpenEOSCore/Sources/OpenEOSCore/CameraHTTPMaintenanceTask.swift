@@ -11,7 +11,7 @@ final class CameraHTTPMaintenanceTask: NSObject, URLSessionDataDelegate, @unchec
     private let lock = NSLock()
     private let configuration: URLSessionConfiguration
     private var session: URLSession?
-    private var task: URLSessionUploadTask?
+    private var task: URLSessionTask?
     private var continuation: CheckedContinuation<CameraHTTPResponse, Error>?
     private var response: HTTPURLResponse?
     private var body = Data()
@@ -30,6 +30,7 @@ final class CameraHTTPMaintenanceTask: NSObject, URLSessionDataDelegate, @unchec
     func run(_ request: URLRequest) async throws -> CameraHTTPResponse {
         guard ["GET", "POST", "PUT", "DELETE"].contains(request.httpMethod ?? ""), request.httpBodyStream == nil,
               request.timeoutInterval > 0, request.timeoutInterval.isFinite,
+              (request.httpMethod != "GET" || (request.httpBody?.isEmpty ?? true)),
               (request.httpBody?.count ?? 0) <= Self.maximumBytes else {
             throw CCAPIError.invalidResponse("Invalid camera maintenance request.")
         }
@@ -50,10 +51,14 @@ final class CameraHTTPMaintenanceTask: NSObject, URLSessionDataDelegate, @unchec
                 configuration.timeoutIntervalForResource = request.timeoutInterval
                 var value = request
                 value.httpBody = nil
-                value.setValue(String(source.count), forHTTPHeaderField: "Content-Length")
+                value.setValue(method == "GET" ? nil : String(source.count), forHTTPHeaderField: "Content-Length")
                 value.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
                 let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-                let task = session.uploadTask(withStreamedRequest: value)
+                // Apple URLSession rejects streamed upload tasks for GET before dispatch.
+                // Keep read-only requests on this same strict delegate/session.
+                let task: URLSessionTask = method == "GET"
+                    ? session.dataTask(with: value)
+                    : session.uploadTask(withStreamedRequest: value)
                 self.session = session; self.task = task
                 lock.unlock()
                 task.resume()
