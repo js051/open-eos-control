@@ -105,7 +105,15 @@ async function journey(browser, origin, mode, language = 'en') {
       await bounded(f.entered.promise, 'Configuration write was not observed');
       if (mode === 'cancel') await f.page.locator('[data-capture-configuration-history] button').filter({ hasText: language === 'en' ? /^Cancel$/ : /^取消$/ }).click();
       if (mode === 'same-value-edit') await f.page.locator('[data-file-naming-field="still-user-setting-1"]').dispatchEvent('input');
-      if (mode === 'retire') { await f.page.click('#disconnect-button'); await f.page.waitForSelector('#connection-view:not([hidden])'); }
+      if (mode === 'retire') {
+        // A pending configuration write must be explicitly cancelled before
+        // the busy-session guard admits Disconnect. Keep the late reply held.
+        assert.equal(await f.page.locator('#disconnect-button').isDisabled(), true);
+        await f.page.locator('[data-capture-configuration-history] button').filter({ hasText: language === 'en' ? /^Cancel$/ : /^取消$/ }).click();
+        await f.page.waitForSelector('#disconnect-button:not([disabled])');
+        await f.page.click('#disconnect-button');
+        await f.page.waitForSelector('#connection-view:not([hidden])');
+      }
       f.gate.resolve();
     }
     if (mode === 'retire') {
