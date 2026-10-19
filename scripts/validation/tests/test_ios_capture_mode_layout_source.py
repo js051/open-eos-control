@@ -9,13 +9,11 @@ class IOSCaptureModeLayoutSourceTests(unittest.TestCase):
     def test_empty_draft_reserves_geometry_but_has_no_action(self):
         source = (ROOT / "ios/OpenEOSControl/App/CameraControlView.swift").read_text()
         picker = source.split("private struct CaptureModePicker: View", 1)[1]
-        self.assertNotIn("if let selected = draft", picker)
+        self.assertIn("if let selected = draft", picker)
         for guard in (
-            "guard let selected = draft else { return }",
-            ".disabled(draft == nil || !camera.canStartShootingSetting",
-            ".opacity(draft == nil ? 0 : 1)",
-            ".allowsHitTesting(draft != nil)",
-            ".accessibilityHidden(draft == nil)",
+            '.hidden()\n                .overlay {\n                    if let selected = draft',
+            ".frame(minHeight: 44)",
+            ".disabled(!camera.canStartShootingSetting || selected == camera.captureMode",
             "revision == submittedRevision, owner == editorOwner",
             "sessionOwner == camera.mediaLibrarySessionID",
         ):

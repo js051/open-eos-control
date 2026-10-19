@@ -174,3 +174,10 @@
 - 候選固定保留 Apply 的 layout slot。無 draft 時同時 hidden／不可命中／disabled／不在 AX，action 仍先 guard draft；原 revision、editor owner、session owner 與單次 mutation 路徑保留。原真 UI 選段／Apply／mode count gates 不改，新增無 draft 無可存取 Apply 與選段前後 picker y 不移動斷言。沒有額外重 tap 或等待預算變更。
 - 原 #129 增加只引用 concrete Apple port 型別與 protocol conformance 的 App SDK probe，絕不建立 adapter、discovery、授權提示或相機命令。若 SDK 不提供 ImageCaptureCore 則明確 XCTSkip；編譯／連結證據不能當 USB DeviceInfo 或實體裝置功能完成。
 - 第十七輪 bounded artifact `12179493135`，5,035,429 bytes，SHA256 `bd4947e5794d1da0f565a2754c2494b53da1bab684da99cfb79e98df53126907`。第十八輪候選尚待真 Apple 原生驗證，沒有全案完成或三端對齊宣告。
+
+## 第十八輪結果與第十九輪空白 slot 的 AX 修正
+
+- Source `285ca4b246158f4575cb62c62bf722234ec9b9b2`，run https://github.com/js051/open-eos-control/actions/runs/39240488333 。App **826/826**，新增 `testIOSSDKIncludesTheConcreteIsolatedPort` 真 PASS，非 SKIP：iOS SDK 分支的 concrete ImageCaptureCore port 已編譯、連結並滿足 protocol；沒有建立 adapter 或存取設備。#129 裝置 discovery／session／DeviceInfo wire／產品接線仍未執行或完成。
+- UI 43 案有 **1 案／2 斷言失敗**。新加的「無 draft 不得存在 AX Apply」先失敗，後續 async guard 正確停止該旅程，尚未點 Video，因此本輪不能驗收原模式選段假說。其餘42案包含 direct 控制及位置穩定斷言通過。
+- 原 opacity／accessibilityHidden Button 仍能被 native AX 找到，不能以畫面不可見取代原負例。最小候選改為 hidden Text 保留隨字級擴展、至少44pt的 slot，只在 draft 存在時以 overlay 建立真 Button；overlay 不改底層 layout 尺寸。原 revision／owner／session guard、capability／same-mode／Stop duty 禁用條件、原負例及全旅程斷言不變，沒有改超時或重tap。
+- 第十八輪 bounded artifact `12183141203`，4,894,030 bytes，API digest `f22dbe027b8fc08eb00302d86481c971c316e8e1166daa564d145cc16c63e647`；本段以原job log定位失敗，未另下載該artifact。第十九輪候選仍待真Apple結果。
