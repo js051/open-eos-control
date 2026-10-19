@@ -3,6 +3,7 @@
 // HTTP responses provide controlled acknowledgment/cancel/refresh boundaries.
 // No app function/state injection. These are not physical-camera tests.
 const assert = require("node:assert/strict");
+const { retireFixtureSession } = require("./browser-session-retirement.cjs");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -97,7 +98,7 @@ async function runJourney(browser, origin, mode, language = "en") {
     for (const item of ITEMS) assert.ok(f.confirmations[0].includes(item.id));
     assert.match(f.confirmations[0], language === "en" ? /Connected desktop capture files/ : /已連線的桌面拍攝檔案/);
     assert.match(f.confirmations[0], language === "en" ? /Camera storage/ : /相機儲存空間/);
-    if (mode === "dismiss") { assert.equal(f.writes.length, 0); assert.equal(await f.page.locator("#media-delete-panel").isVisible(), false); return; }
+    if (mode === "dismiss") { assert.equal(f.writes.length, 0); assert.equal(await f.page.locator("#media-delete-panel").isVisible(), false); await retireFixtureSession(f); return; }
     if (["cancel", "overlap", "retire", "selection", "requalify"].includes(mode)) {
       await f.entered.promise;
       await f.page.waitForFunction(() => document.querySelector("#media-delete-cancel")?.hidden === false);
@@ -139,6 +140,7 @@ async function runJourney(browser, origin, mode, language = "en") {
     assert.equal(f.writes.length, before, "Read-only inspection never retries deletion");
     assert.deepEqual(f.errors, []);
     await f.page.screenshot({ path: path.join(RESULTS, `desktop-delete-${mode}-${language}.png`), fullPage: true });
+    await retireFixtureSession(f);
   } finally { f.gate.resolve(); await f.context.close(); }
 }
 async function run() {
