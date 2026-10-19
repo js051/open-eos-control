@@ -3,6 +3,7 @@
 // No production state injection or real camera writes.
 // No app function/state injection. These are not physical-camera tests.
 const assert = require("node:assert/strict");
+const { retireFixtureSession } = require("./browser-session-retirement.cjs");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -128,6 +129,7 @@ async function journey(browser, origin, mode, language = 'en') {
     }
     assert.equal(f.writes.length, 1); assert.deepEqual(f.replays, []); assert.deepEqual(f.errors, []);
     await f.page.screenshot({ path: path.join(RESULTS, `capture-configuration-${mode}-${language}.png`), fullPage: true });
+    await retireFixtureSession(f);
   } finally { f.gate.resolve(); await f.context.close(); }
 }
 async function run() {

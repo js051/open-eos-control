@@ -3,6 +3,7 @@
 // No production state injection or real camera writes.
 // No app function/state injection. These are not physical-camera tests.
 const assert = require("node:assert/strict");
+const { retireFixtureSession } = require("./browser-session-retirement.cjs");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -98,6 +99,7 @@ async function journey(browser,origin,mode,language) {
     if(mode==='reconnect')assert.equal(await page.locator('[data-setting-history] [data-setting-outcome-action="recover"]').last().isDisabled(),true);
     assert.deepEqual(errors,[]);
     console.log(`ordinary setting ${mode} ${language}: passed`);
+    await retireFixtureSession({ page });
   } finally {gate.resolve();await context.close();}
 }
 (async()=>{

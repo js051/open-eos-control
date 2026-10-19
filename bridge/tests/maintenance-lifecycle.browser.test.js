@@ -3,6 +3,7 @@
 // No production state injection or real camera writes.
 // No app function/state injection. These are not physical-camera tests.
 const assert = require("node:assert/strict");
+const { retireFixtureSession } = require("./browser-session-retirement.cjs");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -83,6 +84,7 @@ async function journey(browser,origin,mode,language){
    if(['lost','duplicate','redirect'].includes(mode))assert.match(await page.locator('[data-maintenance-history]').textContent(),language==='en'?/unknown/:/不確定/);
   }
   assert.equal(writes.length,1);assert.deepEqual(errors,[]);console.log(`maintenance ${mode} ${language}: passed`);
+  await retireFixtureSession({ page }, { maintenance: !['clean', 'reconnect'].includes(mode) });
  }finally{gate.resolve();await context.close();}
 }
 (async()=>{

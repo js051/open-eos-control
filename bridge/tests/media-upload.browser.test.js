@@ -3,6 +3,7 @@
 // HTTP responses provide controlled acknowledgment/cancel/refresh boundaries.
 // No app function/state injection. These are not physical-camera tests.
 const assert = require("node:assert/strict");
+const { retireFixtureSession } = require("./browser-session-retirement.cjs");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -80,6 +81,7 @@ async function fixture(browser, origin, mode = "confirmed", language = "en") {
   await page.waitForSelector(".media-card");
   return { context, page, errors, writes, reads, redirectedWrites, gate };
 }
+
 async function picker(page) {
   const waiting = page.waitForEvent("filechooser"); await page.click("#media-upload-button"); return waiting;
 }
@@ -105,6 +107,7 @@ async function confirmed(browser, origin, language) {
     assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await f.page.screenshot({ path: path.join(RESULTS, `desktop-upload-confirmed-${language}.png`), fullPage: true });
     assert.deepEqual(f.errors, []);
+    await retireFixtureSession(f);
   } finally { await f.context.close(); }
 }
 async function uncertain(browser, origin, mode, language = "en") {
@@ -119,6 +122,7 @@ async function uncertain(browser, origin, mode, language = "en") {
     await outcome(f.page, "uncertain"); assert.equal(f.writes.length, 1);
     await f.page.screenshot({ path: path.join(RESULTS, `desktop-upload-${mode}-${language}.png`), fullPage: true });
     assert.deepEqual(f.errors, []);
+    await retireFixtureSession(f);
   } finally { f.gate.resolve(); await f.context.close(); }
 }
 async function oldPicker(browser, origin, newerPicker) {
@@ -132,6 +136,7 @@ async function oldPicker(browser, origin, newerPicker) {
     });
     await f.page.waitForTimeout(100);
     assert.equal(f.writes.length, 0); assert.deepEqual(f.errors, []);
+    await retireFixtureSession(f);
   } finally { await f.context.close(); }
 }
 async function retired(browser, origin, mode) {
@@ -143,6 +148,7 @@ async function retired(browser, origin, mode) {
     await outcome(f.page, mode === "refresh-reconnect" ? "confirmed" : "uncertain");
     await f.page.waitForSelector("#media-upload-previous-camera:not([hidden])");
     assert.equal(f.writes.length, 1); assert.deepEqual(f.errors, []);
+    await retireFixtureSession(f);
   } finally { f.gate.resolve(); await f.context.close(); }
 }
 async function run() {
