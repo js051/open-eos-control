@@ -100,3 +100,11 @@ The real browser failure retained valid Bridge framing but an unknown Stop-prepa
 - source 明確顯示 `suspendMaintenanceForLifecycle`／`beforeunload` 在 maintenance hold 時只退本地 receiver，刻意不送 session DELETE。原主旅程 sleep 後直接關 context，留下同相機 session；`SessionManager._register` 依法拒絕重複 owner。瀏覽器關閉不能當作已完成這項清理。
 - 在原 sleep／Stop／event／零 page-error assertions 之後，用真 UI Disconnect 完成退場；先註冊 exact maintenance session DELETE，驗 HTTP204 空 body、connection view 回復與無 error，再關 context。產品 guard、後續 Connect 和原時間上限不變。
 - 本地 syntax／diff check 與獨立窄審通過，新增真退場仍待下一輪 Chromium。Windows 同 SHA 的 `39271697588` 全過。
+
+### 第十一輪：連線恢復通過，修正舊刪除回覆 fixture
+
+- `cc69bfa7637d133dc8efda8ae3bdc7304bcaee73` / Actions `39272672982` 真 Chromium 通過 maintenance 顯式退場、英／繁中掃描與成功重連、兩語各七類拒絕／unknown admission，以及 capability disconnect/reconnect；Windows `39272672858` 全過。
+- 下一個媒體刪除 ownership 案在等待 DELETE 派送處超時。fixture 無來源 ID 與現 `sourceFor` 拒 unknown 契約衝突；原 JSON consumption marker 也不對應現 stream 收據實作。
+- 單一 synthetic item 改用合法 `gphoto2:` ID 與 exact URI 編碼 route；保留原200{}、500作不確定回覆，另加204空回覆及403明確拒絕。只在此測試忽略該 DELETE 的 abort，刻意交付退役回覆，驗真正 owner fence；不改產品 transport。
+- marker 在真 stream EOF 後排入下一 task；若真204的body為null，只證 fetch 已返回與後續 continuation 可執行，不宣稱讀取不存在的stream。原B同ID媒體、dialog、enabled、diagnostics與零重送斷言完整保留。
+- 本地 syntax／diff check 與565項原media-delete module測試通過，四個更新後真browser案例仍待下一輪。

@@ -188,32 +188,43 @@ async function verifyCapabilityResponseOwnership(browser, origin) {
 }
 
 async function verifyMediaDeleteResponseOwnership(browser, origin) {
-  for (const rejected of [false, true]) {
+  for (const responseCase of ["confirmed", "rejected", "server-error", "non-authoritative-success"]) {
     const context = await browser.newContext({ locale: "en-US" });
     const page = await context.newPage();
     const writes = [], pageErrors = [];
     let releaseResponse;
     const gate = new Promise(resolve => { releaseResponse = resolve; });
-    const item = { id: "SYNTHETIC_SHARED.JPG", name: "SYNTHETIC_SHARED.JPG", kind: "image",
+    const item = { id: "gphoto2:SYNTHETIC_SHARED.JPG", name: "SYNTHETIC_SHARED.JPG", kind: "image",
       sizeBytes: 1024, captureTime: null, previewAvailable: false };
-    // Observe consumption of the synthetic response, then a new browser task.
-    // The production api/delete continuation microtasks finish before this marker.
+    // Deliver this one retired synthetic DELETE despite AbortSignal, then mark
+    // actual EOF consumption. The owner fence, not network cancellation, must
+    // protect B. Real status/headers/body remain observable by production Fetch.
     await context.addInitScript(() => {
       const fetchOriginal = window.fetch;
-      window.fetch = async (...args) => {
-        const response = await fetchOriginal(...args);
-        if (args[1]?.method === "DELETE" && String(args[0]).includes("/media/")) {
-          const json = response.json.bind(response);
-          response.json = async () => {
-            const value = await json();
+      window.fetch = async (input, options) => {
+        const staleDelete = options?.method === "DELETE" && String(input).includes("/media/");
+        const response = await fetchOriginal(input, staleDelete ? { ...options, signal: undefined } : options);
+        if (staleDelete) {
+          const consumed = () => {
             const channel = new MessageChannel();
             channel.port1.onmessage = () => {
               window.__deleteResponseConsumed = true;
               channel.port1.close(); channel.port2.close();
             };
             channel.port2.postMessage(null);
-            return value;
           };
+          if (response.body) {
+            const getReader = response.body.getReader.bind(response.body);
+            response.body.getReader = (...args) => {
+              const reader = getReader(...args), read = reader.read.bind(reader);
+              reader.read = async (...readArgs) => {
+                const result = await read(...readArgs);
+                if (result.done) consumed();
+                return result;
+              };
+              return reader;
+            };
+          } else consumed();
         }
         return response;
       };
@@ -230,13 +241,19 @@ async function verifyMediaDeleteResponseOwnership(browser, origin) {
       await route.fulfill({ response, json: capabilities });
     });
     await page.route(/\/v1\/session\/[^/]+\/media(?:\?.*)?$/, route => route.fulfill({ json: { items: [item] } }));
-    await page.route(/\/v1\/session\/[^/]+\/media\/SYNTHETIC_SHARED.JPG$/, async route => {
+    await page.route(/\/v1\/session\/[^/]+\/media\/gphoto2%3ASYNTHETIC_SHARED\.JPG$/, async route => {
       assert.equal(route.request().method(), "DELETE");
       // This synthetic delete never reaches the fake backend or a physical camera.
       await page.evaluate(() => { window.__deleteResponsePending = true; });
       await gate;
-      await route.fulfill({ status: rejected ? 500 : 200,
-        json: rejected ? { error: { code: "SYNTHETIC_DELETE_FAILURE", message: "Old A deletion failed" } } : {} });
+      if (responseCase === "confirmed") {
+        await route.fulfill({ status: 204, body: "" });
+      } else {
+        const status = { rejected: 403, "server-error": 500, "non-authoritative-success": 200 }[responseCase];
+        await route.fulfill({ status,
+          json: responseCase === "non-authoritative-success" ? {} :
+            { error: { code: "SYNTHETIC_DELETE_FAILURE", message: "Old A deletion failed" } } });
+      }
     });
     try {
       await page.goto(origin, { waitUntil: "networkidle" });
@@ -274,7 +291,7 @@ async function verifyMediaDeleteResponseOwnership(browser, origin) {
       await page.keyboard.press("Escape");
       await page.click("#disconnect-button");
       await page.waitForSelector("#connection-view:not([hidden])");
-      console.log(`Media delete response ownership: stale ${rejected ? "rejection" : "success"} passed`);
+      console.log(`Media delete response ownership: stale ${responseCase} passed`);
     } finally {
       releaseResponse();
       await context.close();
