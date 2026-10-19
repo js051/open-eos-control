@@ -21,7 +21,7 @@ async function freePort() {
 }
 async function startServer(directory) {
   const port = await freePort();
-  const child = spawn(process.env.PYTHON || "python3", ["-m", "uvicorn", "tests.browser_server:app", "--host", "127.0.0.1", "--port", String(port), "--log-level", "warning"],
+  const child = spawn(process.env.PYTHON || "python3", ["-m", "uvicorn", "tests.maintenance_browser_server:application", "--factory", "--host", "127.0.0.1", "--port", String(port), "--log-level", "warning"],
     { cwd: ROOT, env: { ...process.env, OPEN_EOS_BROWSER_CAPTURE_DIR: directory }, stdio: ["ignore", "pipe", "pipe"] });
   let errors = ""; child.stderr.on("data", (chunk) => { errors += chunk; });
   const origin = `http://127.0.0.1:${port}`, deadline = Date.now() + 20000;
