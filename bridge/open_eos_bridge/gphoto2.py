@@ -2707,14 +2707,13 @@ class GPhoto2Session:
             self._require_open()
             if not self._camera_media_supported:
                 raise unsupported(CameraFeature.MEDIA_DOWNLOAD.value, self.engine_name)
-            cached = self._media_cache.get(media_id)
-            content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
-            item = cached or MediaItem(
-                id=media_id,
-                name=name,
-                kind=_media_kind(name, content_type),
-                content_type=content_type,
-            )
+            if cancellation is not None:
+                cancellation.check()
+            # list-files rounds sizes up to KB. Never use that estimate as an
+            # exact transfer length; bind a fresh primary-file byte receipt.
+            item = self._media_info(media_id, download_receipt=True)
+            if cancellation is not None:
+                cancellation.check()
 
         arguments = self._camera_arguments(["--folder", folder, "--get-file", name, "--stdout"])
 
@@ -2935,7 +2934,9 @@ class GPhoto2Session:
     def media_info(self, media_id: str) -> MediaItem:
         return self._media_info(media_id)
 
-    def _media_info(self, media_id: str, *, upload_receipt: bool = False) -> MediaItem:
+    def _media_info(
+        self, media_id: str, *, upload_receipt: bool = False, download_receipt: bool = False,
+    ) -> MediaItem:
         if is_host_media_id(media_id):
             with self._lock:
                 self._require_open()
@@ -2953,22 +2954,31 @@ class GPhoto2Session:
                 ["--folder", folder, "--show-info", name],
                 timeout=60.0,
             )
-            if upload_receipt:
+            if upload_receipt or download_receipt:
                 try:
                     text = output.stdout.decode("utf-8", errors="strict")
                 except UnicodeDecodeError:
                     text = ""
                 if not _valid_upload_media_info(text, folder, name):
                     raise BridgeError(
-                        "UPLOAD_VERIFY_FAILED",
-                        "gphoto2 did not report one exact primary-file size for the uploaded destination.",
+                        "UPLOAD_VERIFY_FAILED" if upload_receipt else "INVALID_MEDIA_INFO",
+                        ("gphoto2 did not report one exact primary-file size for the uploaded destination."
+                         if upload_receipt else "gphoto2 did not report one exact primary-file download size."),
                         status_code=502,
-                        feature=CameraFeature.MEDIA_UPLOAD.value,
+                        feature=(CameraFeature.MEDIA_UPLOAD if upload_receipt else CameraFeature.MEDIA_DOWNLOAD).value,
                         engine=self.engine_name,
                     )
             else:
                 text = output.text
             info = parse_media_info(text)
+            if download_receipt and not info.size_bytes:
+                raise BridgeError(
+                    "INVALID_MEDIA_INFO",
+                    "gphoto2 did not report a positive primary-file download size.",
+                    status_code=502,
+                    feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                    engine=self.engine_name,
+                )
             if not info.file_section_available:
                 raise BridgeError(
                     "INVALID_MEDIA_INFO",

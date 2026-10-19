@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import pytest
@@ -228,7 +229,22 @@ def test_asgi_status_retry_and_disconnect_preserve_same_session_stop(tmp_path, d
     runner.lose_press = True
     runner.reject_release = True
     engine = GPhoto2Engine(runner, capture_directory=tmp_path)
-    with TestClient(create_app(engine=engine)) as client:
+    with ExitStack() as cleanup:
+        client = TestClient(create_app(engine=engine))
+        client.__enter__()
+
+        def close_client():
+            if disconnect:
+                # Preserve the expected failed owner at shutdown without masking
+                # any assertion from the request sequence below.
+                with pytest.raises(BridgeError) as failure:
+                    client.__exit__(None, None, None)
+                assert failure.value.code == "ENGINE_COMMAND_FAILED"
+                assert failure.value.status_code == 502
+            else:
+                client.__exit__(None, None, None)
+
+        cleanup.callback(close_client)
         created = client.post("/v1/session", json={"engine": "libgphoto2"})
         assert created.status_code == 201, created.text
         route = f"/v1/session/{created.json()['id']}"
@@ -243,12 +259,13 @@ def test_asgi_status_retry_and_disconnect_preserve_same_session_stop(tmp_path, d
             assert closed.status_code == 502, closed.text
             assert closed.json()["error"]["code"] == "SHUTTER_RELEASE_UNCONFIRMED"
             assert client.get(route + "/status").status_code == 404
-            # A replacement session never inherits a prior camera's release command.
+            # An unconfirmed retired USB owner blocks replacement admission.
+            before = list(runner.commands)
             replacement = client.post("/v1/session", json={"engine": "libgphoto2"})
-            assert replacement.status_code == 201, replacement.text
-            before = list(runner.shutter_commands())
-            assert client.post(f"/v1/session/{replacement.json()['id']}/bulb/stop").status_code == 200
-            assert runner.shutter_commands() == before
+            assert replacement.status_code == 409, replacement.text
+            assert replacement.json()["error"]["code"] == "CAMERA_BUSY"
+            assert client.post(route + "/bulb/stop").status_code == 404
+            assert runner.commands == before
         else:
             runner.reject_release = False
             stopped = client.post(route + "/bulb/stop")

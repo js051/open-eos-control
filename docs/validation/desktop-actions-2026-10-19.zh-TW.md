@@ -130,3 +130,16 @@ The real browser failure retained valid Bridge framing but an unknown Stop-prepa
 - 最後 maintenance 的 clean／sleep 原旅程斷言通過，但 sleep 的測試退場得到409：普通 browser peer 是 `GPhoto2Engine(FakeRunner)`，其維護能力與outcome由瀏覽器fixture合成；底層真 gphoto provider沒有 local-only `maintenance_retire`，原 manager 正確拒絕。不能把這當產品 gphoto 已支援維護或允許 generic DELETE 代替安全退場。
 - 新增僅 maintenance browser 使用的專用合成 server factory，固定 `FakeRunner`，idle才允許原session local close，並核零fakecamera命令。存在 short shutter、Bulb、live view或stream責任即拒絕，沒有Stop／重送。普通browser server與production不變。
 - 新3個真TestClient方法涵蓋4種責任subcase、exact204空body／reservation釋放、重複404、拒退後owner仍在，以及普通gphoto仍409；本地通過。這是合成peer契約驗證，完整browser、後續Python與release candidate建置仍待新CI。沒有真相機驗收。
+
+## Desktop 30：下載精確長度與失敗 USB owner / Exact download size and failed USB ownership
+
+- Desktop 29 (`39340743281`, `213b40f34b86dca8235eb1872717b8098d6e4d40`) 全部原 Chromium browser suites 在 23:26:16 UTC 通過。後續 Python contract 在 23:29:02 出 7 紅，wheel/sdist 尚未執行，不能宣稱完整 Desktop gate 綠。
+- All original browser suites passed on Desktop 29. The subsequent Python gate reported seven failures; packaging did not run.
+- 4 紅確證產品問題：普通 gphoto `list-files` 將 13 bytes 上捨入為 1 KB，download 沿用 cache 的 1024 作精確長度，正常 13-byte EOF 被報截短。Playback 先取得 `media_info`，所以相同資料不受影響。修正普通 camera download 在串流前讀取同 folder/name 的嚴格 primary-file byte receipt，保留完整 stage 長度比較；未知、零、重複、非 byte 單位、錯 identity／UTF-8 均拒絕，沒有以 rounded estimate 或未知 0 繞過檢查。
+- Four failures exposed a product defect: rounded listing sizes were treated as exact download lengths. Downloads now obtain a fresh, exact positive primary-file size with strict identity/grammar before opening the stream. Exact length validation remains unchanged; malformed metadata cannot start a transfer and truncated data still fails.
+- `GPhoto2Session._lock` 是 `threading.RLock`（1390），允許同 thread 進 `_media_info`；取消前後檢查只讀 event，不取得另一把 lock。新增 read-only metadata 指令保留原 60 秒 provider deadline；這不是可立即中斷 CLI metadata 的新承諾。
+- The nested metadata call uses the existing reentrant session lock. Cancellation checks read the event and add no lock inversion. The existing 60-second metadata command deadline remains; immediate interruption of that command is not claimed.
+- 另外 3 紅為舊 ASGI 測試與目前 quarantine 契約不符。未確認 Stop 的 session DELETE 仍 502、舊 session 仍 404；新的 local USB session 必須 409 CAMERA_BUSY，不能繼承／重送舊 Stop。shutdown 的 ENGINE_COMMAND_FAILED 明確保留並驗證，ExitStack 精確捕捉該預期錯誤，不以一般吞錯遮蔽 request assertions。
+- Three stale tests expected replacement after an unconfirmed release. They now assert admission quarantine, no additional CLI command, and the precise persistent shutdown error. Production retirement safeguards are unchanged.
+- 凍結本地 gate：974 passed（17.63 秒），含原取消／queued／playback 矩陣、gphoto、Bulb／短控制、API／metadata；Ruff、diff check 過。使用與專案範圍相符的官方 pytest 8.4.2，共用 wheel hash 驗證後隔離到 EOS cache，無重下載。原紅與修後 logs 保留。JPEG 全檔本地收集因缺 PyAV 未執行，未重試已拒下載；完整 codec 與 package 仍交原 Actions 驗。
+- The frozen local slice passed 974 tests plus lint and diff checks. Native codec tests could not collect locally because PyAV is unavailable; the denied download was not retried. Complete CI and package results remain pending.
