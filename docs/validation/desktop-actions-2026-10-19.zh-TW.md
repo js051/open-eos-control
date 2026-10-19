@@ -59,3 +59,11 @@ The original live-view browser journey now passes under the unchanged strict CSP
 - Windows 同 source 全過；Apple21仍在原 App/UI 執行中，未被取消或重啟。
 
 The exact ISO receipt and normal editor completion now pass in Chromium, followed by the original control and media assertions. The next failure is maintenance admission: preview and event monitoring stopped, but sensor cleaning was not dispatched at the peer. Fixed-category response-status diagnostics will distinguish the preceding control stages without weakening the original assertion or issuing extra commands.
+
+## 第六輪：維護 HTTP 分支已縮小
+
+- Source `33f5427310f38aafd137943d78e4761abeee5a39`，[run39267392824](https://github.com/js051/open-eos-control/actions/runs/39267392824) 的固定診斷為 LiveView Stop HTTP200、event DELETE HTTP204，沒有 sensor-cleaning outcome 回覆，peer cleaning 仍0。
+- 補充僅失敗時讀既有 UI history 的 Stop confirmed/unknown/cancelled Bool，及既有 diagnostics 的四個固定 transport error 類別索引；未知只記 -1。三個 route 的 Bridge response headers 只記四個 framing Bool，不輸出值或相機上游 headers。
+- 診斷 DOM 查詢若失敗只記 unavailable=true，仍重拋原錯誤。沒有新增 request、重試、相機命令或 timeout。
+
+The sixth run confirms successful HTTP statuses for the two preceding Bridge control routes, but no cleaning response. Additional fixed booleans distinguish strict representation validation from subsequent admission. They describe Bridge responses only. A failed diagnostic query cannot replace the original test error.

@@ -2113,7 +2113,14 @@ async function run() {
       try { pathname = new URL(response.url()).pathname; } catch (_) { return; }
       const control = ["control/liveview/stop", "control/events", "sensor-cleaning/outcome"]
         .find(suffix => pathname.endsWith(`/maintenance/${suffix}`));
-      if (control && maintenanceResponses.length < 16) maintenanceResponses.push({ control, status: response.status() });
+      if (control && maintenanceResponses.length < 16) {
+        const headers = response.headers();
+        maintenanceResponses.push({ control, status: response.status(),
+          emptyLength: headers["content-length"] === undefined || headers["content-length"] === "0",
+          transferEncoded: headers["transfer-encoding"] !== undefined,
+          contentRanged: headers["content-range"] !== undefined,
+          identityEncoding: headers["content-encoding"] === undefined || headers["content-encoding"] === "identity" });
+      }
     };
     page.on("response", maintenanceResponseListener);
     page.once("dialog", (dialog) => dialog.accept());
@@ -2130,6 +2137,16 @@ async function run() {
       );
     } catch (error) {
       console.log("OEC_MAINTENANCE_RESPONSES", JSON.stringify(maintenanceResponses));
+      console.log("OEC_MAINTENANCE_ADMISSION", JSON.stringify(await page.evaluate(() => {
+        const detail = document.querySelector("[data-maintenance-history] .maintenance-command small")?.textContent || "";
+        let message = "";
+        try { message = JSON.parse(document.querySelector("#diagnostics-output")?.textContent || "{}").lastError?.message || ""; } catch (_) { /* Missing diagnostics stays unknown. */ }
+        const errors = ["Ambiguous setting response representation", "Ambiguous empty control response",
+          "Configuration response stream unavailable", "Maintenance control response unavailable"];
+        return { stopConfirmed: detail.includes("Stop preparation: Confirmed"),
+          stopUnknown: detail.includes("Stop preparation: Unknown"), cancelled: detail.includes("Cancelled"),
+          errorClass: errors.indexOf(message) };
+      }).catch(() => ({ unavailable: true }))));
       throw error;
     } finally {
       page.off("response", maintenanceResponseListener);
