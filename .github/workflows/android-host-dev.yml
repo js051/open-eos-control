@@ -1,0 +1,104 @@
+# Supplemental Android host-only validation; never substitutes for PR ci-complete.
+# No emulator, KVM, udev, release signing, or security-setting changes.
+name: Android host dev validation
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'android/**'
+      - 'scripts/release/verify-android-apk-signing.sh'
+      - '.github/workflows/android-host-dev.yml'
+      - '.github/workflows/android.yml'
+      - '.gitleaks.toml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-host-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository history for secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="gitleaks_8.30.1_linux_x64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/$archive"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/$archive" \
+            | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git . \
+            --config .gitleaks.toml \
+            --redact \
+            --no-banner \
+            --no-color \
+            --timeout 300
+
+      - name: Validate GitHub Actions workflows
+        run: bash scripts/ci/run-actionlint.sh
+
+  android-host:
+    needs: secret-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Prepare Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
+      - name: Build pull-request debug APK
+        run: ./gradlew :app:assembleDebug
+
+      - name: Smoke-test pull-request APK signer verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          verifier="../scripts/release/verify-android-apk-signing.sh"
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          actual="$(bash "$verifier" "$apk")"
+          printf '%s\n' "$actual" > "$RUNNER_TEMP/pull-request-certificate-sha256.txt"
+          bash "$verifier" "$apk" "$RUNNER_TEMP/pull-request-certificate-sha256.txt"
+
+      - name: Upload Android host validation results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-host-validation-results
+          path: |
+            android/app/build/reports/tests/testDebugUnitTest
+            android/app/build/test-results/testDebugUnitTest
+            android/app/build/outputs/apk/debug/app-debug.apk
+            ${{ runner.temp }}/pull-request-certificate-sha256.txt
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
