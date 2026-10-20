@@ -28,3 +28,23 @@ CameraOrientationTest／MediaLibraryTest 所需原 Lifecycle runtime-compose 2.8
 ## Release Assessment
 
 `none`：恢復原測試所需合法 host runtime，沒有版本、tag 或 release。
+
+## 2026-10-20：完整 Gradle host 閉包已驗證 / Full Gradle host closure verified
+
+以上 2026-10-18 的限制保留為歷史。2026-10-20 02:57:50 UTC，[Android host run 39360736976](https://github.com/js051/open-eos-control/actions/runs/39360736976) 在精確 dev head [`bd9cf61365809c4ad14a1fa8f4469bb6def936fc`](https://github.com/js051/open-eos-control/commit/bd9cf61365809c4ad14a1fa8f4469bb6def936fc) 成功。原 JDK 17／Gradle 8.7 執行 `:app:testDebugUnitTest` 與 `:app:assembleDebug`，使用未修改的 Google Maven／Maven Central 依賴宣告與完整 Compose／Media3 UI 來源閉包，沒有抽離 helper、替代 collaborator、排除測試或放寬斷言。
+
+XML 合計 **164 suites／1,867 tests／0 failures／0 errors／0 skipped**。先前剩餘五類已在同一原 Gradle 批次執行：CameraVideoPlaybackTest **2**、CameraViewModelPreviewTest **20**、MediaViewerTransformTest **3**、CameraOrientationTest **17**、MediaLibraryTest **28**，全部通過；不再維持這五類 host 材料阻塞狀態。
+
+AndroidCcapiRtpSessionTest **11/11** 通過，包含原三項負向案例：
+
+- `encodedSpsPpsAndKeyFrameDoNotProveDecoderReadiness`
+- `sdpParameterSetsAndEncodedKeyFrameDoNotProveDecoderReadiness`
+- `decoderFailureRetiresEncodedOnlyInputAndReplaysFailureToALateListener`
+
+這僅關閉原 host 執行缺口：截斷合成 SPS／PPS／keyframe 不得宣告 ready，以及 decoder failure／no rendered frame／late listener failure replay 的原斷言通過，**不證明真 MediaCodec 解碼或輸出畫面**。
+
+完整 debug APK 建置與 signer smoke 通過。APK 20,396,732 bytes，SHA-256 `b06b3cd4d017f2b647b62ac25c07d3039489288373f9e3a6ccd6bbd551deec6c`。[原 XML、HTML 報告、APK 與 signer 收據 artifact](https://github.com/js051/open-eos-control/actions/runs/39360736976/artifacts/12237891744) 的 ZIP SHA-256 為 `9d5ef73d3ed1f2d2d46ad8f7e80373db93d75ce15302e61ec1da0a8373b4062b`；CI artifact 保留 7 天。完整歷史 secret scan 與 actionlint 同時通過。此批僅新增 supplemental host workflow，未修改產品、原測試或原 PR CI；沒有執行 emulator／KVM／udev、安全設定變更、main merge、tag 或 release。
+
+**English:** The exact-head run above passed the unchanged full Gradle unit suite (1,867 tests, zero failures/errors/skips), debug APK build and signer smoke. The five previously blocked UI-source suites and three negative RTP cases are now verified in their original host test context, without reduced assertions or substitute implementations. Full-history secret scanning and actionlint also passed. This does not establish real codec output, Compose instrumentation, GPU/Surface rendering, physical-camera/USB/device compatibility, or PR `ci-complete`. Historical instrumentation failures remain unresolved by this host run. No emulator, security-setting change, merge or release occurred.
+
+Release Assessment: **none**，只補 host 驗證與證據；instrumentation、實機及正式接受／發布門檻維持獨立。This is verification/CI documentation only, not release acceptance.
