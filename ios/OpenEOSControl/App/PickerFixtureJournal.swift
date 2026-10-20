@@ -10,6 +10,7 @@ enum PickerFixtureJournal {
         case controllerCreated = "controller-created"
         case presentationRequested = "presentation-requested"
         case presentationCompleted = "presentation-completed"
+        case presenterRetained = "presenter-retained"
         case presenterDisappeared = "presenter-disappeared"
         case selected, cancelled, dismantle
         case retirementObserved = "retirement-observed"
@@ -30,6 +31,7 @@ enum PickerFixtureJournal {
         case outcomeVerified = "outcome-verified"
         case presenterDeinit = "presenter-deinit"
         case coordinatorDeinit = "coordinator-deinit"
+        case sessionRetired = "session-retired"
     }
     enum Scenario: String, Sendable { case success, cancel, lostAck = "lost-ack" }
     enum Language: String, Sendable { case english, traditionalChinese }
@@ -63,7 +65,7 @@ enum PickerFixtureJournal {
         #if DEBUG && OEC_REQUIRE_SIMULATOR_E2E
         guard ticket.isEnabled else { return }
         storage.append(line(stage, ticket: ticket, now: ProcessInfo.processInfo.systemUptime,
-            presented: presented, transitioning: transitioning, dismissing: dismissing, flag: flag))
+            presented: presented, transitioning: transitioning, dismissing: dismissing, flag: flag), ticket: ticket)
         #endif
     }
 
@@ -106,6 +108,38 @@ enum PickerFixtureJournal {
         return Data()
     }
 
+    /// These first sixteen openings have independent, nonrotating identities.
+    /// Each keeps the same bounded window as the aggregate, but later openings
+    /// can never evict it. No user-provided filename or path enters this mapping.
+    static let openingOrdinals = 1...16
+
+    static func openingJournalName(for ordinal: Int) -> String? {
+        guard openingOrdinals.contains(ordinal) else { return nil }
+        return "eos-picker-lifecycle-opening-\(ordinal).txt"
+    }
+
+    static func boundedOpeningJournal(_ lines: [String], ordinal: Int) -> Data? {
+        guard openingOrdinals.contains(ordinal), lines.allSatisfy({ line in
+            let fields = line.split(separator: " ", omittingEmptySubsequences: false)
+            return isValidLine(line) && fields.count == 10
+                && fields[0] == "v2" && fields[1] == "ticket=\(ordinal)"
+        }) else { return nil }
+        return boundedJournal(lines)
+    }
+
+    static func nextTicketOrdinal(in lines: [String], lastOrdinal: Int,
+                                  highestOccupiedOpening: Int) -> Int? {
+        guard (0...9_999).contains(lastOrdinal), (0...16).contains(highestOccupiedOpening),
+              lines.allSatisfy(isValidLine) else { return nil }
+        let aggregateOrdinal = lines.compactMap { line -> Int? in
+            let fields = line.split(separator: " ")
+            guard fields.first == "v2", fields.count == 10 else { return nil }
+            return boundedInteger(String(fields[1]), key: "ticket", range: 1...9_999)
+        }.max() ?? 0
+        let prior = max(lastOrdinal, max(aggregateOrdinal, highestOccupiedOpening))
+        return prior < 9_999 ? prior + 1 : nil
+    }
+
     private static func value(_ field: String, key: String) -> String? {
         guard field.hasPrefix(key + "=") else { return nil }
         return String(field.dropFirst(key.count + 1))
@@ -125,28 +159,53 @@ enum PickerFixtureJournal {
     /// no UI objects and dispatches no work, so it cannot extend their lifetimes.
     private final class Storage: @unchecked Sendable {
         private let lock = NSLock()
+        private var lastOrdinal = 0
         func makeTicket(scenario: Scenario, language: Language) -> Ticket {
             lock.lock(); defer { lock.unlock() }
             do {
                 guard let url = journalURL(), let lines = try read(url) else { return .disabled }
-                let prior = lines.compactMap { line -> Int? in
-                    let fields = line.split(separator: " ")
-                    guard fields.first == "v2", fields.count == 10 else { return nil }
-                    return PickerFixtureJournal.boundedInteger(String(fields[1]), key: "ticket", range: 1...9_999)
-                }.max() ?? 0
-                guard prior < 9_999 else { return .disabled }
-                let ticket = Ticket(ordinal: prior + 1, startedUptime: ProcessInfo.processInfo.systemUptime,
+                // Late callbacks can rotate a newer ticket out of the aggregate.
+                // A high-water mark protects this process; occupied fixed slots
+                // protect earlier openings across fixture app relaunches as well.
+                let occupiedOrdinal = try highestOccupiedOpening(in: url.deletingLastPathComponent())
+                guard let ordinal = PickerFixtureJournal.nextTicketOrdinal(in: lines,
+                    lastOrdinal: lastOrdinal, highestOccupiedOpening: occupiedOrdinal) else { return .disabled }
+                let ticket = Ticket(ordinal: ordinal, startedUptime: ProcessInfo.processInfo.systemUptime,
                     scenario: scenario, language: language)
-                try write(lines + [PickerFixtureJournal.line(.selectionCreated, ticket: ticket, now: ticket.startedUptime)], to: url)
+                let firstLine = PickerFixtureJournal.line(.selectionCreated, ticket: ticket, now: ticket.startedUptime)
+                try write(lines + [firstLine], to: url)
+                lastOrdinal = ticket.ordinal
+                appendOpening(firstLine, ticket: ticket, aggregateURL: url)
                 return ticket
             } catch { return .disabled }
         }
-        func append(_ line: String) {
+        func append(_ line: String, ticket: Ticket) {
             lock.lock(); defer { lock.unlock() }
+            guard let url = journalURL() else { return }
             do {
-                guard let url = journalURL(), let lines = try read(url) else { return }
-                try write(lines + [line], to: url)
+                if let lines = try read(url) { try write(lines + [line], to: url) }
             } catch { /* Diagnostics cannot alter admission or outcomes. */ }
+            appendOpening(line, ticket: ticket, aggregateURL: url)
+        }
+        private func highestOccupiedOpening(in cache: URL) throws -> Int {
+            for ordinal in PickerFixtureJournal.openingOrdinals.reversed() {
+                guard let name = PickerFixtureJournal.openingJournalName(for: ordinal) else { continue }
+                do {
+                    // Even an invalid, empty or symlink slot is consumed, never
+                    // reassigned. Its contents are read only through read below.
+                    _ = try FileManager.default.attributesOfItem(atPath: cache.appendingPathComponent(name).path)
+                    return ordinal
+                } catch let error as CocoaError where error.code == .fileReadNoSuchFile { continue }
+            }
+            return 0
+        }
+        private func appendOpening(_ line: String, ticket: Ticket, aggregateURL: URL) {
+            guard let name = PickerFixtureJournal.openingJournalName(for: ticket.ordinal) else { return }
+            let url = aggregateURL.deletingLastPathComponent().appendingPathComponent(name)
+            do {
+                guard let lines = try read(url) else { return }
+                try write(lines + [line], to: url, openingOrdinal: ticket.ordinal)
+            } catch { /* A damaged optional slot cannot suppress the aggregate. */ }
         }
         private func journalURL() -> URL? {
             guard let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
@@ -172,8 +231,14 @@ enum PickerFixtureJournal {
             guard records.count <= 128, records.allSatisfy(PickerFixtureJournal.isValidLine) else { return nil }
             return records
         }
-        private func write(_ lines: [String], to url: URL) throws {
-            guard let bytes = PickerFixtureJournal.boundedJournal(lines), bytes.count <= 16_384 else { return }
+        private func write(_ lines: [String], to url: URL, openingOrdinal: Int? = nil) throws {
+            let data: Data?
+            if let openingOrdinal {
+                data = PickerFixtureJournal.boundedOpeningJournal(lines, ordinal: openingOrdinal)
+            } else {
+                data = PickerFixtureJournal.boundedJournal(lines)
+            }
+            guard let bytes = data, bytes.count <= 16_384 else { return }
             try bytes.write(to: url, options: .atomic)
         }
     }

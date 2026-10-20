@@ -22,13 +22,22 @@ class IOSMediaUploadSourceTests(unittest.TestCase):
         self.assertIn("guard !invalidated, !completed else { return }", picker)
         self.assertIn("coordinator.invalidate()", picker)
         self.assertIn("picker.modalPresentationStyle = .overFullScreen", picker)
-        self.assertIn("present(picker, animated: true)", picker)
+        self.assertIn("host.present(picker, animated: true, completion: completion)", picker)
         self.assertIn("if cancelled || isPresented() { dismiss() }", picker)
         self.assertIn("if !registered { dismiss() }", picker)
         self.assertIn("guard !isPresented() else { return }", picker)
-        self.assertIn(
-            "func updateUIViewController(_ controller: Presenter, context: Context) {}", picker
-        )
+        # The stable host updates pending intent, never an existing opening's callback.
+        self.assertIn("controller.update(selection: selection, completion: completion)", picker)
+        opening = picker.split("private struct Opening {", 1)[1].split("final class Session", 1)[0]
+        self.assertIn("let selection: MediaUploadSelection", opening)
+        self.assertIn("let completion: (MediaUploadSelection, [URL]?) -> Void", opening)
+        self.assertIn("Session(selection: opening.selection, completion: opening.completion)", picker)
+        self.assertIn("if let selection, selection == pending?.selection { advance(); return }", picker)
+        self.assertIn("presentation.present(self, session.picker) { [self, session] in", picker)
+        self.assertIn("presentation.retire(session.picker, ticket) { [self, session] in", picker)
+        self.assertIn("session.coordinator.retirement = { [weak self, weak session] completion in", picker)
+        self.assertIn("guard session.presentationCompleted, !session.retirementStarted else { return }", picker)
+        self.assertNotIn(".sheet(item: $uploadSelection", view)
 
     def test_app_releases_grant_once_and_never_confirms_by_listing(self):
         app = (APP / "CameraAppState.swift").read_text()

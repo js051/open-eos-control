@@ -388,6 +388,168 @@ final class MediaResponseOwnershipTests: XCTestCase {
         XCTAssertEqual(completions, 1)
     }
 
+    func testGalleryPresenterSurvivesSelectionAndCancelWithoutReplacingItsHost() throws {
+        let probe = PickerPresentationProbe()
+        let presenter = MediaUploadPicker.Presenter(presentation: probe.presentation)
+        var deliveries: [(MediaUploadSelection, [URL]?)] = []
+        for selected in [true, false] {
+            let opening = MediaUploadSelection(owner: UUID())
+            presenter.update(selection: opening) { deliveries.append(($0, $1)) }
+            let session = try XCTUnwrap(presenter.active)
+            XCTAssertEqual(session.coordinator.selection, opening)
+            XCTAssertEqual(session.picker.view.accessibilityIdentifier, "media-upload-document-picker")
+            XCTAssertEqual(session.picker.modalPresentationStyle, .overFullScreen)
+            XCTAssertFalse(session.picker.allowsMultipleSelection)
+            try probe.finishPresentation()
+            let before = deliveries.count
+            if selected {
+                session.coordinator.documentPicker(session.picker, didPickDocumentsAt: [URL(fileURLWithPath: "/synthetic/SELECTED.JPG")])
+            } else { session.coordinator.documentPickerWasCancelled(session.picker) }
+            XCTAssertEqual(deliveries.count, before)
+            XCTAssertTrue(presenter.active === session)
+            try probe.finishRetirement()
+            XCTAssertNil(presenter.active)
+            XCTAssertEqual(deliveries.count, before + 1)
+            XCTAssertEqual(deliveries.last?.0, opening)
+            XCTAssertEqual(deliveries.last?.1 != nil, selected)
+            presenter.update(selection: nil) { _, _ in XCTFail("No replacement completion") }
+        }
+        XCTAssertEqual(probe.presenters, [ObjectIdentifier(presenter), ObjectIdentifier(presenter)])
+        XCTAssertEqual(probe.retiredPickers.count, 2)
+    }
+
+    func testReplacementWaitsForBothPresentationAndRetirementOfTheOldOpening() throws {
+        let probe = PickerPresentationProbe()
+        let presenter = MediaUploadPicker.Presenter(presentation: probe.presentation)
+        let first = MediaUploadSelection(owner: UUID()), second = MediaUploadSelection(owner: UUID())
+        var firstDeliveries = 0, secondDeliveries = 0
+        presenter.update(selection: first) { _, _ in firstDeliveries += 1 }
+        let old = try XCTUnwrap(presenter.active)
+        presenter.update(selection: second) { opening, _ in
+            XCTAssertEqual(opening, second); secondDeliveries += 1
+        }
+        old.coordinator.documentPicker(old.picker, didPickDocumentsAt: [URL(fileURLWithPath: "/synthetic/OLD.JPG")])
+        XCTAssertEqual(probe.presenters.count, 1)
+        XCTAssertTrue(probe.retiredPickers.isEmpty, "Never dismiss during the held presentation transition")
+        try probe.finishPresentation()
+        XCTAssertEqual(probe.retiredPickers.count, 1)
+        XCTAssertEqual(probe.presenters.count, 1)
+        try probe.finishRetirement()
+        XCTAssertEqual(probe.presenters.count, 2)
+        let fresh = try XCTUnwrap(presenter.active)
+        XCTAssertEqual(fresh.coordinator.selection, second)
+        XCTAssertFalse(fresh === old)
+        old.coordinator.documentPickerWasCancelled(old.picker)
+        XCTAssertEqual(firstDeliveries, 0)
+        XCTAssertEqual(secondDeliveries, 0)
+        try probe.finishPresentation()
+        fresh.coordinator.documentPickerWasCancelled(fresh.picker)
+        try probe.finishRetirement()
+        XCTAssertEqual(secondDeliveries, 1)
+    }
+
+    func testGalleryRemovalKeepsOwnerThroughPublicReceiptsThenReleasesIt() throws {
+        let probe = PickerPresentationProbe()
+        var presenter: MediaUploadPicker.Presenter? = .init(presentation: probe.presentation)
+        weak var weakPresenter = presenter
+        var deliveries = 0
+        presenter?.update(selection: MediaUploadSelection(owner: UUID())) { _, _ in deliveries += 1 }
+        weak var weakSession = presenter?.active
+        weak var weakCoordinator = presenter?.active?.coordinator
+        presenter?.dismantle()
+        presenter?.dismantle()
+        presenter = nil
+        XCTAssertNotNil(weakPresenter, "The registered presentation receipt owns the detached host")
+        XCTAssertNotNil(weakSession)
+        XCTAssertTrue(probe.retiredPickers.isEmpty)
+        try probe.finishPresentation()
+        XCTAssertEqual(probe.retiredPickers.count, 1)
+        XCTAssertNotNil(weakPresenter, "The registered dismissal receipt now owns the detached host")
+        try probe.finishRetirement()
+        XCTAssertNil(weakPresenter)
+        XCTAssertNil(weakSession)
+        XCTAssertNil(weakCoordinator)
+        XCTAssertEqual(deliveries, 0)
+    }
+
+    func testRemovalDuringHeldSelectionRetirementRejectsDeliveryAndPendingReopen() throws {
+        let probe = PickerPresentationProbe()
+        let presenter = MediaUploadPicker.Presenter(presentation: probe.presentation)
+        let first = MediaUploadSelection(owner: UUID()), second = MediaUploadSelection(owner: UUID())
+        var deliveries = 0
+        presenter.update(selection: first) { _, _ in deliveries += 1 }
+        try probe.finishPresentation()
+        let old = try XCTUnwrap(presenter.active)
+        old.coordinator.documentPicker(old.picker, didPickDocumentsAt: [URL(fileURLWithPath: "/synthetic/OLD.JPG")])
+        presenter.update(selection: second) { _, _ in deliveries += 1 }
+        presenter.dismantle()
+        try probe.finishRetirement()
+        presenter.update(selection: second) { _, _ in deliveries += 1 }
+        old.coordinator.documentPickerWasCancelled(old.picker)
+        XCTAssertEqual(probe.presenters.count, 1)
+        XCTAssertEqual(probe.retiredPickers.count, 1)
+        XCTAssertNil(presenter.active)
+        XCTAssertEqual(deliveries, 0)
+    }
+
+    func testPendingOpeningUsesLatestImmutableCallbackOnlyAfterHostIsReady() throws {
+        let probe = PickerPresentationProbe()
+        probe.ready = false
+        let presenter = MediaUploadPicker.Presenter(presentation: probe.presentation)
+        let first = MediaUploadSelection(owner: UUID()), second = MediaUploadSelection(owner: UUID())
+        var delivered: [MediaUploadSelection] = []
+        presenter.update(selection: first) { _, _ in XCTFail("Superseded before presentation") }
+        presenter.update(selection: nil) { _, _ in XCTFail("No opening") }
+        presenter.update(selection: second) { opening, _ in delivered.append(opening) }
+        XCTAssertNil(presenter.active)
+        probe.ready = true
+        presenter.update(selection: second) { _, _ in XCTFail("An update cannot retarget the captured callback") }
+        XCTAssertEqual(probe.presenters.count, 1)
+        let session = try XCTUnwrap(presenter.active)
+        try probe.finishPresentation()
+        session.coordinator.documentPickerWasCancelled(session.picker)
+        try probe.finishRetirement()
+        XCTAssertEqual(delivered, [second])
+    }
+
+    func testConsumedOpeningAndDuplicateReceiptsCannotReopenOrRetireANewPicker() throws {
+        let probe = PickerPresentationProbe()
+        let presenter = MediaUploadPicker.Presenter(presentation: probe.presentation)
+        let first = MediaUploadSelection(owner: UUID()), second = MediaUploadSelection(owner: UUID())
+        var deliveries = 0
+        presenter.update(selection: first) { _, _ in deliveries += 1 }
+        let old = try XCTUnwrap(presenter.active)
+        let presented = try probe.takePresentation()
+        presented(); presented()
+        old.coordinator.documentPickerWasCancelled(old.picker)
+        old.coordinator.documentPickerWasCancelled(old.picker)
+        let retired = try probe.takeRetirement()
+        retired(); retired()
+        presenter.update(selection: first) { _, _ in XCTFail("Consumed ticket must not reopen") }
+        XCTAssertEqual(probe.presenters.count, 1)
+        presenter.update(selection: second) { _, _ in deliveries += 1 }
+        let fresh = try XCTUnwrap(presenter.active)
+        presented(); retired()
+        XCTAssertTrue(presenter.active === fresh)
+        XCTAssertEqual(probe.retiredPickers.count, 1)
+        XCTAssertEqual(deliveries, 1)
+        try probe.finishPresentation()
+        fresh.coordinator.documentPickerWasCancelled(fresh.picker)
+        try probe.finishRetirement()
+        XCTAssertEqual(deliveries, 2)
+    }
+
+    func testNoModalRetirementRemainsSynchronousAndOneShotWithoutInventedQuiescence() {
+        var deliveries = 0
+        let retirement = MediaUploadPicker.Retirement(isPresented: { false },
+            dismiss: { _ in XCTFail("There is no modal relationship to dismiss") },
+            completion: { deliveries += 1 })
+        retirement.dismiss()
+        XCTAssertEqual(deliveries, 1)
+        retirement.dismiss()
+        XCTAssertEqual(deliveries, 1)
+    }
+
     func testRejectedProviderGrantNeverDispatchesAndDoesNotReleaseAnUnacquiredGrant() async throws {
         let peer = MediaOwnershipPeer()
         let state = makeState([peer])
@@ -873,6 +1035,34 @@ final class MediaResponseOwnershipTests: XCTestCase {
     }
 
     private func removeUpload(_ file: URL) { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+}
+
+/// Holds the same public ownership receipts used by Presenter. It does not
+/// present a provider or simulate UIKit/XPC behavior; native UI tests do that.
+@MainActor
+private final class PickerPresentationProbe {
+    var ready = true
+    var presenters: [ObjectIdentifier] = []
+    var retiredPickers: [ObjectIdentifier] = []
+    private var presentations: [() -> Void] = []
+    private var retirements: [() -> Void] = []
+    var presentation: MediaUploadPicker.Presenter.Presentation {
+        .init(isReady: { [self] _ in ready }, present: { [self] host, _, done in
+            presenters.append(ObjectIdentifier(host)); presentations.append(done)
+        }, retire: { [self] picker, _, done in
+            retiredPickers.append(ObjectIdentifier(picker)); retirements.append(done)
+        })
+    }
+    func takePresentation() throws -> () -> Void {
+        guard !presentations.isEmpty else { XCTFail("Missing presentation receipt"); throw CocoaError(.coderInvalidValue) }
+        return presentations.removeFirst()
+    }
+    func takeRetirement() throws -> () -> Void {
+        guard !retirements.isEmpty else { XCTFail("Missing retirement receipt"); throw CocoaError(.coderInvalidValue) }
+        return retirements.removeFirst()
+    }
+    func finishPresentation() throws { try takePresentation()() }
+    func finishRetirement() throws { try takeRetirement()() }
 }
 
 private enum OwnershipOperation: String, Sendable {

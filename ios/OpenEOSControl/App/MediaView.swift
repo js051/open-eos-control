@@ -17,8 +17,6 @@ struct MediaView: View {
     @State private var metadataPresentation: MediaMetadataPresentation?
     @State private var pendingPreviewMetadataPresentation: MediaMetadataPresentation?
     @State private var uploadSelection: MediaUploadSelection?
-    // Synthetic value only, retained across selection=nil for the sheet receipt.
-    @State private var uploadFixtureTicket = PickerFixtureJournal.Ticket.disabled
     @State private var mediaFilter = MediaFilter.all
     @State private var mediaSort = MediaSort.newest
     @State private var isFolderFilterPresented = false
@@ -99,23 +97,15 @@ struct MediaView: View {
             camera.refreshMediaDateDisplayZone()
             if camera.mediaItems.isEmpty { camera.startMediaLibraryLoad() }
         }
-        .sheet(item: $uploadSelection, onDismiss: {
-            PickerFixtureJournal.record(.sheetDismissed, ticket: uploadFixtureTicket)
-            if uploadFixtureTicket.isEnabled { uploadFixtureTicket = .disabled }
-        }) { selection in
-            MediaUploadPicker(selection: selection) { opening, urls in
-                if uploadSelection == opening {
-                    PickerFixtureJournal.record(.sheetClear, ticket: opening.fixtureTicket)
-                    uploadSelection = nil
-                }
+        .background {
+            // One gallery-lifetime UIKit presenter; selection=nil does not tear it down.
+            MediaUploadPicker(selection: uploadSelection) { opening, urls in
+                if uploadSelection == opening { uploadSelection = nil }
                 guard let url = urls?.first else { camera.cancelMediaUploadSelection(opening); return }
                 let started = camera.startMediaUpload(url, selection: opening, access: .securityScoped)
                 PickerFixtureJournal.record(.uploadReturned, ticket: opening.fixtureTicket, flag: started)
             }
-            .onDisappear {
-                PickerFixtureJournal.record(.sheetDisappeared, ticket: selection.fixtureTicket)
-                camera.cancelMediaUploadSelection(selection)
-            }
+            .frame(width: 0, height: 0)
         }
         .onDisappear {
             if let selection = uploadSelection { camera.cancelMediaUploadSelection(selection) }
@@ -421,7 +411,6 @@ struct MediaView: View {
         } else {
             Button {
                 uploadSelection = camera.beginMediaUploadSelection()
-                if let ticket = uploadSelection?.fixtureTicket, ticket.isEnabled { uploadFixtureTicket = ticket }
             } label: {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "arrow.up.circle")
