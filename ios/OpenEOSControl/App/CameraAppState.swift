@@ -303,6 +303,7 @@ final class CameraAppState: ObservableObject {
     private var mediaUploadSelection: MediaUploadSelection?
     private var mediaUploadAttempt: CameraMediaUploadAttempt?
     private var mediaUploadOwner: UUID?
+    private var mediaUploadFixtureTicket = PickerFixtureJournal.Ticket.disabled
     @Published private(set) var deletedMediaName: String?
     @Published private(set) var maintenanceHistory: [MaintenanceRecord] = []
     @Published private(set) var maintenanceCurrentID: UUID?
@@ -4437,8 +4438,10 @@ final class CameraAppState: ObservableObject {
             busy: mediaLibraryLoading || isBusy(.media), sourceSelected: true)
         if mediaUploadSelection == selection { mediaUploadSelection = nil }
         guard admitted, let session, begin(.media) else { return false }
+        mediaUploadFixtureTicket = selection.fixtureTicket
         guard access.acquire(fileURL) else {
             publishMediaUploadResult(filename: fileURL.lastPathComponent, owner: selection.owner, attempt: CameraMediaUploadAttempt())
+            mediaUploadFixtureTicket = .disabled
             mediaUploadError = CocoaError(.fileReadNoPermission).localizedDescription
             end(.media)
             return false
@@ -4482,6 +4485,11 @@ final class CameraAppState: ObservableObject {
         let receipt = evidence.receipt
         mediaUploadResult = MediaUploadResult(attemptID: attempt.id, owner: owner,
             filename: receipt?.name ?? filename, outcome: evidence.outcome, receipt: receipt)
+        switch evidence.outcome {
+        case .notSent: PickerFixtureJournal.record(.outcomeNotSent, ticket: mediaUploadFixtureTicket)
+        case .uncertain: PickerFixtureJournal.record(.outcomeUncertain, ticket: mediaUploadFixtureTicket)
+        case .verified: PickerFixtureJournal.record(.outcomeVerified, ticket: mediaUploadFixtureTicket)
+        }
         uploadedMediaName = receipt?.name
         mediaUploadError = nil
         if receipt != nil {
@@ -4503,6 +4511,7 @@ final class CameraAppState: ObservableObject {
                 mediaUploadToken = nil
                 mediaUploadAttempt = nil
                 mediaUploadOwner = nil
+                mediaUploadFixtureTicket = .disabled
                 activeMediaUploadName = nil
                 mediaUploadProgress = nil
                 end(.media)
@@ -5657,6 +5666,7 @@ final class CameraAppState: ObservableObject {
         mediaUploadToken = nil
         mediaUploadAttempt = nil
         mediaUploadOwner = nil
+        mediaUploadFixtureTicket = .disabled
         activeMediaUploadName = nil
         mediaUploadProgress = nil
         mediaUploadError = nil

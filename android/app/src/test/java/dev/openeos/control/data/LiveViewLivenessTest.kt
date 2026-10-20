@@ -20,9 +20,22 @@ class LiveViewLivenessTest {
         for ((sequence, nal) in listOf(0x67, 0x68, 0x06).withIndex()) {
             assertFalse(checkNotNull(reader.accept(packet(sequence, nal))).hasPicture)
         }
-        assertTrue(checkNotNull(reader.accept(packet(4, 0x65))).hasPicture)
-        assertTrue(checkNotNull(reader.accept(packet(5, 0x61))).hasPicture)
-        assertFalse(checkNotNull(reader.accept(packet(6, 0x67))).hasPicture)
+        // Contiguous RTP sequence: this case distinguishes NAL roles, not packet loss.
+        assertTrue(checkNotNull(reader.accept(packet(3, 0x65))).hasPicture)
+        assertTrue(checkNotNull(reader.accept(packet(4, 0x61))).hasPicture)
+        assertFalse(checkNotNull(reader.accept(packet(5, 0x67))).hasPicture)
+    }
+
+    @Test fun gapContainingPictureCannotRefreshInputProgressAndRecoveryRetainsLossEvidence() {
+        val reader = H264RtpDepacketizer(103)
+        fun packet(sequence: Int, nal: Int) = byteArrayOf(0x80.toByte(), (0x80 or 103).toByte(), 0, sequence.toByte(),
+            0, 0, 0, sequence.toByte(), 0, 0, 0, 1, nal.toByte(), 1)
+        assertFalse(checkNotNull(reader.accept(packet(0, 0x06))).hasPicture)
+        // Missing sequence 1 makes even this complete single-NAL IDR untrustworthy.
+        assertNull(reader.accept(packet(2, 0x65)))
+        val recovery = checkNotNull(reader.accept(packet(3, 0x65)))
+        assertTrue(recovery.hasPicture)
+        assertTrue(recovery.discontinuity)
     }
 
     @Test fun firstOutputAndEveryFollowingOutputHaveABoundedDeadline() {

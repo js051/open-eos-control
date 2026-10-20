@@ -12,15 +12,39 @@ DATA = ROOT / "android/app/src/main/java/dev/openeos/control/data"
 
 
 class H264StartupSourceTests(unittest.TestCase):
-    def test_platform_format_uses_exact_config_csd_and_dimensions_without_color_override(self):
+    def test_platform_format_uses_exact_config_csd_dimensions_and_complete_source_color(self):
         source = (DATA / "AndroidH264DecoderFormat.kt").read_text()
         self.assertIn('"video/avc", configuration.width, configuration.height', source)
         self.assertIn('setByteBuffer("csd-0", ByteBuffer.wrap(configuration.csd0))', source)
         self.assertIn('setByteBuffer("csd-1", ByteBuffer.wrap(configuration.csd1))', source)
-        self.assertNotIn("KEY_COLOR_", source)
-        self.assertNotIn("COLOR_STANDARD_", source)
+        self.assertIn("configuration.color.completeDecoderColorHints()?.let { color ->", source)
+        for key, field, values in (
+            ("STANDARD", "standard", ("BT709", "BT601_PAL", "BT601_NTSC", "BT2020")),
+            ("RANGE", "range", ("FULL", "LIMITED")),
+            ("TRANSFER", "transfer", ("LINEAR", "SDR_VIDEO", "ST2084", "HLG")),
+        ):
+            self.assertEqual(source.count(f"setInteger(MediaFormat.KEY_COLOR_{key},"), 1)
+            self.assertIn(f"setInteger(MediaFormat.KEY_COLOR_{key}, when (color.{field})", source)
+            for value in values:
+                self.assertIn(f".{value} -> MediaFormat.COLOR_{key}_{value}", source)
+        self.assertNotIn("KEY_COLOR_TRANSFER_REQUEST", source)
         self.assertIn("FEATURE_LowLatency", source)
         self.assertIn("setInteger(MediaFormat.KEY_OPERATING_RATE, 30)", source)
+
+    def test_color_hints_do_not_infer_metadata_or_change_native_color_admission(self):
+        source = (DATA / "H264DecoderColorHints.kt").read_text()
+        self.assertIn("internal fun H264VuiColor.completeDecoderColorHints()", source)
+        self.assertIn("primaries == 1 && matrix == 1", source)
+        self.assertIn("null -> return null", source)
+        self.assertGreaterEqual(source.count("else -> return null"), 2)
+        for forbidden in ("Build.", "codec.name", "width", "height", "goldfish", "?: 1", "?: 3"):
+            self.assertNotIn(forbidden, source)
+        admission = (DATA / "NativeVideoLut.kt").read_text().split(
+            "internal fun nativeLutColorSupported(", 1
+        )[1].split("/**", 1)[0]
+        self.assertIn("standard in setOf(1, 2, 4)", admission)
+        self.assertIn("transfer == 3", admission)
+        self.assertIn("bitDepth == 8", admission)
 
     def test_production_and_native_pixel_test_use_the_same_format_builder(self):
         session = (DATA / "AndroidCcapiRtpSession.kt").read_text()
