@@ -21,11 +21,27 @@ BATTERY = PREFIX + "/devicestatus/batterylist"
 AF = PREFIX + "/shooting/control/af"
 MANUAL = PREFIX + "/shooting/control/shutterbutton/manual"
 BUDGET = 0.1
+OPTIONAL_STATUS_PATHS = (
+    "/functions/cardselection/stillimage", "/functions/cardselection/movie",
+    "/functions/beep", "/functions/displayoff",
+)
+OPTIONAL_STATUS_VALUES = {
+    "/functions/cardselection/stillimage": {"value": "card1", "ability": ["none", "card1", "card2"]},
+    "/functions/cardselection/movie": {"value": "card2", "ability": ["none", "card1", "card2"]},
+    "/functions/beep": {"value": "enable", "ability": ["enable", "disable", "disabletouch"]},
+    "/functions/displayoff": {"value": "60", "ability": ["10", "20", "30", "60", "120", "180"]},
+}
+OPTIONAL_SETTING_KEYS = {
+    "/functions/cardselection/stillimage": "cardselectionstillimage",
+    "/functions/cardselection/movie": "cardselectionmovie",
+    "/functions/beep": "beep",
+    "/functions/displayoff": "displayoff",
+}
 STATUS_PATHS = (
     "/devicestatus/batterylist", "/devicestatus/battery",
     "/devicestatus/storage", "/devicestatus/currentstorage", "/contents",
     "/shooting/information/recordable", "/devicestatus/lens", "/devicestatus/temperature",
-)
+) + OPTIONAL_STATUS_PATHS
 
 
 class StatusPeer:
@@ -37,6 +53,8 @@ class StatusPeer:
         self.slow_status = 200
         self.redirect_path = None
         self.reject_stop = False
+        self.values = {}
+        self.statuses = {}
         self.first_byte = threading.Event()
         self.closed = threading.Event()
         self._lock = threading.Lock()
@@ -63,9 +81,11 @@ class StatusPeer:
                     return
                 action = (payload or {}).get("action")
                 status = peer.slow_status if slow else (
-                    503 if peer.reject_stop and action in {"stop", "release"} else 200
+                    503 if peer.reject_stop and action in {"stop", "release"} else peer.statuses.get(path, 200)
                 )
-                value = {"shootingmode": {"value": "Bulb"}} if path.endswith("/shooting/settings") else {}
+                value = peer.values.get(
+                    path, {"shootingmode": {"value": "Bulb"}} if path.endswith("/shooting/settings") else {},
+                )
                 body = b" " * 40 + b"{}" if slow else json.dumps(value).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -135,6 +155,26 @@ def test_status_get_keeps_existing_redirect_policy(peer):
     assert peer.requests == [("GET", BATTERY, None), ("GET", "/status-target", None)]
 
 
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+def test_optional_status_slow_rejection_body_preserves_received_status(peer, suffix):
+    path = PREFIX + suffix
+    peer.slow_path, peer.slow_status = path, 503
+    started = time.monotonic()
+    response = UrllibCcapiTransport().request("GET", peer.origin + path, timeout=BUDGET)
+    assert response.status == 503 and response.body == b""
+    assert time.monotonic() - started < 0.4
+    assert peer.requests == [("GET", path, None)]
+
+
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+def test_optional_status_get_keeps_existing_redirect_policy(peer, suffix):
+    path = PREFIX + suffix
+    peer.redirect_path = path
+    response = UrllibCcapiTransport().request("GET", peer.origin + path, timeout=BUDGET)
+    assert response.status == 200 and response.body == b"{}"
+    assert peer.requests == [("GET", path, None), ("GET", "/status-target", None)]
+
+
 @pytest.mark.parametrize("suffix", STATUS_PATHS)
 @pytest.mark.parametrize("finished_at", [BUDGET, BUDGET + 0.01])
 def test_exact_status_routes_reject_bytes_at_or_after_absolute_deadline(suffix, finished_at):
@@ -193,6 +233,61 @@ def test_unrelated_routes_keep_legacy_body_policy(method, path):
     assert body.closed
 
 
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+@pytest.mark.parametrize("method", ["PUT", "POST", "DELETE", "HEAD"])
+def test_optional_status_non_get_methods_keep_legacy_body_policy(suffix, method):
+    body = BytesIO(b"{}")
+    transport = UrllibCcapiTransport()
+    with patch.object(transport, "_open", return_value=CcapiStreamResponse(200, {}, body)) as opened, patch(
+        "open_eos_bridge.ccapi.time.monotonic",
+    ) as clock:
+        assert transport.request(method, "http://192.0.2.1" + PREFIX + suffix).body == b"{}"
+    clock.assert_not_called()
+    assert opened.call_args.kwargs["follow_redirects"] is (method != "DELETE")
+    assert opened.call_args.kwargs["strict_control"] is False
+    assert body.closed
+
+
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+@pytest.mark.parametrize("tail", ["/unknown", "unknown", "/"])
+def test_optional_status_suffix_extensions_keep_legacy_body_policy(suffix, tail):
+    body = BytesIO(b"{}")
+    transport = UrllibCcapiTransport()
+    with patch.object(transport, "_open", return_value=CcapiStreamResponse(200, {}, body)), patch(
+        "open_eos_bridge.ccapi.time.monotonic",
+    ) as clock:
+        assert transport.request("GET", "http://192.0.2.1" + PREFIX + suffix + tail).body == b"{}"
+    clock.assert_not_called()
+    assert body.closed
+
+
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+def test_optional_status_open_stream_does_not_read_or_close_the_body(suffix):
+    class UnreadBody(BytesIO):
+        def read(self, _size=-1):
+            raise AssertionError("Opening a stream must not consume its response body")
+
+        read1 = read
+
+    body = UnreadBody(b"{}")
+    response = CcapiStreamResponse(200, {}, body)
+    transport = UrllibCcapiTransport()
+    url = "http://192.0.2.1" + PREFIX + suffix
+    try:
+        with patch.object(transport, "_open", return_value=response) as opened, patch(
+            "open_eos_bridge.ccapi.time.monotonic",
+        ) as clock:
+            assert transport.open_stream("GET", url, timeout=BUDGET) is response
+        clock.assert_not_called()
+        opened.assert_called_once_with(
+            "GET", url, headers=None, timeout=BUDGET, follow_redirects=True, strict_control=False,
+        )
+        assert not body.closed
+    finally:
+        response.close()
+    assert body.closed
+
+
 @pytest.mark.parametrize(("payload", "headers", "limit", "error"), [
     (b"1234", {"content-length": "4"}, 4, None),
     (b"12345", {}, 4, "CCAPI_RESPONSE_TOO_LARGE"),
@@ -228,6 +323,26 @@ def test_status_rejection_keeps_diagnostic_or_original_status_and_closes(broken)
     assert body.closed
 
 
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+@pytest.mark.parametrize("broken", [False, True])
+def test_optional_status_rejection_keeps_diagnostic_or_original_status_and_closes(suffix, broken):
+    class DiagnosticBody(BytesIO):
+        def read(self, size=-1):
+            if broken:
+                raise OSError("synthetic diagnostic read failure")
+            return super().read(size)
+
+        read1 = read
+
+    body = DiagnosticBody(b"diagnostic")
+    transport = UrllibCcapiTransport()
+    with patch.object(transport, "_open", return_value=CcapiStreamResponse(401, {}, body)):
+        response = transport.request("GET", "http://192.0.2.1" + PREFIX + suffix)
+    assert response.status == 401
+    assert response.body == (b"" if broken else b"diagnostic")
+    assert body.closed
+
+
 class TrackedBody:
     def __init__(self, body, trace, label):
         self.body, self.trace, self.label = body, trace, label
@@ -246,10 +361,11 @@ class TrackedBody:
 class ObservedTransport(UrllibCcapiTransport):
     """Keep real I/O; a test barrier holds the original producer before its exit."""
 
-    def __init__(self):
+    def __init__(self, observed_path=BATTERY):
         super().__init__()
         self.trace = []
         self.observe_next_status = False
+        self.observed_path = observed_path
         self.producer_ready = threading.Event()
         self.allow_producer_exit = threading.Event()
         self.stop_entered = threading.Event()
@@ -263,7 +379,7 @@ class ObservedTransport(UrllibCcapiTransport):
     def request(self, method, url, **kwargs):
         payload = json.loads(kwargs["body"]) if kwargs.get("body") else {}
         action = payload.get("action")
-        observed = self.observe_next_status and method == "GET" and urlsplit(url).path == BATTERY
+        observed = self.observe_next_status and method == "GET" and urlsplit(url).path == self.observed_path
         if observed:
             self.observe_next_status = False
         label = "status-producer" if observed else action or urlsplit(url).path
@@ -281,21 +397,103 @@ class ObservedTransport(UrllibCcapiTransport):
             self.trace.append((label, "exit"))
 
 
-def session_and_manager(peer):
-    transport = ObservedTransport()
+def session_and_manager(peer, optional_suffixes=(), observed_path=BATTERY):
+    transport = ObservedTransport(observed_path)
     session = CcapiSession(peer.origin, transport)
     session._initialized = True
-    # Optional card-selection/beep/display-off reads are not advertised here;
-    # the ordinary settings JSON and all non-armed reads return promptly.
+    # By default optional reads remain unadvertised, preserving the original
+    # battery-only fixture. Opt-in pairs use the same exact GET/PUT version.
     session._operations = {CcapiOperation("POST", AF), CcapiOperation("PUT", MANUAL)}
+    for suffix in optional_suffixes:
+        path = PREFIX + suffix
+        session._operations.update({CcapiOperation("GET", path), CcapiOperation("PUT", path)})
+        peer.values[path] = OPTIONAL_STATUS_VALUES[suffix]
     manager = SessionManager(Mock())
     identifier = manager._register(session).id
     return session, transport, manager, identifier
 
 
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+def test_optional_status_reads_only_its_advertised_same_version_pair_after_aggregate(peer, suffix):
+    session, _transport, _manager, _identifier = session_and_manager(peer, (suffix,))
+    assert session.status().mode == "Bulb"
+    assert peer.requests == [
+        ("GET", BATTERY, None), ("GET", PREFIX + "/devicestatus/storage", None),
+        ("GET", PREFIX + "/shooting/settings", None), ("GET", PREFIX + suffix, None),
+    ]
+    assert session._setting_paths[OPTIONAL_SETTING_KEYS[suffix]] == PREFIX + suffix
+
+
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+@pytest.mark.parametrize("advertisement", ["unadvertised", "get-only", "put-only", "mismatched"])
+def test_optional_status_without_matching_pair_keeps_aggregate_only_fallback(peer, suffix, advertisement):
+    session, _transport, _manager, _identifier = session_and_manager(peer)
+    path = PREFIX + suffix
+    if advertisement in {"get-only", "mismatched"}:
+        session._operations.add(CcapiOperation("GET", path))
+    if advertisement in {"put-only", "mismatched"}:
+        write_path = "/ccapi/ver110" + suffix if advertisement == "mismatched" else path
+        session._operations.add(CcapiOperation("PUT", write_path))
+    peer.slow_path = path
+    assert session.status().mode == "Bulb"
+    assert peer.requests == [
+        ("GET", BATTERY, None), ("GET", PREFIX + "/devicestatus/storage", None),
+        ("GET", PREFIX + "/shooting/settings", None),
+    ]
+    assert peer.slow_path == path
+    assert OPTIONAL_SETTING_KEYS[suffix] not in session._setting_paths
+
+
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+def test_optional_status_skips_newer_mismatched_pair_and_reads_original_pair(peer, suffix):
+    session, _transport, _manager, _identifier = session_and_manager(peer, (suffix,))
+    newer_read = "/ccapi/ver110" + suffix
+    session._operations.update({
+        CcapiOperation("GET", newer_read), CcapiOperation("PUT", "/ccapi/ver120" + suffix),
+    })
+    peer.slow_path = newer_read
+    assert session.status().mode == "Bulb"
+    assert peer.requests == [
+        ("GET", BATTERY, None), ("GET", PREFIX + "/devicestatus/storage", None),
+        ("GET", PREFIX + "/shooting/settings", None), ("GET", PREFIX + suffix, None),
+    ]
+    assert peer.slow_path == newer_read
+    assert session._setting_paths[OPTIONAL_SETTING_KEYS[suffix]] == PREFIX + suffix
+
+
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+def test_optional_status_http_rejection_keeps_other_advertised_reads(peer, suffix):
+    session, _transport, _manager, _identifier = session_and_manager(peer, OPTIONAL_STATUS_PATHS)
+    peer.statuses[PREFIX + suffix] = 404
+    assert session.status().mode == "Bulb"
+    assert peer.requests == [
+        ("GET", BATTERY, None), ("GET", PREFIX + "/devicestatus/storage", None),
+        ("GET", PREFIX + "/shooting/settings", None),
+        *(("GET", PREFIX + path, None) for path in OPTIONAL_STATUS_PATHS),
+    ]
+    assert OPTIONAL_SETTING_KEYS[suffix] not in session._setting_paths
+    for other in OPTIONAL_STATUS_PATHS:
+        if other != suffix:
+            assert session._setting_paths[OPTIONAL_SETTING_KEYS[other]] == PREFIX + other
+
+
 @pytest.mark.parametrize("cleanup", ["held-af", "owned-bulb", "close"])
 def test_status_timeout_joins_original_producer_before_saved_stop(peer, cleanup):
-    session, transport, manager, identifier = session_and_manager(peer)
+    _assert_status_timeout_joins_original_producer_before_saved_stop(peer, cleanup)
+
+
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+@pytest.mark.parametrize("cleanup", ["held-af", "owned-bulb", "close"])
+def test_optional_status_timeout_joins_original_producer_before_saved_stop(peer, suffix, cleanup):
+    _assert_status_timeout_joins_original_producer_before_saved_stop(
+        peer, cleanup, optional_suffixes=OPTIONAL_STATUS_PATHS, slow_path=PREFIX + suffix,
+    )
+
+
+def _assert_status_timeout_joins_original_producer_before_saved_stop(
+    peer, cleanup, *, optional_suffixes=(), slow_path=BATTERY,
+):
+    session, transport, manager, identifier = session_and_manager(peer, optional_suffixes, slow_path)
     owner = "synthetic-owner"
     if cleanup == "held-af":
         session.start_autofocus(owner)
@@ -313,7 +511,7 @@ def test_status_timeout_joins_original_producer_before_saved_stop(peer, cleanup)
             return session.close()
         return manager.stop_bulb_exposure(identifier, owner)
 
-    peer.slow_path = BATTERY
+    peer.slow_path = slow_path
     transport.observe_next_status = True
     outcomes = {}
     completed = {"status": threading.Event(), "stop": threading.Event()}
@@ -356,9 +554,14 @@ def test_status_timeout_joins_original_producer_before_saved_stop(peer, cleanup)
         ) < transport.trace.index((stop_action, "enter"))
         commands = [payload["action"] for _, _, payload in peer.requests if payload]
         assert commands == (["start", "stop"] if cleanup == "held-af" else ["full_press", "release"])
+        saved_operation = saved_stop[0] if cleanup == "held-af" else saved_stop
+        assert [(method, path) for method, path, payload in peer.requests
+                if payload and payload["action"] == stop_action] == [(saved_operation.method, saved_operation.path)]
         assert {path for method, path, _ in peer.requests if method == "GET"} <= {
             BATTERY, PREFIX + "/devicestatus/storage", PREFIX + "/shooting/settings",
-        }, "The fixture must not imply that optional status/settings routes are deadline-bounded"
+            *(PREFIX + suffix for suffix in optional_suffixes),
+        }, "Only explicitly advertised optional pairs may extend the fixture's status reads"
+        assert ("GET", slow_path, None) in peer.requests
         if cleanup == "held-af":
             assert outcomes["stop"].active is False
             assert session._short_control_release is None and session._held_autofocus_owner is None
@@ -380,11 +583,24 @@ def test_status_timeout_joins_original_producer_before_saved_stop(peer, cleanup)
 
 
 def test_status_timeout_does_not_retire_failed_saved_stop_or_replay_start(peer):
-    session, transport, manager, identifier = session_and_manager(peer)
+    _assert_status_timeout_does_not_retire_failed_saved_stop_or_replay_start(peer)
+
+
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+def test_optional_status_timeout_does_not_retire_failed_saved_stop_or_replay_start(peer, suffix):
+    _assert_status_timeout_does_not_retire_failed_saved_stop_or_replay_start(
+        peer, optional_suffixes=OPTIONAL_STATUS_PATHS, slow_path=PREFIX + suffix,
+    )
+
+
+def _assert_status_timeout_does_not_retire_failed_saved_stop_or_replay_start(
+    peer, *, optional_suffixes=(), slow_path=BATTERY,
+):
+    session, transport, manager, identifier = session_and_manager(peer, optional_suffixes)
     owner = "synthetic-owner"
     manager.start_bulb_exposure(identifier, owner)
     original = session._bulb_release_operation
-    peer.slow_path = BATTERY
+    peer.slow_path = slow_path
     with pytest.raises(BridgeError) as failure:
         session.status()
     assert failure.value.code == "CCAPI_UNREACHABLE"
@@ -402,10 +618,23 @@ def test_status_timeout_does_not_retire_failed_saved_stop_or_replay_start(peer):
 
 
 def test_late_stop_status_tail_preserves_release_ack_and_owner_recovery(peer):
-    session, _transport, manager, identifier = session_and_manager(peer)
+    _assert_late_stop_status_tail_preserves_release_ack_and_owner_recovery(peer)
+
+
+@pytest.mark.parametrize("suffix", OPTIONAL_STATUS_PATHS)
+def test_optional_late_stop_status_tail_preserves_release_ack_and_owner_recovery(peer, suffix):
+    _assert_late_stop_status_tail_preserves_release_ack_and_owner_recovery(
+        peer, optional_suffixes=OPTIONAL_STATUS_PATHS, slow_path=PREFIX + suffix,
+    )
+
+
+def _assert_late_stop_status_tail_preserves_release_ack_and_owner_recovery(
+    peer, *, optional_suffixes=(), slow_path=BATTERY,
+):
+    session, _transport, manager, identifier = session_and_manager(peer, optional_suffixes)
     owner = "synthetic-owner"
     manager.start_bulb_exposure(identifier, owner)
-    peer.slow_path = BATTERY
+    peer.slow_path = slow_path
     with pytest.raises(BridgeError) as failure:
         manager.stop_bulb_exposure(identifier, owner)
     assert failure.value.code == "CCAPI_UNREACHABLE"
