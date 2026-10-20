@@ -176,6 +176,13 @@ class CameraBridgeShutterRecoverySessionTest {
         retryNode().performClick()
         compose.waitUntil(TIMEOUT) {
             val state = viewModel.uiState.value
+            peer.count("POST", "bulb/stop/owned") == 5 &&
+                !state.bridgeBulbStopRequired && !state.bridgeBulbUnconfirmed && !state.shutterReleaseUnconfirmed
+        }
+        assertFalse("A confirmed owner Stop must settle its own command before resuming preview.",
+            viewModel.uiState.value.bridgeBulbStopPending)
+        compose.waitUntil(TIMEOUT) {
+            val state = viewModel.uiState.value
             !state.bridgeBulbStopRequired && !state.bridgeBulbUnconfirmed &&
                 !state.shutterReleaseUnconfirmed && state.pendingOperations.isEmpty() && peer.frames.get() > framesBefore
         }
@@ -186,6 +193,35 @@ class CameraBridgeShutterRecoverySessionTest {
         assertNull(viewModel.uiState.value.bulbStartedAtMillis)
         assertEquals(0, captureSuccesses.get())
         compose.onNodeWithContentDescription(text(R.string.start_bulb_exposure)).assertIsEnabled()
+    }
+
+    @Test fun receiptOnlyOwnedStopCannotRestartPreviewRetiredWhileReleaseWasUnconfirmed() {
+        startAmbiguousExposure()
+        compose.runOnIdle {
+            viewModel.setAppForeground(false)
+            viewModel.setAppForeground(true)
+        }
+        awaitOwnedStop(1)
+        assertOwnedRecoveryVisible()
+        val framesBefore = peer.frames.get()
+        val previewStartsBefore = peer.count("POST", "liveview/start")
+        peer.stopReply.set(StopReply.RECEIPT_ONLY)
+
+        retryOwnedRelease()
+
+        val state = viewModel.uiState.value
+        assertFalse(state.bridgeBulbStopRequired)
+        assertFalse(state.bridgeBulbStopPending)
+        assertFalse(state.bridgeBulbUnconfirmed)
+        assertFalse(state.shutterReleaseUnconfirmed)
+        assertTrue(state.pendingOperations.isEmpty())
+        assertNull(state.liveViewBitmap)
+        assertEquals("An owner receipt without a fresh status must not restart the preview.",
+            previewStartsBefore, peer.count("POST", "liveview/start"))
+        assertEquals(framesBefore, peer.frames.get())
+        assertEquals(0, captureSuccesses.get())
+        assertEquals(2, peer.count("POST", "bulb/stop/owned"))
+        assertOwnedRequestsStayWithStart()
     }
 
     @Test fun lostStartResponseIsNotReplayedAndRecoveryFitsNarrowLargeFontLayout() {
@@ -466,7 +502,7 @@ class CameraBridgeShutterRecoverySessionTest {
 }
 
 private enum class StartReply { UNCONFIRMED, LOST_RESPONSE }
-private enum class StopReply { UNCONFIRMED, LEGACY_IDLE, RELEASED }
+private enum class StopReply { UNCONFIRMED, LEGACY_IDLE, RECEIPT_ONLY, RELEASED }
 private data class RemoteState(
     val mode: String = "Bulb",
     val bulb: Boolean? = false,
@@ -576,6 +612,12 @@ private class BridgeRecoveryPeer(private val label: String) : AutoCloseable {
                 // Do not discharge the peer's owner just because this observation is idle.
                 status()
             }
+            StopReply.RECEIPT_ONLY -> {
+                // Cached terminal receipts settle only this command identity. They carry no
+                // fresh physical-camera observation with which to restart a retired preview.
+                bulbOwnerId.set(null)
+                json(JSONObject().put("ownerId", ownerId).put("outcome", "released").toString())
+            }
             StopReply.RELEASED -> {
                 remote.updateAndGet { it.copy(bulb = false, releaseUnconfirmed = false) }
                 bulbOwnerId.set(null)
@@ -589,6 +631,7 @@ private class BridgeRecoveryPeer(private val label: String) : AutoCloseable {
         if (bulbOwnerId.get() != null) return error("SYNTHETIC_OWNED_STOP_REQUIRED").setResponseCode(409)
         return when (stopReply.get()) {
             StopReply.UNCONFIRMED -> error("SHUTTER_RELEASE_UNCONFIRMED")
+            StopReply.RECEIPT_ONLY -> error("SYNTHETIC_OWNED_RECEIPT_ONLY").setResponseCode(400)
             StopReply.LEGACY_IDLE -> {
                 remote.updateAndGet { it.copy(bulb = false, releaseUnconfirmed = null) }
                 status()

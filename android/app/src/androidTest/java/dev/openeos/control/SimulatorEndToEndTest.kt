@@ -4,6 +4,7 @@ import androidx.annotation.StringRes
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasSetTextAction
@@ -148,6 +149,7 @@ class SimulatorEndToEndTest {
         }
         // The fixed camera surface exposes the updated action only in Compose's unmerged tree.
         waitForContentDescription(text(R.string.stop_recording), useUnmergedTree = true)
+        assertRecordingReceiptDoesNotCoverCaptureControls()
         compose.onNodeWithTag("capture-button", useUnmergedTree = true)
             .performClick()
         waitForSimulatorState { state ->
@@ -157,6 +159,7 @@ class SimulatorEndToEndTest {
         }
 
         waitForEnabledNode("capture-mode-PHOTO")
+        assertRecordingReceiptDoesNotCoverCaptureControls()
         compose.onNodeWithTag("capture-mode-PHOTO").performClick()
         compose.onNodeWithTag("shooting-setting-apply-capture-mode").performClick()
         waitForSimulatorState { state ->
@@ -258,6 +261,19 @@ class SimulatorEndToEndTest {
             runCatching {
                 compose.onNodeWithTag(tag).assertIsEnabled()
             }.isSuccess
+        }
+    }
+
+    private fun assertRecordingReceiptDoesNotCoverCaptureControls() {
+        // An enabled semantics node can still lose a real tap to the receipt's Refresh
+        // button. Keep measuring rendered bounds, and retain the actual touch actions.
+        val receiptBottom = compose.onNodeWithTag("recording-status-refresh", useUnmergedTree = true)
+            .assertIsDisplayed().getUnclippedBoundsInRoot().bottom
+        for (tag in listOf("capture-button", "capture-mode-PHOTO", "capture-mode-VIDEO")) {
+            val control = compose.onNodeWithTag(tag, useUnmergedTree = true)
+                .assertIsDisplayed().getUnclippedBoundsInRoot()
+            assertTrue("The recording receipt must remain above $tag: receipt bottom=$receiptBottom, control=$control",
+                receiptBottom <= control.top)
         }
     }
 

@@ -2064,7 +2064,11 @@ class CameraViewModel(
                     // The client sanitizes its own stale Start snapshot on a cached receipt.
                     // A newer UI observation is independent and must survive this older command.
                     val display = if (it.status === statusBeforeStop) response ?: it.status else it.status
-                    it.copy(status = display, bridgeBulbStopRequired = false,
+                    // The owned Stop is settled before preview reconciliation. Leaving its
+                    // own SHUTTER_RELEASE marker until finally would block that reconciliation
+                    // after backgrounding has retired the old preview. Other interlocks remain.
+                    it.copy(status = display, bridgeBulbStopRequired = false, bridgeBulbStopPending = false,
+                        pendingOperations = it.pendingOperations - CameraOperation.SHUTTER_RELEASE,
                         bridgeBulbUnconfirmed = false, bulbStartedAtMillis = null,
                         error = it.error.takeUnless { message -> message == CameraAppError.BRIDGE_BULB_STOP_PENDING.messageToken },
                         shutterReleaseUnconfirmed = it.shutterReleaseUnconfirmed || display?.shutterReleaseUnconfirmed == true)

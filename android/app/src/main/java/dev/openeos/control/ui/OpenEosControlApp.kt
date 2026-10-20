@@ -268,11 +268,17 @@ fun OpenEosControlApp(
                             actions = actions,
                         )
                     }
+                    // Recovery guidance and retained recording receipts can include live
+                    // actions. Keep the whole presentation above the capture controls,
+                    // including after a confirmed recording Stop leaves its receipt visible.
+                    val keepCaptureControlsClear = state.shutterReleaseUnconfirmed || state.bridgeBulbStopRequired ||
+                        state.pendingRecordingCommand != null ||
+                        state.recordingReceipt?.let { !it.retired && it.sameOwner } == true
                     Box(
-                        Modifier.align(if (state.shutterReleaseUnconfirmed) Alignment.TopCenter else Alignment.BottomCenter)
+                        Modifier.align(if (keepCaptureControlsClear) Alignment.TopCenter else Alignment.BottomCenter)
                             .padding(
-                                top = if (state.shutterReleaseUnconfirmed) CAMERA_OVERLAY_HEADER_HEIGHT else 0.dp,
-                                bottom = if (!state.shutterReleaseUnconfirmed && state.connected &&
+                                top = if (keepCaptureControlsClear) CAMERA_OVERLAY_HEADER_HEIGHT else 0.dp,
+                                bottom = if (!keepCaptureControlsClear && state.connected &&
                                     state.uiMode == UiMode.CONTROL && state.showForegroundJpegImportStatus
                                 ) FOREGROUND_IMPORT_BAR_HEIGHT else 0.dp,
                             ),
