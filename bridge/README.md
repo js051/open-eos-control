@@ -70,6 +70,30 @@ their separate behavior. See the [source scope and synthetic RED/GREEN evidence]
 ../docs/validation/bridge-ccapi-status-body-deadline-2026-10-20.zh-TW.md);
 this evidence does not establish physical-camera Stop or network reliability.
 
+### Focus command response-body deadlines
+
+The existing one-shot `POST /shooting/control/drivefocus`,
+`PUT /shooting/liveview/afframeposition`, and `POST /shooting/liveview/clickwb`
+commands also use that cooperative absolute response-body budget. The default
+request timeout remains 15 seconds. This bounds consumption between reads, not
+DNS, connection, headers, a blocking read, lock admission, or total Stop latency.
+Redirect policy and timely complete ACK forms are unchanged.
+
+The camera may already have applied a command whose ACK arrives too late. Such
+a response returns the existing `CCAPI_UNREACHABLE` error saying command
+completion is unknown, never `accepted: true`; it does not prove rejection or
+that nothing happened. A received HTTP rejection retains its original status.
+Neither the Bridge nor the browser automatically repeats the command or shows
+accepted feedback after this error. This is not a durable focus-retry fence:
+the existing UI can permit a later explicit user action after settlement.
+
+Stop and disconnect still join the original command producer before using the
+same session's saved Live View Stop. Body timeout does not detach that producer,
+transfer ownership, or clear an unconfirmed Stop. Recording, unrelated methods,
+streams, strict-control rules, and security settings are unchanged. See the
+[exact scope and verification limits](
+../docs/validation/bridge-ccapi-focus-body-deadline-2026-10-20.zh-TW.md).
+
 ## Local USB cleanup failures
 
 If closing a registered local USB session raises, the Bridge retains that exact retired owner's reservation. New local connections, including AUTO, and camera discovery return `CAMERA_BUSY` for the rest of that Bridge process. Reconnecting, polling, and shutdown do not retry its close or clear the reservation: an already-closed provider can return successfully on a second close without performing any cleanup.

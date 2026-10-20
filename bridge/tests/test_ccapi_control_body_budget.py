@@ -270,7 +270,7 @@ def test_late_stop_keeps_exact_owner_and_explicit_retry_never_represses(peer_fac
     ("GET", AF), ("DELETE", AF), ("PUT", LIVE_VIEW),
     ("GET", LIVE_VIEW + "/rtpsessiondesc"), ("GET", LIVE_VIEW + "/multipart"),
     ("POST", LIVE_VIEW + "/unknown"), ("POST", PREFIX + "/shooting/control/recbutton"),
-    ("POST", PREFIX + "/shooting/control/drivefocus"),
+    ("PUT", PREFIX + "/shooting/control/drivefocus"),
 ])
 def test_nonlisted_method_or_suffix_does_not_gain_a_body_budget(method, path):
     body = BytesIO(b"ok")

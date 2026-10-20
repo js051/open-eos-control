@@ -833,8 +833,8 @@ _STATUS_BODY_PATHS = (
     "/functions/displayoff",
 )
 
-# Receipt integrity only: these focus operations keep their existing body,
-# deadline, redirect and retry policy rather than joining _CONTROL_BODY_ROUTES.
+# These one-shot focus commands share complete-ACK checks and the cooperative
+# body budget. Their legacy redirects, success forms and no-retry policy remain.
 _FOCUS_CONTROL_ACK_ROUTES = (
     ("POST", "/shooting/control/drivefocus"),
     ("PUT", "/shooting/liveview/afframeposition"),
@@ -897,7 +897,7 @@ class UrllibCcapiTransport:
         )
         control_resource = any(
             method == control_method and resource_path.endswith(suffix)
-            for control_method, suffix in _CONTROL_BODY_ROUTES
+            for control_method, suffix in _CONTROL_BODY_ROUTES + _FOCUS_CONTROL_ACK_ROUTES
         )
         status_resource = method == "GET" and resource_path.endswith(_STATUS_BODY_PATHS)
         deadline = time.monotonic() + timeout if configuration_resource or control_resource or status_resource else None

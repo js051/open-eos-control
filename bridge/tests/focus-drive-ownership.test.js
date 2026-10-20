@@ -11,6 +11,10 @@ const vm = require("node:vm");
 const root = path.resolve(__dirname, "../..");
 const source = fs.readFileSync(path.join(root, "bridge/open_eos_bridge/static/app.js"), "utf8");
 const actual = {status: 200, body: {accepted: true, direction: "NEAR", step: "SMALL"}};
+// Actual Bridge transport envelope for an interrupted CCAPI response body.
+// It cannot establish whether the camera completed the focus mutation.
+const interrupted = {status: 502, body: {error: {code: "CCAPI_UNREACHABLE",
+  message: "The camera CCAPI response was interrupted; command completion is unknown."}}};
 function production(name) {
   const found = new RegExp(`^  (?:async )?function ${name}\\(`, "m").exec(source);
   assert.ok(found, name);
@@ -19,11 +23,11 @@ function production(name) {
 function gate() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return {promise,resolve,reject}; }
 async function turns() { for (let i=0;i<5;i++) await new Promise(setImmediate); }
 function fixture() {
-  const requests=[], frame=gate(), focus=gate(), stop=gate(), messages=[], errors=[], toasts=[];
+  const requests=[], frame=gate(), focus=gate(), stop=gate(), messages=[], errors=[], caughtErrors=[], toasts=[];
   const state={session:{id:"synthetic-session-A"},liveActive:true,liveGeneration:1,refreshGeneration:0,
     activeLiveSource:"CCAPI_JPEG_POLLING",focusStep:"SMALL",busy:false,frameTimes:[],status:{}};
   state.liveViewStopOwner={session:state.session,confirmedStart:true};
-  const f={state,requests,frame,focus,stop,messages,errors,toasts};
+  const f={state,requests,frame,focus,stop,messages,errors,caughtErrors,toasts};
   const ctx=vm.createContext({state,Error,TypeError,AbortController,Headers,Response,performance,setTimeout,clearTimeout,
     FEATURES:{FOCUS_DRIVE:"FOCUS_DRIVE"}, featureSupported:()=>true, mediaTransferActive:()=>false,
     ui:{liveImage:{removeAttribute(){}},focusReticle:{hidden:true}},
@@ -32,11 +36,11 @@ function fixture() {
     cancelCameraFocusInfo(){},stopRtpAudio(){},releaseObjectUrl(){},clearMonitoringLayers(){},
     renderLiveState(){},renderFrameIndicator(){},renderAvailability(){},
     setOperationState:(message,error=false)=>{f.operation={message,error};messages.push(f.operation);},
-    captureError:e=>{errors.push({message:e.message,code:e.code});return e;},
+    captureError:e=>{caughtErrors.push(e);errors.push({message:e.message,code:e.code});return e;},
     showToast:(message,error=false)=>toasts.push({message,error}),t:key=>key,
     fetch:(url,options)=>{requests.push({url,method:options.method,body:options.body});
       if(url.endsWith("/liveview/frame"))return frame.promise;
-      if(url.endsWith("/focus/drive"))return focus.promise;
+      if(url.endsWith("/focus/drive"))return f.focus.promise;
       if(url.endsWith("/liveview/stop"))return stop.promise;
       throw new Error("Unexpected request");},
   });
@@ -46,7 +50,7 @@ function fixture() {
     "readDecodedLiveFrame","pollLiveView","stopLiveLoop","liveViewControlRequest","stopLiveView","adoptCameraStatus"].map(production).join("\n"),ctx);
   return Object.assign(f,{ctx});
 }
-for (const outcome of ["accepted", "network-failure"]) {
+for (const outcome of ["accepted", "network-failure", "completion-unknown"]) {
   test(`focus ${outcome} must not erase a later automatic Live View Stop owner`, async()=>{
     const f=fixture();
     const polling=f.ctx.pollLiveView(1);
@@ -61,6 +65,7 @@ for (const outcome of ["accepted", "network-failure"]) {
     const stopOwner=f.state.liveViewStopOwner;
     const before={busy:f.state.busy,operation:f.operation,generation:f.state.refreshGeneration};
     if(outcome==="accepted") f.focus.resolve(new Response(JSON.stringify(actual.body),{status:actual.status,headers:{"content-type":"application/json"}}));
+    else if(outcome==="completion-unknown") answerInterrupted(f);
     else f.focus.reject(new TypeError("Synthetic old focus response lost"));
     await driving;
     const observed={busy:f.state.busy,operation:f.operation,generation:f.state.refreshGeneration,
@@ -78,8 +83,13 @@ for (const outcome of ["accepted", "network-failure"]) {
 function answer(f, body = actual.body) {
   f.focus.resolve(new Response(JSON.stringify(body), {status:200,headers:{"content-type":"application/json"}}));
 }
+function answerInterrupted(f) {
+  f.focus.resolve(new Response(JSON.stringify(interrupted.body),
+    {status:interrupted.status,headers:{"content-type":"application/json"}}));
+}
 function complete(f, outcome) {
   if (outcome === "accepted") answer(f);
+  else if (outcome === "completion-unknown") answerInterrupted(f);
   else f.focus.reject(new TypeError("old focus response lost"));
 }
 function clearFeedback(f) { f.messages.length=0; f.errors.length=0; f.toasts.length=0; }
@@ -117,6 +127,43 @@ test("current network loss reports once, unlocks its own operation, and never re
   assert.equal(f.operation.error,true); assert.equal(f.errors.length,1); assert.equal(f.toasts.length,1);
 });
 
+for (const direction of ["NEAR", "FAR"]) {
+  test(`${direction}: interrupted CCAPI body preserves unknown completion and never automatically resends`, async()=>{
+    const f=fixture(); const run=f.ctx.driveFocus(direction);
+    answerInterrupted(f); await run; await turns();
+    assert.equal(f.state.busy,false);
+    assert.deepEqual(f.requests,[{url:"/v1/session/synthetic-session-A/focus/drive",method:"POST",
+      body:JSON.stringify({direction,step:"SMALL"})}]);
+    assert.equal(f.caughtErrors.length,1);
+    assert.equal(f.caughtErrors[0].name,"ApiError");
+    assert.equal(f.caughtErrors[0].status,502);
+    assert.deepEqual(f.errors,[interrupted.body.error]);
+    assert.deepEqual(f.messages,[{message:"busy",error:false},
+      {message:interrupted.body.error.message,error:true}]);
+    assert.deepEqual(f.toasts,[{message:interrupted.body.error.message,error:true}]);
+    assert.equal(f.messages.some(row=>row.message==="focusDriveAccepted"),false);
+    assert.equal(f.state.liveActive,true); assert.equal(f.state.liveGeneration,1);
+    // This is an unknown camera outcome, not rejection or proof of no motion.
+    // No automatic retry is allowed; this does not fence a later explicit action.
+    await turns();
+    assert.equal(f.requests.length,1); assert.equal(f.errors.length,1);
+  });
+}
+
+test("an explicit later focus drive remains possible after unknown completion", async()=>{
+  const f=fixture(); const first=f.ctx.driveFocus("NEAR");
+  answerInterrupted(f); await first; await turns();
+  assert.equal(f.requests.length,1);
+  f.focus=gate();
+  const next=f.ctx.driveFocus("FAR");
+  assert.equal(f.requests.length,2,"only the explicit second action may send again");
+  answer(f,{accepted:true,direction:"FAR",step:"SMALL"}); await next; await turns();
+  assert.equal(f.state.busy,false);
+  assert.deepEqual(f.operation,{message:"focusDriveAccepted",error:false});
+  assert.equal(f.requests[1].body,JSON.stringify({direction:"FAR",step:"SMALL"}));
+  assert.equal(f.requests.length,2); assert.equal(f.errors.length,1);
+});
+
 test("repeated Near/Far clicks while pending send only the first command", async()=>{
   const f=fixture(); const run=f.ctx.driveFocus("NEAR");
   await f.ctx.driveFocus("FAR"); await f.ctx.driveFocus("NEAR");
@@ -132,7 +179,7 @@ test("disconnected, unsupported, busy, and inactive controls send nothing", asyn
   for (const f of [disconnected,unsupported,busy,inactive]) assert.equal(f.requests.length,0);
 });
 
-for (const outcome of ["accepted","network-failure"]) {
+for (const outcome of ["accepted","network-failure","completion-unknown"]) {
   test(`${outcome}: natural local reader retirement releases its own busy without publishing`, async()=>{
     const f=fixture(); const run=f.ctx.driveFocus("NEAR");
     f.ctx.stopLiveLoop(); clearFeedback(f); complete(f,outcome); await run;
