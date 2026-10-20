@@ -1,5 +1,7 @@
 # 原功能與三端交付對帳（2026-10-16 UTC）
 
+> 最新平台批次終態見文末「2026-10-20 平台證據對帳」；下列各舊日期／SHA 表格保留歷史，不能當成目前仍全部 NOT_RUN。Latest completed platform runs are reconciled at the end; dated snapshots remain historical.
+
 ## 固定對帳基準
 
 產品 source 固定 `dev` 的 `41bf6ef0684f982937f5d5fdf428feca3b683f04`，tree `3d67cdb74b6c95010ba82f0035421679af548e16`。本文件在另一個從此 dev 出發的 docs 分支製作，不改 Firefox 受驗產品 HEAD。原三來源 archive refs、舊 receipt、六個 KVM 待批快照均保留。
@@ -495,3 +497,24 @@ run `39240488333`／dev `285ca4b246158f4575cb62c62bf722234ec9b9b2` 的 App SDK p
 ### 2026-10-19 13:14 UTC：Apple-only 全批真驗通過
 
 [run39252314539](https://github.com/js051/open-eos-control/actions/runs/39252314539)／dev `0a2035fcc84f4f18c19ab8b1c8863e340077f457`：App828/828、UI43/43、Core與安全gate全部通過；包括同epoch音訊退場倒序新回歸、原背景案例及真picker六組。原DocumentManager crash本批只有診斷、未證實修復，保留穩定性風險。此更新關閉目前Apple gate紅案，不把額外Apple工作流當原ci-complete、Windows/Android/native或全部89列驗收。
+
+
+### 2026-10-20 平台證據對帳 / Platform evidence reconciliation
+
+本次是已有終態的文件對帳，不是新跑測試；不將不同 SHA 組成虛構的共同全綠 head，也不宣稱原 89 項全功能已驗收。
+
+- Apple：[39350717367](https://github.com/js051/open-eos-control/actions/runs/39350717367)，`c7cdd68a9cbccd48c5569abec1bd7b218644891b`，2026-10-20 01:39:25 UTC success，Core669／App833／UI43。詳 [Apple 原生證據](apple-actions-2026-10-19.zh-TW.md)。
+- Desktop：[39342666839](https://github.com/js051/open-eos-control/actions/runs/39342666839)，`1e7929f71099a179c74083cb46e6ea40e7b25d4e`，2026-10-19 23:49:03 UTC success，原完整 Chromium／Python 與 wheel/sdist。詳 [Desktop 證據](desktop-actions-2026-10-19.zh-TW.md)。
+- Windows：[39342666985](https://github.com/js051/open-eos-control/actions/runs/39342666985)，同 Desktop SHA，2026-10-19 23:38:51 UTC success；原生 standalone build／launch verification，不是 USB／相機驗收。
+- Android host：[39360736976](https://github.com/js051/open-eos-control/actions/runs/39360736976)，`bd9cf61365809c4ad14a1fa8f4469bb6def936fc`，2026-10-20 02:57:52 UTC success，1,867 tests／164 suites、零 failure／error／skip，debug APK／signer smoke。五個 UI-source suite 與三個負向 RTP host 缺口已關閉；詳 [原案例及完整證據](android-ui-host-closure-2026-10-18.zh-TW.md)。
+
+These are separate successful supplemental platform runs at their stated source commits, not a single common-head acceptance run. Historical NOT_RUN statements for those specific completed gates are superseded only within the documented scope. This reconciliation does not represent new execution or 89/89 feature acceptance.
+
+仍未關閉 / Still open:
+
+- Android API34／36 instrumentation 的既有 RTP pixel/orientation、Compose／SAF 失敗不因 JVM 全綠而消失；真 MediaCodec、GPU／Surface、系統 provider 與裝置行為仍需相應執行。
+- #129 的 Apple SDK concrete adapter 編譯已證，但 DeviceInfo native wire／runtime／產品接線仍未完成；真 EDSDK 仍需合法匹配 SDK／ABI／provider。
+- direct CCAPI upload、gphoto normalized AF／Click WB、逐檔 metadata mutation 等契約或未實作邊界保留，不能改稱只待測試。
+- 真相機／USB／網路／物理結果、原 PR `ci-complete`、main acceptance 與 release 均為獨立門檻。No emulator/KVM authorization, merge or release is implied.
+
+Release Assessment: none，僅對帳驗證文件；保留所有先前失敗與實機限制。

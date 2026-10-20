@@ -250,3 +250,10 @@
 - The remaining failure was the second photo-to-folder return, still using eight seconds. Two native seeks consumed about seven seconds; the control remained above the viewport. The existing cached scroll surface was reused successfully. No date/filter assertion failed.
 - 本批將這一個明確XXXL雙語case的九個照片↔filter長距離腿統一使用局部15秒常數：其中兩個原已15，七個由8改15，每語名目上限合計最多增加49秒。明確列為日期clear→photo、photo→rating、rating apply→photo、photo→folder、known folder apply→photo、photo→folder、folder clear→photo、photo→rating clear、rating clear→photo。所有sheet內選擇、取消後重開、鄰近clear與其他case仍原預算；所有原斷言、手勢、真正hittable不改。不是產品速度改善或相機期限修改。
 - A local fifteen-second budget now consistently covers the nine photo/filter long-distance legs of this single XXXL bilingual case. Two were already fifteen seconds; seven change from eight, adding at most 49 nominal seconds per language. Sheet-local, nearby and all other-case budgets remain unchanged. This is a bounded harness adjustment, with all original assertions and real gestures retained; native results remain pending.
+
+
+## 2026-10-20 Apple 30 最終通過 / Final passed run
+
+[Run 39350717367](https://github.com/js051/open-eos-control/actions/runs/39350717367) 在 exact source `c7cdd68a9cbccd48c5569abec1bd7b218644891b` 於 2026-10-20 01:39:25 UTC 完成 success：Core 669、App 833、UI 43 全部通過，包含上一節等待執行的 XXXL 長距離導航。此終態取代「該候選 native results pending」，不刪除先前失敗紀錄，也不將單輪成功當成間歇性 picker/framework crash 永不復發的證明。
+
+The final exact-source Apple run passed Core 669, App 833 and UI 43, including the previously pending XXXL navigation candidate. This closes that validation run, not physical-camera/USB acceptance, future framework reliability, original PR `ci-complete`, or release authorization. No additional test execution is represented by this documentation update.
