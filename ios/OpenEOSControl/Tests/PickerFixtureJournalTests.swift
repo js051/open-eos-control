@@ -64,6 +64,90 @@ final class PickerFixtureJournalTests: XCTestCase {
         XCTAssertEqual(retained.last, lines.last)
     }
 
+    func testOpeningSlotNamesAreFixedAndNeverWrap() {
+        XCTAssertEqual(Array(PickerFixtureJournal.openingOrdinals), Array(1...16))
+        for ordinal in 1...16 {
+            XCTAssertEqual(PickerFixtureJournal.openingJournalName(for: ordinal),
+                "eos-picker-lifecycle-opening-\(ordinal).txt")
+        }
+        for ordinal in [-1, 0, 17, 32, 9_999, 10_000] {
+            XCTAssertNil(PickerFixtureJournal.openingJournalName(for: ordinal))
+            XCTAssertNil(PickerFixtureJournal.boundedOpeningJournal([], ordinal: ordinal))
+        }
+    }
+
+    func testOpeningJournalRejectsDifferentTicketsLegacyAndPrivateFields() {
+        let first = PickerFixtureJournal.line(.presenterRetained, ticket: ticket, now: 10, flag: true)
+        XCTAssertNotNil(PickerFixtureJournal.boundedOpeningJournal([first], ordinal: 1))
+        for invalid in [
+            first.replacingOccurrences(of: "ticket=1", with: "ticket=2"),
+            first.replacingOccurrences(of: "ticket=1", with: "ticket=17"),
+            "success selected presented=1 transitioning=0 dismissing=0",
+            first + " filename=private", first + " owner=private", first + " url=https://example.invalid",
+        ] {
+            XCTAssertNil(PickerFixtureJournal.boundedOpeningJournal([first, invalid], ordinal: 1))
+        }
+    }
+
+    func testOpeningJournalKeepsBothCapsWithoutMixingOpenings() throws {
+        let opening = PickerFixtureJournal.Ticket(ordinal: 16, startedUptime: 0,
+            scenario: .lostAck, language: .traditionalChinese)
+        let lines = (0..<200).map { index in
+            PickerFixtureJournal.line(.presentationCompleted, ticket: opening, now: Double(index),
+                presented: true, transitioning: true, dismissing: true, flag: true)
+        }
+        let bytes = try XCTUnwrap(PickerFixtureJournal.boundedOpeningJournal(lines, ordinal: 16))
+        let retained = String(decoding: bytes, as: UTF8.self).split(separator: "\n").map(String.init)
+        XCTAssertLessThanOrEqual(bytes.count, 16_384)
+        XCTAssertLessThanOrEqual(retained.count, 128)
+        XCTAssertGreaterThan(retained.count, 1)
+        XCTAssertEqual(retained, Array(lines.suffix(retained.count)))
+        XCTAssertTrue(retained.allSatisfy { $0.hasPrefix("v2 ticket=16 ") })
+    }
+
+    func testLaterOpeningsCannotReuseSlotsAfterAggregateRotationOrRelaunch() throws {
+        var slots: [Int: Data] = [:]
+        var firstSixteenSlots: [Int: Data] = [:]
+        var aggregate: [String] = []
+        var lastOrdinal = 0
+        for expected in 1...20 {
+            let ordinal = try XCTUnwrap(PickerFixtureJournal.nextTicketOrdinal(in: aggregate,
+                lastOrdinal: lastOrdinal, highestOccupiedOpening: slots.keys.max() ?? 0))
+            XCTAssertEqual(ordinal, expected)
+            let current = PickerFixtureJournal.Ticket(ordinal: ordinal, startedUptime: 0,
+                scenario: .success, language: .english)
+            let first = PickerFixtureJournal.line(.selectionCreated, ticket: current, now: 0)
+            if PickerFixtureJournal.openingJournalName(for: ordinal) != nil {
+                XCTAssertNil(slots[ordinal])
+                slots[ordinal] = try XCTUnwrap(PickerFixtureJournal.boundedOpeningJournal([first], ordinal: ordinal))
+            }
+            if ordinal == 16 { firstSixteenSlots = slots }
+            aggregate.append(first)
+            lastOrdinal = ordinal
+        }
+        let oldLine = PickerFixtureJournal.line(.presenterDisappeared, ticket: ticket, now: 11)
+        let rotatedBytes = try XCTUnwrap(PickerFixtureJournal.boundedJournal(aggregate + Array(repeating: oldLine, count: 200)))
+        let rotated = String(decoding: rotatedBytes, as: UTF8.self).split(separator: "\n").map(String.init)
+        XCTAssertTrue(rotated.allSatisfy { $0.hasPrefix("v2 ticket=1 ") })
+        XCTAssertEqual(PickerFixtureJournal.nextTicketOrdinal(in: rotated,
+            lastOrdinal: lastOrdinal, highestOccupiedOpening: 16), 21)
+        // A relaunch loses the in-memory high-water mark, not the consumed slots.
+        XCTAssertEqual(PickerFixtureJournal.nextTicketOrdinal(in: rotated,
+            lastOrdinal: 0, highestOccupiedOpening: 16), 17)
+        XCTAssertEqual(slots, firstSixteenSlots)
+        XCTAssertEqual(slots.count, 16)
+        XCTAssertEqual(slots[1], Data((aggregate[0] + "\n").utf8))
+    }
+
+    func testTicketAllocationIsBoundedAndTreatsOccupiedSlotsAsConsumed() {
+        XCTAssertEqual(PickerFixtureJournal.nextTicketOrdinal(in: [], lastOrdinal: 0, highestOccupiedOpening: 0), 1)
+        XCTAssertEqual(PickerFixtureJournal.nextTicketOrdinal(in: [], lastOrdinal: 0, highestOccupiedOpening: 8), 9)
+        XCTAssertNil(PickerFixtureJournal.nextTicketOrdinal(in: [], lastOrdinal: 9_999, highestOccupiedOpening: 16))
+        XCTAssertNil(PickerFixtureJournal.nextTicketOrdinal(in: [], lastOrdinal: -1, highestOccupiedOpening: 0))
+        XCTAssertNil(PickerFixtureJournal.nextTicketOrdinal(in: [], lastOrdinal: 0, highestOccupiedOpening: 17))
+        XCTAssertNil(PickerFixtureJournal.nextTicketOrdinal(in: ["private"], lastOrdinal: 0, highestOccupiedOpening: 0))
+    }
+
     func testDisabledTicketContainsNoOwnerAndCannotProduceAnAcceptedRecord() {
         XCTAssertFalse(PickerFixtureJournal.Ticket.disabled.isEnabled)
         XCTAssertTrue(ticket.isEnabled)

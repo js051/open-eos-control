@@ -35,112 +35,203 @@ struct MediaUploadFileAccess {
     static let unscoped = Self(acquire: { _ in true }, release: { _ in })
 }
 
-/// A controller/Coordinator captures an immutable opening ticket. SwiftUI may
-/// rebuild its view or present a second picker before an old OS callback arrives.
-/// Updating a coordinator to the newest closure would silently redirect the file.
+/// The gallery owns one UIKit presenter; each opening owns an immutable
+/// picker/Coordinator pair. Clearing an opening never removes its presenter.
 @MainActor
-struct MediaUploadPicker: UIViewControllerRepresentable {
-    let selection: MediaUploadSelection
+struct MediaUploadPicker: View {
+    let selection: MediaUploadSelection?
     let completion: (MediaUploadSelection, [URL]?) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(selection: selection, completion: completion) }
-    func makeUIViewController(context: Context) -> Presenter {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
-        picker.allowsMultipleSelection = false
-        picker.delegate = context.coordinator
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["OEC_UPLOAD_JOURNEY_FIXTURE"] != nil {
-            picker.directoryURL = try? BridgeUploadJourneyFixture.seedPickerFile().deletingLastPathComponent()
+    var body: some View { Host(selection: selection, completion: completion) }
+
+    private struct Host: UIViewControllerRepresentable {
+        let selection: MediaUploadSelection?
+        let completion: (MediaUploadSelection, [URL]?) -> Void
+        func makeUIViewController(context: Context) -> Presenter { Presenter() }
+        func updateUIViewController(_ controller: Presenter, context: Context) {
+            controller.update(selection: selection, completion: completion)
         }
-        #endif
-        picker.view.accessibilityIdentifier = "media-upload-document-picker"
-        Self.trace(.controllerCreated, picker, ticket: selection.fixtureTicket)
-        return Presenter(picker: picker, coordinator: context.coordinator)
-    }
-    func updateUIViewController(_ controller: Presenter, context: Context) {}
-    static func dismantleUIViewController(_ controller: Presenter, coordinator: Coordinator) {
-        trace(.dismantle, controller.picker, ticket: coordinator.selection.fixtureTicket)
-        coordinator.invalidate()
-        controller.retire()
+        static func dismantleUIViewController(_ controller: Presenter, coordinator: ()) {
+            controller.dismantle()
+        }
     }
 
-    /// UIKit owns a real modal presentation instead of embedding the document
-    /// service controller as SwiftUI sheet content. Keep its owner alive through
-    /// dismissal, then deliver the immutable ticket and let SwiftUI close us.
     final class Presenter: UIViewController {
-        let picker: UIDocumentPickerViewController
-        private let coordinator: Coordinator
-        private let fixtureTicket: PickerFixtureJournal.Ticket
-        private var presentedPicker = false
-        private var retired = false
+        /// Injection is limited to the actual public UIKit ownership boundaries.
+        /// Tests hold these receipts; they do not pretend to drain DocumentManager.
+        @MainActor
+        struct Presentation {
+            var isReady: (Presenter) -> Bool
+            var present: (Presenter, UIDocumentPickerViewController, @escaping () -> Void) -> Void
+            var retire: (UIDocumentPickerViewController, PickerFixtureJournal.Ticket, @escaping () -> Void) -> Void
+            static let system = Self(
+                isReady: { host in
+                    guard host.isViewLoaded, host.view.window != nil else { return false }
+                    var ancestor: UIViewController? = host
+                    while let controller = ancestor {
+                        guard controller.presentedViewController == nil,
+                              !controller.isBeingPresented, !controller.isBeingDismissed else { return false }
+                        ancestor = controller.parent
+                    }
+                    return true
+                },
+                present: { host, picker, completion in host.present(picker, animated: true, completion: completion) },
+                retire: { picker, ticket, completion in
+                    MediaUploadPicker.retire(picker, ticket: ticket, completion: completion)
+                }
+            )
+        }
 
-        init(picker: UIDocumentPickerViewController, coordinator: Coordinator) {
-            self.picker = picker
-            self.coordinator = coordinator
-            fixtureTicket = coordinator.selection.fixtureTicket
-            super.init(nibName: nil, bundle: nil)
-            coordinator.retirement = { [weak self] completion in
-                self?.retire(completion: completion)
+        private struct Opening {
+            let selection: MediaUploadSelection
+            let completion: (MediaUploadSelection, [URL]?) -> Void
+        }
+        @MainActor
+        final class Session {
+            let picker: UIDocumentPickerViewController
+            let coordinator: Coordinator
+            var presentationCompleted = false
+            var retirementRequested = false
+            var retirementStarted = false
+            var retired = false
+            var delivery: (() -> Void)?
+            init(selection: MediaUploadSelection, completion: @escaping (MediaUploadSelection, [URL]?) -> Void) {
+                coordinator = Coordinator(selection: selection, completion: completion)
+                picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
+                picker.allowsMultipleSelection = false
+                picker.delegate = coordinator
+                // Keep the gallery in the hierarchy while the real provider is visible.
+                picker.modalPresentationStyle = .overFullScreen
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["OEC_UPLOAD_JOURNEY_FIXTURE"] != nil {
+                    picker.directoryURL = try? BridgeUploadJourneyFixture.seedPickerFile().deletingLastPathComponent()
+                }
+                #endif
+                picker.view.accessibilityIdentifier = "media-upload-document-picker"
+                MediaUploadPicker.trace(.controllerCreated, picker, ticket: selection.fixtureTicket)
             }
         }
+
+        private let presentation: Presentation
+        private var pending: Opening?
+        private(set) var active: Session?
+        private var lastRetiredSelection: MediaUploadSelection?
+        private var lastFixtureTicket = PickerFixtureJournal.Ticket.disabled
+        private var dismantled = false
+
+        init(presentation: Presentation? = nil) {
+            self.presentation = presentation ?? .system
+            super.init(nibName: nil, bundle: nil)
+        }
         required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
-        deinit { PickerFixtureJournal.record(.presenterDeinit, ticket: fixtureTicket) }
-        override func viewDidDisappear(_ animated: Bool) {
-            super.viewDidDisappear(animated)
-            MediaUploadPicker.trace(.presenterDisappeared, picker, ticket: fixtureTicket)
+        deinit { PickerFixtureJournal.record(.presenterDeinit, ticket: lastFixtureTicket) }
+        override func loadView() {
+            view = UIView()
+            view.backgroundColor = .clear
         }
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
-            guard !presentedPicker, !retired else { return }
-            presentedPicker = true
-            // Keep the SwiftUI ticket host visible in the hierarchy; covering
-            // it must not trigger its external-removal cancellation boundary.
-            picker.modalPresentationStyle = .overFullScreen
-            #if DEBUG && OEC_REQUIRE_SIMULATOR_E2E
-            let ticket = fixtureTicket
-            if ticket.isEnabled {
-                MediaUploadPicker.trace(.presentationRequested, picker, ticket: ticket)
-                // Observers are weak; a diagnostic completion must not extend owner lifetime.
-                present(picker, animated: true) { [weak self, weak picker] in
-                    guard let picker else {
-                        PickerFixtureJournal.record(.presentationCompleted, ticket: ticket)
-                        return
-                    }
-                    MediaUploadPicker.trace(.presentationCompleted, picker, ticket: ticket,
-                        flag: self?.presentedViewController === picker)
-                }
-                return
-            }
-            #endif
-            present(picker, animated: true)
+            advance()
         }
-        func retire(completion: (() -> Void)? = nil) {
-            retired = true
-            let retirement = Retirement(
-                isPresented: { [picker] in picker.presentingViewController != nil },
-                dismiss: { [picker, fixtureTicket] done in
-                    guard fixtureTicket.isEnabled else { picker.dismiss(animated: true, completion: done); return }
-                    picker.dismiss(animated: true) {
-                        PickerFixtureJournal.record(.dismissCompleted, ticket: fixtureTicket)
-                        done()
-                    }
-                },
-                completion: { completion?() }, fixtureTicket: fixtureTicket
-            )
-            // A provider may already be dismissing when it calls the delegate.
-            // A cancelled/unregistered transition is not a dismissal receipt.
-            if picker.isBeingDismissed, let transition = picker.transitionCoordinator {
-                PickerFixtureJournal.record(.retirementObserved, ticket: fixtureTicket)
-                retirement.observe { [fixtureTicket] done in
-                    transition.animate(alongsideTransition: nil) { context in
-                        PickerFixtureJournal.record(.transitionCompleted, ticket: fixtureTicket, flag: context.isCancelled)
-                        done(context.isCancelled)
-                    }
-                }
-            } else {
-                retirement.dismiss()
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            if let active {
+                MediaUploadPicker.trace(.presenterDisappeared, active.picker,
+                    ticket: active.coordinator.selection.fixtureTicket)
             }
         }
+
+        func update(selection: MediaUploadSelection?, completion: @escaping (MediaUploadSelection, [URL]?) -> Void) {
+            guard !dismantled else { return }
+            if let selection, selection == active?.coordinator.selection { return }
+            if let selection, selection == pending?.selection { advance(); return }
+            // SwiftUI may update with the consumed ticket before reflecting selection=nil.
+            pending = selection.flatMap { $0 == lastRetiredSelection ? nil : Opening(selection: $0, completion: completion) }
+            if let active {
+                active.coordinator.invalidate()
+                requestRetirement(active)
+            } else { advance() }
+        }
+
+        func dismantle() {
+            guard !dismantled else { return }
+            dismantled = true
+            pending = nil
+            if let active {
+                MediaUploadPicker.trace(.dismantle, active.picker, ticket: active.coordinator.selection.fixtureTicket)
+                active.coordinator.invalidate()
+                requestRetirement(active)
+            }
+        }
+
+        private func advance() {
+            guard !dismantled, active == nil, let opening = pending, presentation.isReady(self) else { return }
+            pending = nil
+            let session = Session(selection: opening.selection, completion: opening.completion)
+            active = session
+            let ticket = opening.selection.fixtureTicket
+            lastFixtureTicket = ticket
+            session.coordinator.retirement = { [weak self, weak session] completion in
+                guard let self, let session else { return }
+                self.requestRetirement(session, delivery: completion)
+            }
+            MediaUploadPicker.trace(.presentationRequested, session.picker, ticket: ticket)
+            // UIKit's completion owns this host/session through presentation, including
+            // external SwiftUI removal. This is ownership, not a diagnostic delay.
+            presentation.present(self, session.picker) { [self, session] in
+                guard active === session, !session.presentationCompleted else { return }
+                session.presentationCompleted = true
+                MediaUploadPicker.trace(.presentationCompleted, session.picker, ticket: ticket,
+                    flag: session.picker.presentingViewController != nil)
+                if session.retirementRequested { requestRetirement(session) }
+            }
+        }
+
+        private func requestRetirement(_ session: Session, delivery: (() -> Void)? = nil) {
+            guard active === session, !session.retired else { return }
+            if let delivery, session.delivery == nil { session.delivery = delivery }
+            session.retirementRequested = true
+            // Do not overlap dismiss with an in-flight public presentation transition.
+            guard session.presentationCompleted, !session.retirementStarted else { return }
+            session.retirementStarted = true
+            let ticket = session.coordinator.selection.fixtureTicket
+            presentation.retire(session.picker, ticket) { [self, session] in
+                guard active === session, !session.retired else { return }
+                session.retired = true
+                lastRetiredSelection = session.coordinator.selection
+                active = nil
+                let delivery = session.delivery
+                session.delivery = nil
+                PickerFixtureJournal.record(.sessionRetired, ticket: ticket)
+                // This flag describes app ownership only, never remote-service lifetime.
+                PickerFixtureJournal.record(.presenterRetained, ticket: ticket, flag: !dismantled)
+                delivery?()
+                advance()
+            }
+        }
+    }
+
+    private static func retire(_ picker: UIDocumentPickerViewController,
+                               ticket: PickerFixtureJournal.Ticket, completion: @escaping () -> Void) {
+        let retirement = Retirement(
+            isPresented: { [picker] in picker.presentingViewController != nil },
+            dismiss: { [picker] done in
+                picker.dismiss(animated: true) {
+                    PickerFixtureJournal.record(.dismissCompleted, ticket: ticket)
+                    done()
+                }
+            }, completion: completion, fixtureTicket: ticket
+        )
+        // A cancelled/unregistered transition is not a dismissal receipt.
+        if picker.isBeingDismissed, let transition = picker.transitionCoordinator {
+            PickerFixtureJournal.record(.retirementObserved, ticket: ticket)
+            retirement.observe { done in
+                transition.animate(alongsideTransition: nil) { context in
+                    PickerFixtureJournal.record(.transitionCompleted, ticket: ticket, flag: context.isCancelled)
+                    done(context.isCancelled)
+                }
+            }
+        } else { retirement.dismiss() }
     }
 
     /// The same decision boundary is exercised with held transition receipts in

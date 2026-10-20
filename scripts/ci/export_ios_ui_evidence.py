@@ -329,13 +329,19 @@ def export_evidence(bundle: Path, output: Path, run=command) -> dict:
 
 
 def _collect_fixture_journal(container: Path, output: Path, report: dict, *,
-                             source_name: str, name: str, pattern: str, label: str) -> None:
+                             source_name: str, name: str, pattern: str, label: str,
+                             optional: bool = False) -> None:
     """Read one fixture-only cache file, never enumerate the simulator container."""
     source = container / "Library" / "Caches" / source_name
     try:
         if any(p.is_symlink() for p in (container, container / "Library", source.parent, source)):
             raise EvidenceError("Unsafe fixture journal path")
-        fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            if optional:
+                return
+            raise
         with os.fdopen(fd, "rb") as stream:
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_TEXT_BYTES:
@@ -363,25 +369,34 @@ def _collect_fixture_journal(container: Path, output: Path, report: dict, *,
 
 PICKER_STAGES = (
     "selection-created", "coordinator-created", "controller-created",
-    "presentation-requested", "presentation-completed", "presenter-disappeared",
+    "presentation-requested", "presentation-completed", "presenter-retained", "presenter-disappeared",
     "selected", "cancelled", "dismantle", "retirement-observed",
     "retirement-no-modal", "retirement-dismiss", "transition-registered",
     "transition-completed", "dismiss-completed", "completion-begin",
     "completion-end", "delegate-returning", "sheet-clear", "sheet-disappeared",
     "sheet-dismissed", "upload-returned", "outcome-not-sent", "outcome-uncertain",
-    "outcome-verified", "presenter-deinit", "coordinator-deinit",
+    "outcome-verified", "presenter-deinit", "coordinator-deinit", "session-retired",
 )
+PICKER_OPENING_SLOTS = range(1, 17)
 
 
 def collect_picker_journal(container: Path, output: Path, report: dict) -> None:
     legacy = r"(?:success|cancel|lost-ack) (?:coordinator-created|controller-created|selected|cancelled|dismantle|completion-begin|completion-end) presented=[01] transitioning=[01] dismissing=[01]"
-    current = (r"v2 ticket=[1-9][0-9]{0,3} ms=(?:0|[1-9][0-9]{0,5}) "
-               r"language=(?:english|traditionalChinese) scenario=(?:success|cancel|lost-ack) "
-               r"stage=(?:" + "|".join(PICKER_STAGES) + r") "
-               r"presented=[01] transitioning=[01] dismissing=[01] flag=[01]")
+    current_fields = (r" ms=(?:0|[1-9][0-9]{0,5}) "
+                      r"language=(?:english|traditionalChinese) scenario=(?:success|cancel|lost-ack) "
+                      r"stage=(?:" + "|".join(PICKER_STAGES) + r") "
+                      r"presented=[01] transitioning=[01] dismissing=[01] flag=[01]")
+    current = r"v2 ticket=[1-9][0-9]{0,3}" + current_fields
     _collect_fixture_journal(container, output, report,
         source_name="eos-picker-lifecycle.txt", name="picker-lifecycle.txt", label="synthetic-picker-lifecycle",
         pattern="(?:" + legacy + "|" + current + ")")
+    # Exact, optional paths only. A slot cannot contain a legacy or different
+    # ticket's record, and no directory listing can admit other app data.
+    for slot in PICKER_OPENING_SLOTS:
+        _collect_fixture_journal(container, output, report,
+            source_name=f"eos-picker-lifecycle-opening-{slot}.txt",
+            name=f"picker-lifecycle-opening-{slot}.txt", label="synthetic-picker-lifecycle-opening",
+            pattern=f"v2 ticket={slot}" + current_fields, optional=True)
 
 
 def collect_capture_mode_journal(container: Path, output: Path, report: dict) -> None:
