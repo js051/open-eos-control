@@ -10,6 +10,41 @@ CORE = ROOT / "ios/OpenEOSCore/Sources/OpenEOSCore"
 
 
 class IOSMediaUploadSourceTests(unittest.TestCase):
+    def test_provider_view_is_loaded_only_by_real_system_presentation(self):
+        picker = (APP / "MediaUploadPicker.swift").read_text()
+        session = picker.split("final class Session {", 1)[1].split("private let presentation:", 1)[0]
+        system = picker.split("static let system = Self(", 1)[1].split("private struct Opening", 1)[0]
+        view_setup = 'picker.view.accessibilityIdentifier = "media-upload-document-picker"'
+        present = "host.present(picker, animated: true, completion: completion)"
+        self.assertNotRegex(session, r"\bpicker\.view\b", "Session must not load an unpresented provider view")
+        self.assertEqual(picker.count(view_setup), 1)
+        self.assertIn(view_setup, system)
+        self.assertLess(system.index(view_setup), system.index(present))
+        # Configuration intent only: UIKit's effective style can differ at runtime.
+        self.assertEqual(picker.count("picker.modalPresentationStyle = .overFullScreen"), 1)
+        self.assertIn("picker.modalPresentationStyle = .overFullScreen", session)
+        self.assertNotIn("modalPresentationStyle", system)
+
+    def test_receipt_probe_isolation_preserves_final_release_guarantees(self):
+        tests = (ROOT / "ios/OpenEOSControl/Tests/MediaResponseOwnershipTests.swift").read_text()
+        probe = tests.split("private final class PickerPresentationProbe {", 1)[1].split(
+            "private enum OwnershipOperation", 1
+        )[0]
+        release = tests.split("func testGalleryRemovalKeepsOwnerThroughPublicReceiptsThenReleasesIt()", 1)[1].split(
+            "func testRemovalDuringHeldSelectionRetirementRejectsDeliveryAndPendingReopen", 1
+        )[0]
+        self.assertNotRegex(probe, r"\bpicker\.view\b")
+        self.assertEqual(probe.count("XCTAssertFalse(picker.isViewLoaded"), 2)
+        self.assertIn("XCTAssertEqual(ObjectIdentifier(picker), presentedPickers.last)", probe)
+        self.assertIn("try autoreleasepool {", release)
+        self.assertEqual(release.count("XCTAssertNotNil(weakPresenter"), 2)
+        for reference in ["weakPresenter", "weakSession", "weakCoordinator"]:
+            self.assertIn(f"XCTAssertNil({reference})", release)
+        for queue in ["pendingPresentationCount", "pendingRetirementCount"]:
+            self.assertIn(f"XCTAssertEqual(probe.{queue}, 0)", release)
+        self.assertNotIn("Task.sleep", release)
+        self.assertNotIn("RunLoop", release)
+
     def test_immutable_os_picker_uses_explicit_one_shot_opening(self):
         view = (APP / "MediaView.swift").read_text()
         picker = (APP / "MediaUploadPicker.swift").read_text()

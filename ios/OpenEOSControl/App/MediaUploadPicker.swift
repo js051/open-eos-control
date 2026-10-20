@@ -75,7 +75,12 @@ struct MediaUploadPicker: View {
                     }
                     return true
                 },
-                present: { host, picker, completion in host.present(picker, animated: true, completion: completion) },
+                present: { host, picker, completion in
+                    // Loading a real provider view belongs to real UIKit presentation,
+                    // not to a Session whose ownership receipts may be substituted.
+                    picker.view.accessibilityIdentifier = "media-upload-document-picker"
+                    host.present(picker, animated: true, completion: completion)
+                },
                 retire: { picker, ticket, completion in
                     MediaUploadPicker.retire(picker, ticket: ticket, completion: completion)
                 }
@@ -100,14 +105,14 @@ struct MediaUploadPicker: View {
                 picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
                 picker.allowsMultipleSelection = false
                 picker.delegate = coordinator
-                // Keep the gallery in the hierarchy while the real provider is visible.
+                // Request a non-removing presentation. UIKit may adapt its effective
+                // style; the gallery host's lifetime is governed by ownership below.
                 picker.modalPresentationStyle = .overFullScreen
                 #if DEBUG
                 if ProcessInfo.processInfo.environment["OEC_UPLOAD_JOURNEY_FIXTURE"] != nil {
                     picker.directoryURL = try? BridgeUploadJourneyFixture.seedPickerFile().deletingLastPathComponent()
                 }
                 #endif
-                picker.view.accessibilityIdentifier = "media-upload-document-picker"
                 MediaUploadPicker.trace(.controllerCreated, picker, ticket: selection.fixtureTicket)
             }
         }

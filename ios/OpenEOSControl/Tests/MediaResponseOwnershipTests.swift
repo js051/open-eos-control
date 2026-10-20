@@ -392,26 +392,38 @@ final class MediaResponseOwnershipTests: XCTestCase {
         let probe = PickerPresentationProbe()
         let presenter = MediaUploadPicker.Presenter(presentation: probe.presentation)
         var deliveries: [(MediaUploadSelection, [URL]?)] = []
+        var previousSession: MediaUploadPicker.Presenter.Session?
         for selected in [true, false] {
             let opening = MediaUploadSelection(owner: UUID())
             presenter.update(selection: opening) { deliveries.append(($0, $1)) }
             let session = try XCTUnwrap(presenter.active)
             XCTAssertEqual(session.coordinator.selection, opening)
-            XCTAssertEqual(session.picker.view.accessibilityIdentifier, "media-upload-document-picker")
-            XCTAssertEqual(session.picker.modalPresentationStyle, .overFullScreen)
+            XCTAssertFalse(session.picker.isViewLoaded, "Receipt probes must not materialize a provider view")
+            XCTAssertTrue(session.picker.delegate === session.coordinator)
+            XCTAssertEqual(probe.presenters.last, ObjectIdentifier(presenter))
+            XCTAssertEqual(probe.presentedPickers.last, ObjectIdentifier(session.picker))
+            if let previousSession {
+                XCTAssertFalse(session === previousSession)
+                XCTAssertFalse(session.picker === previousSession.picker)
+                XCTAssertFalse(session.coordinator === previousSession.coordinator)
+            }
             XCTAssertFalse(session.picker.allowsMultipleSelection)
             try probe.finishPresentation()
+            XCTAssertFalse(session.picker.isViewLoaded, "Receipt probes must not materialize a provider view")
             let before = deliveries.count
             if selected {
                 session.coordinator.documentPicker(session.picker, didPickDocumentsAt: [URL(fileURLWithPath: "/synthetic/SELECTED.JPG")])
             } else { session.coordinator.documentPickerWasCancelled(session.picker) }
             XCTAssertEqual(deliveries.count, before)
             XCTAssertTrue(presenter.active === session)
+            XCTAssertEqual(probe.retiredPickers.last, ObjectIdentifier(session.picker))
             try probe.finishRetirement()
+            XCTAssertFalse(session.picker.isViewLoaded, "Receipt probes must not materialize a provider view")
             XCTAssertNil(presenter.active)
             XCTAssertEqual(deliveries.count, before + 1)
             XCTAssertEqual(deliveries.last?.0, opening)
             XCTAssertEqual(deliveries.last?.1 != nil, selected)
+            previousSession = session
             presenter.update(selection: nil) { _, _ in XCTFail("No replacement completion") }
         }
         XCTAssertEqual(probe.presenters, [ObjectIdentifier(presenter), ObjectIdentifier(presenter)])
@@ -450,22 +462,35 @@ final class MediaResponseOwnershipTests: XCTestCase {
 
     func testGalleryRemovalKeepsOwnerThroughPublicReceiptsThenReleasesIt() throws {
         let probe = PickerPresentationProbe()
-        var presenter: MediaUploadPicker.Presenter? = .init(presentation: probe.presentation)
-        weak var weakPresenter = presenter
+        weak var weakPresenter: MediaUploadPicker.Presenter?
+        weak var weakSession: MediaUploadPicker.Presenter.Session?
+        weak var weakCoordinator: MediaUploadPicker.Coordinator?
         var deliveries = 0
-        presenter?.update(selection: MediaUploadSelection(owner: UUID())) { _, _ in deliveries += 1 }
-        weak var weakSession = presenter?.active
-        weak var weakCoordinator = presenter?.active?.coordinator
-        presenter?.dismantle()
-        presenter?.dismantle()
-        presenter = nil
-        XCTAssertNotNil(weakPresenter, "The registered presentation receipt owns the detached host")
-        XCTAssertNotNil(weakSession)
-        XCTAssertTrue(probe.retiredPickers.isEmpty)
-        try probe.finishPresentation()
-        XCTAssertEqual(probe.retiredPickers.count, 1)
-        XCTAssertNotNil(weakPresenter, "The registered dismissal receipt now owns the detached host")
-        try probe.finishRetirement()
+        // Drain Objective-C/XCTest temporaries at a deterministic scope boundary,
+        // not by sleeping, polling, or pretending the remote service is quiescent.
+        try autoreleasepool {
+            var presenter: MediaUploadPicker.Presenter? = .init(presentation: probe.presentation)
+            weakPresenter = presenter
+            presenter?.update(selection: MediaUploadSelection(owner: UUID())) { _, _ in deliveries += 1 }
+            weakSession = presenter?.active
+            weakCoordinator = presenter?.active?.coordinator
+            presenter?.dismantle()
+            presenter?.dismantle()
+            presenter = nil
+            XCTAssertNotNil(weakPresenter, "The registered presentation receipt owns the detached host")
+            XCTAssertNotNil(weakSession)
+            XCTAssertTrue(probe.retiredPickers.isEmpty)
+            XCTAssertEqual(probe.pendingPresentationCount, 1)
+            XCTAssertEqual(probe.pendingRetirementCount, 0)
+            try probe.finishPresentation()
+            XCTAssertEqual(probe.retiredPickers.count, 1)
+            XCTAssertNotNil(weakPresenter, "The registered dismissal receipt now owns the detached host")
+            XCTAssertEqual(probe.pendingPresentationCount, 0)
+            XCTAssertEqual(probe.pendingRetirementCount, 1)
+            try probe.finishRetirement()
+        }
+        XCTAssertEqual(probe.pendingPresentationCount, 0)
+        XCTAssertEqual(probe.pendingRetirementCount, 0)
         XCTAssertNil(weakPresenter)
         XCTAssertNil(weakSession)
         XCTAssertNil(weakCoordinator)
@@ -1043,13 +1068,20 @@ final class MediaResponseOwnershipTests: XCTestCase {
 private final class PickerPresentationProbe {
     var ready = true
     var presenters: [ObjectIdentifier] = []
+    var presentedPickers: [ObjectIdentifier] = []
     var retiredPickers: [ObjectIdentifier] = []
     private var presentations: [() -> Void] = []
     private var retirements: [() -> Void] = []
+    var pendingPresentationCount: Int { presentations.count }
+    var pendingRetirementCount: Int { retirements.count }
     var presentation: MediaUploadPicker.Presenter.Presentation {
-        .init(isReady: { [self] _ in ready }, present: { [self] host, _, done in
-            presenters.append(ObjectIdentifier(host)); presentations.append(done)
+        .init(isReady: { [self] _ in ready }, present: { [self] host, picker, done in
+            XCTAssertFalse(picker.isViewLoaded, "Receipt probes must not materialize a provider view")
+            presenters.append(ObjectIdentifier(host)); presentedPickers.append(ObjectIdentifier(picker))
+            presentations.append(done)
         }, retire: { [self] picker, _, done in
+            XCTAssertFalse(picker.isViewLoaded, "Receipt probes must not materialize a provider view")
+            XCTAssertEqual(ObjectIdentifier(picker), presentedPickers.last)
             retiredPickers.append(ObjectIdentifier(picker)); retirements.append(done)
         })
     }

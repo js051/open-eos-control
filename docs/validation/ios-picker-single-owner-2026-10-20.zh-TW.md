@@ -40,7 +40,8 @@
 5. retirement 結束前不能呈現 replacement。結束後釋放 active Session，再交付該次結果；Presenter 留在相簿。
 6. gallery removal／selection replacement 先 invalidates 舊 Coordinator，舊結果不能取得安全作用域或影響新 owner。
 7. 同一 consumed ticket、重複 delegate／presentation／retirement callback 都不能重新呈現或交付。
-8. 仍保留 `.overFullScreen`、真正 picker 的 accessibility identifier、fixture directory hint、單選、既有 grant acquisition/release 與 reconnect admission。
+8. 仍保留 `.overFullScreen` 的設定要求、真正 picker 的 accessibility identifier、fixture directory hint、單選、既有 grant acquisition/release 與 reconnect admission。
+   此要求不是 UIKit effective modal style 一定為同一 raw value 的保證。
 
 [Apple 的 dismiss completion 契約](https://developer.apple.com/documentation/uikit/uiviewcontroller/dismiss(animated:completion:))
 是 view-controller 生命週期邊界，不承諾 DocumentManager 的遠端 XPC 已排空。
@@ -102,13 +103,77 @@ SHA-256 `05a60bbd2bfc3064451fa17f094a2435d72b541cf10a41989740b8609487af37`。
 原有雙語 Cancel／reopen／reconnect、六個 selection 情境、實際 provider、安全作用域、
 stale owner 與 uncertainty／verified 邊界都保留。
 
-Apple 原生 gate：pending。僅一次既有完整 Apple dev workflow，預估 40–50 分鐘加排隊；
-原 45 分鐘 App/UI step 與 55 分鐘 job timeout 不變。不得自動重跑。
+Apple 原生 gate：[39483834003](https://github.com/js051/open-eos-control/actions/runs/39483834003)
+在 `26bd6d35629c3ba9b48d357f554e9e3dd1947e7b` 結束為 **FAIL**。
+secret scan、Core、一般 Apple SDK app build 通過；App/UI step 19:33:11–20:11:08 UTC，
+37 分 57 秒，未超過原 45 分鐘 step／55 分鐘 job timeout。沒有手動重試或其他平台 fanout。
+
+- 44 個原始 UI tests 全數通過。雙語 Cancel／reopen 案例 96.369 秒；六個選檔情境 214.612 秒。
+- App log 有 853 個不同的 test starts、849 個明確 pass、3 個明確 failed endings；
+  另 1 個案例遭 process termination 中斷，terminal failing list 共 4 個。不能宣稱 App 完整通過。
+- 新增 `testGalleryPresenterSurvivesSelectionAndCancelWithoutReplacingItsHost` 的兩次 style getter
+  觀察為 raw 2，而非測試假定的 raw 5。
+- 新增 `testGalleryRemovalKeepsOwnerThroughPublicReceiptsThenReleasesIt` 最後的 weak Presenter
+  非 nil；同一處後續 weak Session、Coordinator nil 斷言沒有失敗。
+- 19:39:38–39 的 App unit-test process 出現 `DOCWeakProxy` 例外；這次 log 明確提供
+  deallocated-host-proxy reason 與 `_updateRemoteBarButtonFrames:forUUID:` selector。
+  `testRetiredInfoAndEveryMetadataResponseCannotOwnReplacementSession` 被記錄為例外失敗，
+  `testVerifiedReceiptIdentitySurvivesFailedGalleryRefresh` 隨後開始但被終止。
+  這是 framework/XPC stack，不是證明 metadata callback 為原因；也不是上述已通過的 UI case 崩潰。
+
 這是 supplemental dev validation，不等同 PR `ci-complete` 或 physical-camera 驗收。
 若 runtime 與基準不同，必須另列 comparison limitation。
-零尺寸背景 Host 的實際 window／viewDidAppear，以及 overFullScreen 不觸發 gallery onDisappear，
-只能由此原生 gate 驗證。若其他 modal 暫時阻擋，只由合法的 update／viewDidAppear 再推進 pending opening，
+本次原生 journal 的十個實際 opening 均記錄 presentation-completed 的 presented=1，
+retirement 後 presenter-retained flag=1，completion 前沒有 dismantle／presenter-disappeared。
+這支持本次實際呈現及未 dismantle 的擁有權觀察，不把 flag 變成 window attachment 或 XPC lifetime 證明。
+若其他 modal 暫時阻擋，只由合法的 update／viewDidAppear 再推進 pending opening，
 不以 timer 或 polling 繞過呈現邊界。
+
+小型 artifact 12294663572（5,603,605 bytes）保有 aggregate 與個別 opening 1–4；
+原 64-file cap 在此用盡，summary 明確標記 incomplete，個別 5–10 未匯出。
+後六個情境仍留在 aggregate，但不能宣稱所有個別 opening 檔案皆已取得。
+不提高 cap，也沒有因這次例外下載完整 xcresult。
+
+## App 單元邊界更正候選（四檔，離線通過／Apple 待驗證）
+
+更正基準為上述 `26bd6d3`。Session 建構時讀取 `picker.view` 會載入真實 provider view，
+但新 unit probe 只替代 presentation／retirement receipts，沒有執行真正 UIKit 呈現。
+這是確定的 isolation 邊界問題；非同步 XPC 例外與它相鄰並不能證明是哪個 picker 造成，
+也不能把全部四個 App 失敗直接歸為測試雜訊。
+[Apple 的 view 契約](https://developer.apple.com/documentation/UIKit/UIViewController/view)
+明確區分會觸發 loadView 的 `view` 與不載入的 `isViewLoaded`。
+
+1. 僅將 accessibility view materialization 移至真正的 `Presentation.system.present`，
+   在原 `host.present` 之前執行。Session 的 `.overFullScreen` 要求與 directory 設定不變，
+   不在載入後重新指定 style；原 immutable ticket、strong public receipts、retirement 與 grant 契約不變。
+2. synthetic probe 不再讀取 `view` 或假設 effective style getter，改為在 admission／retirement
+   及 held receipt 前後嚴格確認 picker 未載入，並確認確切 Presenter／Session／Coordinator／picker identity。
+   真正 accessibility identifier 與 provider 互動仍由原始、完全不變的 UI tests 覆蓋。
+   source guard 確保 production 仍提出同一 style 要求，但這不是 raw 5 原生行為證明。
+3. 保留兩次中途 alive 檢查與最後三個 weak nil 斷言；建構、XCTest 暫時引用與 receipt draining
+   放入明確 `autoreleasepool`，離開後仍保有 probe、確認兩個 receipt queue 為空，再要求三者均 nil。
+   Objective-C/XCTest 暫存引用只是可檢驗假設，若 pool 結束仍不釋放就保留該失敗。
+   不加入 sleep、run-loop drain、polling 或放寬 weak 斷言。
+4. 原有 29 個 ownership methods、完整 UI file、production Retirement／Coordinator 不變。
+
+更正離線 gate：PASS（2026-10-20 20:25 UTC）。保留原五分鐘 ceiling，使用 2 CPU、
+768 MiB ceiling、既有工具與 2 GiB free-disk floor。完整最後 gate 5.58 秒，
+sampled process-tree peak 90,932 KiB；結束時 free disk 2,263,339,008 bytes。
+
+- frozen baseline 的 source guard 如預期失敗；六個指定 receipt-probe methods 共 24 個失敗斷言，
+  全部且僅為 eager-view isolation。其他 ownership／journal methods 通過。這不是 native crash RED。
+- candidate 的 22 個 extracted Swift tests、63 focused Python tests、125 CI helper tests、
+  ordinary／fixture parse、完整 Ruff 指令與 diff/source integrity 均通過；Python 組別部分重疊。
+- 原 29 個 semantic ownership methods、已發布候選的其餘 34 個 methods、原 8 個 source guard
+  的 AST、原完整 UI hash、Retirement／Coordinator／admission／grant／journal／exporter 不變。
+- 最初 gate 找到一個新增 guard 的 E501；只做 AST-identical line wrap。
+  隨後編譯發現四個新 identity assertion 誤用 `Array.last()` 而非 `.last`，以及對應 guard 字串；
+  修正 property syntax 後原斷言保留。兩次失敗 receipt 留存，不當成 baseline RED 或測試通過。
+  靜態獨立 review 沒有發現此語法錯誤，不能把 review 代替編譯證據。
+
+Linux 的 autoreleasepool substitute 僅執行 closure，不模擬 Apple Objective-C autorelease，
+因此真正釋放及 provider 安全仍須下一個單次 Apple gate 驗證。
+候選完成後的既有 Apple-only workflow 預估 40–50 分鐘加排隊；不改 timeout、不自動重跑、不使用 KVM。
 
 ## 可證偽與後續決策
 
@@ -123,3 +188,6 @@ test_picker_journal_evidence.py、test_ios_media_upload_source.py 與本文件�
 發布僅限原 dev 的這九個檔案；push 前須 fresh head／無 open head:dev PR、正常 hooks、非 force。
 預期只觸發 Apple dev（含 secret scan/Core/App/UI），不改 workflow，不觸發 Android/KVM 或其他平台。
 任何新增 PR／意外 fanout 都先停止並重新評估，不能關掉必要 checks。
+
+上述已發布九檔保留；本次更正只修改 MediaUploadPicker.swift、MediaResponseOwnershipTests.swift、
+test_ios_media_upload_source.py 與本文件，不修改診斷 schema、exporter caps、原 UI tests 或 workflow。
