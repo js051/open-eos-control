@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.CameraFeature
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -51,6 +52,11 @@ class MediaScreenActionOwnershipUiTest {
     @Test fun retiredGalleryClickCannotOpenAReplacementCamerasReusedItem() {
         val current = mutableStateOf(CameraUiState().withOfflinePreview().copy(
             previewMode = false, uiMode = UiMode.MEDIA, mediaItems = listOf(item)))
+        // Offline preview deliberately lacks real camera preview support. This fixture is
+        // a connected synthetic camera, so explicitly advertise the capability under test.
+        current.value = current.value.copy(capabilities = requireNotNull(current.value.capabilities).let {
+            it.copy(matrix = it.matrix.copy(supported = it.matrix.supported + CameraFeature.MEDIA_PREVIEW))
+        })
         var previews = 0
         compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) {
             MediaScreen(current.value, connectionRecoveryTestActions().copy(openMediaPreview = { previews++ }))

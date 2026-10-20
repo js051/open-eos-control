@@ -573,7 +573,7 @@ internal class AndroidCcapiRtpSession(
                 catch (cancel: CancellationException) { throw cancel }
                 catch (_: Exception) { throw LutFallback(NativeVideoLutStatus.UNSUPPORTED_GPU) }
             } else targetSurface
-            codec = MediaCodec.createDecoderByType(MIME_AVC)
+            codec = createNativeRtpAvcDecoder()
             val format = MediaFormat.createVideoFormat(MIME_AVC, DEFAULT_VIDEO_WIDTH, DEFAULT_VIDEO_HEIGHT).apply {
                 setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_H264_DECODER_INPUT_BYTES)
                 setInteger(MediaFormat.KEY_PRIORITY, 0)

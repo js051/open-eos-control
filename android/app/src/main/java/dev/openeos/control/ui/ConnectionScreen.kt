@@ -227,7 +227,7 @@ private fun CcapiConnectionControls(
     }
     Button(
         onClick = actions.connect,
-        enabled = !state.isBusy(CameraOperation.CONNECT) && !state.isBusy(CameraOperation.BRIDGE) && state.baseUrl.isNotBlank(),
+        enabled = !state.isBusy(CameraOperation.CONNECT) && CameraOperation.BRIDGE !in state.pendingOperations && state.baseUrl.isNotBlank(),
         modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp).testTag("connection-connect"),
         shape = RoundedCornerShape(6.dp),
     ) {

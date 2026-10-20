@@ -219,6 +219,9 @@ class CameraRecordingMediaJourneyTest {
     @Test
     fun acknowledgedReadbackFailureOffersStopAndReadOnlyRefreshThenReviewsAndSavesMovie() {
         compose.onNodeWithTag("capture-mode-VIDEO").assertIsDisplayed().performClick()
+        // Selection is a draft; only the explicit Apply may change capture mode.
+        assertEquals(CaptureMode.PHOTO, model.uiState.value.captureMode)
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").assertIsEnabled().performClick()
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
             model.uiState.value.captureMode == CaptureMode.VIDEO && !model.uiState.value.busy
         }
@@ -260,6 +263,9 @@ class CameraRecordingMediaJourneyTest {
     private fun recordAndStopOnce() {
         assertEquals(previousId, model.uiState.value.captureReviewItem?.id)
         compose.onNodeWithTag("capture-mode-VIDEO").assertIsDisplayed().performClick()
+        // Selection is a draft; only the explicit Apply may change capture mode.
+        assertEquals(CaptureMode.PHOTO, model.uiState.value.captureMode)
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").assertIsEnabled().performClick()
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
             model.uiState.value.captureMode == CaptureMode.VIDEO && !model.uiState.value.busy
         }

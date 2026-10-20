@@ -7,7 +7,7 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import dev.openeos.control.data.AutomaticJpegEnvelope
 import dev.openeos.control.data.InvalidAutomaticJpegException
-import dev.openeos.control.data.validateAutomaticJpegStructure
+import dev.openeos.control.data.validateAutomaticJpegSequentialEntropy
 
 /** Local pending-row reads only. Neither validation gate can fetch or retry a camera original. */
 @RequiresApi(Build.VERSION_CODES.Q)
@@ -20,11 +20,12 @@ internal fun validateAutomaticJpegPendingOriginal(
 ) {
     checkActive()
     val structure = resolver.openInputStream(destination)?.use {
-        validateAutomaticJpegStructure(it, byteLength, sha256, checkActive)
+        validateAutomaticJpegSequentialEntropy(it, byteLength, sha256, checkActive)
     } ?: throw InvalidAutomaticJpegException("could not read the pending original")
     checkActive()
-    // ImageDecoder reports partial-input errors explicitly. A bounds-only result or a
-    // BitmapFactory partial bitmap would not establish this acceptance gate.
+    // ImageDecoder can conceal missing sequential MCUs even with the partial listener
+    // rejecting input errors. The local gate above must establish entropy coverage first.
+    // Native decode remains mandatory; structure/coverage alone cannot establish pixels.
     val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(resolver, destination)) { decoder, info, _ ->
         checkActive()
         val width = info.size.width

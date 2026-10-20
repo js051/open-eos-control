@@ -49,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -508,6 +509,9 @@ internal fun MediaViewerDialog(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Dialog creates a new Android view root from LocalView's context. Preserve the
+    // caller's localized resource context across that boundary, including language changes.
+    val resourceContext = LocalContext.current
     val hasSaveFeedback = saveFeedback != null || otherDownloadName != null
     val captureTime = mediaCaptureTimeLabel(item.captureTime, displayZone, stringResource(R.string.media_time_zone_unknown))
     val size = mediaByteSizeLabel(item.sizeBytes)
@@ -518,144 +522,146 @@ internal fun MediaViewerDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        BoxWithConstraints(
-            modifier.fillMaxSize().background(Color.Black).testTag("media-viewer-content")
-                .windowInsetsPadding(WindowInsets.safeDrawing),
-        ) {
-            val maximumFeedbackHeight = maxHeight * 0.4f
-            Column(Modifier.fillMaxSize()) {
-                Row(
-                    Modifier.fillMaxWidth().height(76.dp)
-                        .background(Color.Black.copy(alpha = 0.76f)).padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ToolIconButton(
-                        LucideR.drawable.lucide_ic_x,
-                        stringResource(R.string.close_media_preview),
-                        onDismiss,
-                        tint = Color.White,
-                    )
-                    Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                        Text(
-                            item.name,
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+        CompositionLocalProvider(LocalContext provides resourceContext) {
+            BoxWithConstraints(
+                modifier.fillMaxSize().background(Color.Black).testTag("media-viewer-content")
+                    .windowInsetsPadding(WindowInsets.safeDrawing),
+            ) {
+                val maximumFeedbackHeight = maxHeight * 0.4f
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier.fillMaxWidth().height(76.dp)
+                            .background(Color.Black.copy(alpha = 0.76f)).padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ToolIconButton(
+                            LucideR.drawable.lucide_ic_x,
+                            stringResource(R.string.close_media_preview),
+                            onDismiss,
+                            tint = Color.White,
                         )
-                        if (position > 0 && totalCount > 0) {
+                        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                             Text(
-                                stringResource(R.string.media_viewer_position, position, totalCount),
-                                color = Color.White.copy(alpha = 0.72f),
+                                item.name,
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (position > 0 && totalCount > 0) {
+                                Text(
+                                    stringResource(R.string.media_viewer_position, position, totalCount),
+                                    color = Color.White.copy(alpha = 0.72f),
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                        if (downloadEnabled) {
+                            ToolIconButton(
+                                LucideR.drawable.lucide_ic_download,
+                                stringResource(R.string.download_media, item.name),
+                                onDownload,
+                                enabled = !downloadBusy,
+                                tint = Color.White,
+                            )
+                        }
+                        if (actionsEnabled) {
+                            ToolIconButton(
+                                LucideR.drawable.lucide_ic_ellipsis_vertical,
+                                stringResource(R.string.media_actions, item.name),
+                                onActions,
+                                tint = Color.White,
                             )
                         }
                     }
-                    if (downloadEnabled) {
-                        ToolIconButton(
-                            LucideR.drawable.lucide_ic_download,
-                            stringResource(R.string.download_media, item.name),
-                            onDownload,
-                            enabled = !downloadBusy,
-                            tint = Color.White,
-                        )
-                    }
-                    if (actionsEnabled) {
-                        ToolIconButton(
-                            LucideR.drawable.lucide_ic_ellipsis_vertical,
-                            stringResource(R.string.media_actions, item.name),
-                            onActions,
-                            tint = Color.White,
-                        )
-                    }
-                }
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                    when {
-                        item.isVideo && streamSource != null -> CameraVideoPlayer(
-                            item = item,
-                            source = streamSource,
-                            downloadEnabled = downloadEnabled && !downloadBusy,
-                            onDownload = onDownload,
-                        )
-                        item.isPhoto && bytes != null -> ZoomableMediaImage(
-                            item = item,
-                            bytes = bytes,
-                            hasBottomMetadata = !hasSaveFeedback && (captureTime != null || technicalDetails != null),
-                        )
-                        loading -> CircularProgressIndicator(
-                            modifier = Modifier.align(Alignment.Center).size(36.dp),
-                            color = AppAccent,
-                            strokeWidth = 3.dp,
-                        )
-                        offlinePlaceholder -> Column(
-                            modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            Icon(
-                                painterResource(LucideR.drawable.lucide_ic_image),
-                                contentDescription = null,
-                                tint = AppAccent,
-                                modifier = Modifier.size(48.dp),
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        when {
+                            item.isVideo && streamSource != null -> CameraVideoPlayer(
+                                item = item,
+                                source = streamSource,
+                                downloadEnabled = downloadEnabled && !downloadBusy,
+                                onDownload = onDownload,
                             )
-                            Text(
-                                stringResource(R.string.offline_media_preview_placeholder),
+                            item.isPhoto && bytes != null -> ZoomableMediaImage(
+                                item = item,
+                                bytes = bytes,
+                                hasBottomMetadata = !hasSaveFeedback && (captureTime != null || technicalDetails != null),
+                            )
+                            loading -> CircularProgressIndicator(
+                                modifier = Modifier.align(Alignment.Center).size(36.dp),
+                                color = AppAccent,
+                                strokeWidth = 3.dp,
+                            )
+                            offlinePlaceholder -> Column(
+                                modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Icon(
+                                    painterResource(LucideR.drawable.lucide_ic_image),
+                                    contentDescription = null,
+                                    tint = AppAccent,
+                                    modifier = Modifier.size(48.dp),
+                                )
+                                Text(
+                                    stringResource(R.string.offline_media_preview_placeholder),
+                                    color = AppSubtleText,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.widthIn(max = 240.dp),
+                                )
+                            }
+                            else -> Text(
+                                stringResource(R.string.media_preview_unavailable),
                                 color = AppSubtleText,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.widthIn(max = 240.dp),
+                                modifier = Modifier.align(Alignment.Center).padding(24.dp),
                             )
                         }
-                        else -> Text(
-                            stringResource(R.string.media_preview_unavailable),
-                            color = AppSubtleText,
-                            modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                        )
-                    }
-                    if (canMovePrevious) {
-                        ViewerNavigationButton(
-                            icon = LucideR.drawable.lucide_ic_chevron_left,
-                            description = stringResource(R.string.previous_media),
-                            onClick = onPrevious,
-                            modifier = Modifier.align(Alignment.CenterStart),
-                        )
-                    }
-                    if (canMoveNext) {
-                        ViewerNavigationButton(
-                            icon = LucideR.drawable.lucide_ic_chevron_right,
-                            description = stringResource(R.string.next_media),
-                            onClick = onNext,
-                            modifier = Modifier.align(Alignment.CenterEnd),
-                        )
-                    }
-                    if (!hasSaveFeedback && (captureTime != null || technicalDetails != null)) {
-                        Column(
-                            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                                .background(Color.Black.copy(alpha = 0.76f))
-                                .padding(horizontal = 20.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            captureTime?.let {
-                                Text(it, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            technicalDetails?.let {
-                                Text(it, color = Color.White.copy(alpha = 0.72f), maxLines = 1)
+                        if (canMovePrevious) {
+                            ViewerNavigationButton(
+                                icon = LucideR.drawable.lucide_ic_chevron_left,
+                                description = stringResource(R.string.previous_media),
+                                onClick = onPrevious,
+                                modifier = Modifier.align(Alignment.CenterStart),
+                            )
+                        }
+                        if (canMoveNext) {
+                            ViewerNavigationButton(
+                                icon = LucideR.drawable.lucide_ic_chevron_right,
+                                description = stringResource(R.string.next_media),
+                                onClick = onNext,
+                                modifier = Modifier.align(Alignment.CenterEnd),
+                            )
+                        }
+                        if (!hasSaveFeedback && (captureTime != null || technicalDetails != null)) {
+                            Column(
+                                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                                    .background(Color.Black.copy(alpha = 0.76f))
+                                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                captureTime?.let {
+                                    Text(it, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                technicalDetails?.let {
+                                    Text(it, color = Color.White.copy(alpha = 0.72f), maxLines = 1)
+                                }
                             }
                         }
                     }
-                }
-                if (hasSaveFeedback) {
-                    MediaSaveFeedbackPanel(
-                        item = item,
-                        feedback = saveFeedback,
-                        otherDownloadName = otherDownloadName,
-                        otherDownloadProgress = otherDownloadProgress,
-                        captureTime = captureTime,
-                        technicalDetails = technicalDetails,
-                        retryEnabled = downloadEnabled && !downloadBusy,
-                        onRetry = onDownload,
-                        onCancel = onCancelDownload,
-                        modifier = Modifier.fillMaxWidth().heightIn(max = maximumFeedbackHeight),
-                    )
+                    if (hasSaveFeedback) {
+                        MediaSaveFeedbackPanel(
+                            item = item,
+                            feedback = saveFeedback,
+                            otherDownloadName = otherDownloadName,
+                            otherDownloadProgress = otherDownloadProgress,
+                            captureTime = captureTime,
+                            technicalDetails = technicalDetails,
+                            retryEnabled = downloadEnabled && !downloadBusy,
+                            onRetry = onDownload,
+                            onCancel = onCancelDownload,
+                            modifier = Modifier.fillMaxWidth().heightIn(max = maximumFeedbackHeight),
+                        )
+                    }
                 }
             }
         }

@@ -276,6 +276,22 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
         self.assertNotIn("format.toString()", fixture)
         self.assertNotIn("takeScreenshot", fixture)
 
+    def test_native_fixture_and_production_share_the_bounded_decoder_workaround(self):
+        fixture = (
+            ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/NativeRtpLutRenderingTest.kt"
+        ).read_text()
+        session = (DATA / "AndroidCcapiRtpSession.kt").read_text()
+        factory = (DATA / "AndroidNativeRtpDecoder.kt").read_text()
+        self.assertIn("codec = createNativeRtpAvcDecoder()", fixture)
+        self.assertIn("codec = createNativeRtpAvcDecoder()", session)
+        self.assertNotIn("MediaCodec.createDecoderByType", fixture)
+        self.assertIn("nativeRtpUsesGoldfishHostDecoder(defaultDecoder.name, Build.HARDWARE)", factory)
+        self.assertIn("if (replacement == null) return defaultDecoder", factory)
+        self.assertIn("!it.isEncoder", factory)
+        self.assertIn("type.equals(mime, ignoreCase = true)", factory)
+        self.assertLess(factory.index("defaultDecoder.release()"), factory.index("MediaCodec.createByCodecName"))
+        self.assertEqual(factory.count("MediaCodec.createDecoderByType(mime)"), 2)
+
     def test_native_fixture_retires_prior_captures_when_a_later_phase_fails(self):
         fixture = (
             ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/NativeRtpLutRenderingTest.kt"

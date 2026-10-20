@@ -1902,6 +1902,8 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.setting_metering_mode))
             .performScrollTo()
             .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-drivemode").performScrollTo()
+        compose.onNodeWithTag("advanced-setting-values-drivemode").performScrollToIndex(2)
         compose.onNodeWithText(resourceText(R.string.camera_value_super_high_speed_continuous))
             .assertIsDisplayed()
             .performClick()

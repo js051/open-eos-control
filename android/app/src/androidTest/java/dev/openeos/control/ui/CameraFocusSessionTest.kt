@@ -404,7 +404,11 @@ class CameraFocusSessionTest {
             viewModel.captureStill()
             viewModel.setLiveViewAutoRefresh(false)
         }
-        assertTrue(repository.isLiveViewRunning())
+        // Local presentation retires immediately. Remote view Stop remains blocked by
+        // failed AF release; neither a running claim nor a second camera command is safe.
+        assertFalse(repository.isLiveViewRunning())
+        assertTrue(repository.isLiveViewStopRequired())
+        assertFalse("AF release failure must block remote view Stop", viewWrites.contains("off"))
         assertEquals(listOf("start", "stop"), afWrites.toList())
         failAfStop.set(false)
         compose.runOnIdle { viewModel.retryHeldAutofocusStop() }
@@ -498,7 +502,9 @@ class CameraFocusSessionTest {
         failNextStop.set(true)
         compose.runOnIdle { viewModel.setLiveViewAutoRefresh(false) }
         compose.waitUntil(8_000) { viewModel.uiState.value.error != null }
-        assertTrue(repository.isLiveViewRunning())
+        assertFalse("An unconfirmed Stop cannot retain a running presentation claim", repository.isLiveViewRunning())
+        assertTrue(repository.isLiveViewStopRequired())
+        assertTrue(viewModel.uiState.value.needsLiveViewStopRecovery)
         assertEquals(CameraOperation.LIVE_VIEW, viewModel.uiState.value.errorOperation)
         compose.runOnIdle { viewModel.setLiveViewAutoRefresh(false) }
         awaitStopped()

@@ -4,6 +4,8 @@ import androidx.annotation.StringRes
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -297,8 +299,10 @@ class SimulatorEndToEndTest {
 
     private fun setAdvancedSetting(key: String, value: String, stateKey: String) {
         compose.onNodeWithTag("advanced-setting-$key").performScrollTo()
+        compose.onNodeWithTag("advanced-setting-values-$key")
+            .performScrollToNode(hasTestTag("advanced-setting-value-$key-$value"))
         compose.onNodeWithTag("advanced-setting-value-$key-$value")
-            .performScrollTo()
+            .assertIsDisplayed()
             .performClick()
         compose.onNodeWithTag("shooting-setting-apply-$key").performScrollTo().performClick()
         waitForSimulatorState { state ->

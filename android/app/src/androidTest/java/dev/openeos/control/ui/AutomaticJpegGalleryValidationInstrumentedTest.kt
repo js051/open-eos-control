@@ -70,14 +70,22 @@ class AutomaticJpegGalleryValidationInstrumentedTest {
             val bytes = Base64.getDecoder().decode(vector.getString("base64"))
             val media = item.copy(sizeBytes = bytes.size.toLong())
             val before = rows()
+            var attempts = 0
+            var publications = 0
+            var finalized = 0
             val result = runCatching {
-                CameraMediaGalleryStore(resolver).save(model, media, requireAutomaticJpeg = true) { output ->
+                CameraMediaGalleryStore(resolver).save(model, media, requireAutomaticJpeg = true,
+                    onPublished = { publications++ }, onFinalized = { finalized++ }) { output ->
+                    attempts++
                     output.write(bytes)
                     CameraMediaDownloadResult(media, bytes.size.toLong(), "image/jpeg")
                 }
             }
             val accepted = vector.getBoolean("structuralValid") && vector.getBoolean("decodedValid")
             assertEquals(vector.getString("id"), accepted, result.isSuccess)
+            assertTrue(vector.getString("id"), attempts <= 1)
+            assertEquals(vector.getString("id"), if (accepted) 1 else 0, publications)
+            assertEquals(vector.getString("id"), if (accepted) 1 else 0, finalized)
             if (accepted) {
                 assertArrayEquals(bytes, resolver.openInputStream(result.getOrThrow())!!.use { it.readBytes() })
                 assertPublished(result.getOrThrow())
@@ -103,7 +111,8 @@ class AutomaticJpegGalleryValidationInstrumentedTest {
         val sos = (0 until jpeg.lastIndex).first { jpeg[it] == 0xff.toByte() && jpeg[it + 1] == 0xda.toByte() }
         val size = (jpeg[sos + 2].toInt() and 255) * 256 + (jpeg[sos + 3].toInt() and 255)
         val noImageData = jpeg.copyOf(sos + 2 + size) + byteArrayOf(0x3f, 0xff.toByte(), 0xd9.toByte())
-        // It has all legal marker framing and one entropy byte, but cannot decode the frame.
+        // Legal marker framing and one entropy byte do not cover the frame's MCUs.
+        // ImageDecoder may conceal the missing blocks, so local entropy admission must reject it.
         dev.openeos.control.data.validateAutomaticJpegStructure(noImageData.inputStream(),
             noImageData.size.toLong(), digest(noImageData))
         assertRejected(noImageData)

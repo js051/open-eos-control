@@ -103,12 +103,37 @@ internal fun validateAutomaticJpegStructure(
     expectedLength: Long,
     expectedSha256: String,
     checkActive: () -> Unit = {},
+): AutomaticJpegStructure = validateAutomaticJpeg(input, expectedLength, expectedSha256, checkActive,
+    verifySequentialEntropy = false)
+
+/**
+ * Decode admission, separate from the frozen structure-only contract. Native decoders may
+ * conceal missing sequential MCUs; require every block's Huffman symbols and amplitude bits.
+ * Progressive scans retain their structure + native-decode path. This is not a progressive
+ * coefficient-refinement validator, nor a replacement for the mandatory native decode.
+ */
+internal fun validateAutomaticJpegSequentialEntropy(
+    input: InputStream,
+    expectedLength: Long,
+    expectedSha256: String,
+    checkActive: () -> Unit = {},
+): AutomaticJpegStructure = validateAutomaticJpeg(input, expectedLength, expectedSha256, checkActive,
+    verifySequentialEntropy = true)
+
+private fun validateAutomaticJpeg(
+    input: InputStream,
+    expectedLength: Long,
+    expectedSha256: String,
+    checkActive: () -> Unit,
+    verifySequentialEntropy: Boolean,
 ): AutomaticJpegStructure {
+    checkActive()
     requireAutomaticJpegLength(expectedLength)
     jpegRequire(expectedSha256.matches(Regex("[a-fA-F0-9]{64}")), "missing original digest")
-    return AutomaticJpegParser(input, expectedLength, checkActive).parse().also {
+    return AutomaticJpegParser(input, expectedLength, checkActive, verifySequentialEntropy).parse().also {
         jpegRequire(it.byteLength == expectedLength && it.sha256.equals(expectedSha256, ignoreCase = true),
             "pending bytes differ from the original write")
+        checkActive()
     }
 }
 
@@ -116,13 +141,22 @@ private fun jpegRequire(condition: Boolean, detail: String) {
     if (!condition) throw InvalidAutomaticJpegException(detail)
 }
 
-private class AutomaticJpegParser(input: InputStream, expected: Long, private val checkActive: () -> Unit) {
+private class AutomaticJpegParser(
+    input: InputStream,
+    expected: Long,
+    private val checkActive: () -> Unit,
+    private val verifySequentialEntropy: Boolean,
+) {
     private val reader = JpegReader(input, expected, checkActive)
     private val quantization = BooleanArray(4)
     private val huffman = Array(2) { BooleanArray(4) }
     private val sequentialAcSafe = BooleanArray(4)
     private val components = linkedMapOf<Int, Int>()
     private val samplingBlocks = mutableMapOf<Int, Int>()
+    private val horizontalSampling = mutableMapOf<Int, Int>()
+    private val verticalSampling = mutableMapOf<Int, Int>()
+    private val decodingTables = Array(2) { arrayOfNulls<JpegHuffmanTable>(4) }
+    private val scanComponents = mutableListOf<JpegScanComponent>()
     private val coefficients = mutableMapOf<Int, IntArray>()
     private val scannedComponents = mutableSetOf<Int>()
     private var frame = -1
@@ -163,7 +197,7 @@ private class AutomaticJpegParser(input: InputStream, expected: Long, private va
                 }
                 0xda -> {
                     readScan(segment)
-                    pendingMarker = entropy()
+                    pendingMarker = if (verifySequentialEntropy && frame != 0xc2) sequentialEntropy() else entropy()
                 }
                 // APP and COM segments are length-bounded but their metadata is not interpreted.
             }
@@ -201,6 +235,8 @@ private class AutomaticJpegParser(input: InputStream, expected: Long, private va
                 "invalid frame component")
             components[id] = table
             samplingBlocks[id] = (sampling shr 4) * (sampling and 15)
+            horizontalSampling[id] = sampling shr 4
+            verticalSampling[id] = sampling and 15
             coefficients[id] = IntArray(64) { -1 }
         }
         frame = marker
@@ -236,8 +272,10 @@ private class AutomaticJpegParser(input: InputStream, expected: Long, private va
             jpegRequire(kind in 0..1 && id in 0..3, "invalid Huffman table")
             var symbols = 0
             var available = 1
+            val counts = IntArray(16)
             repeat(16) {
                 val count = segment.u(offset++)
+                counts[it] = count
                 symbols += count
                 available = available * 2 - count
                 jpegRequire(available >= 0, "oversubscribed Huffman table")
@@ -249,6 +287,7 @@ private class AutomaticJpegParser(input: InputStream, expected: Long, private va
                 if (kind == 0) it <= 11 else (it and 15) <= 10
             }, "unsupported or duplicate Huffman symbol")
             if (kind == 1) sequentialAcSafe[id] = values.all { (it and 15) != 0 || it == 0 || it == 0xf0 }
+            if (verifySequentialEntropy) decodingTables[kind][id] = JpegHuffmanTable(counts, values.toIntArray())
             offset += symbols
             huffman[kind][id] = true
         }
@@ -273,6 +312,7 @@ private class AutomaticJpegParser(input: InputStream, expected: Long, private va
         val selected = mutableSetOf<Int>()
         val frameOrder = components.keys.toList()
         var previousComponent = -1
+        scanComponents.clear()
         repeat(count) { index ->
             val id = segment.u(1 + index * 2)
             val selector = segment.u(2 + index * 2)
@@ -300,6 +340,7 @@ private class AutomaticJpegParser(input: InputStream, expected: Long, private va
             if (frame != 0xc2) {
                 jpegRequire(id !in scannedComponents, "repeated sequential component")
                 jpegRequire(sequentialAcSafe[ac], "unsupported sequential AC symbol")
+                if (verifySequentialEntropy) scanComponents.add(JpegScanComponent(id, dc, ac))
             }
         }
         if (count > 1) jpegRequire(selected.sumOf { samplingBlocks.getValue(it) } <= 10,
@@ -307,6 +348,59 @@ private class AutomaticJpegParser(input: InputStream, expected: Long, private va
         scannedComponents.addAll(selected)
         scanCount++
         jpegRequire(scanCount <= AutomaticJpegEnvelope.MAX_SCANS, "too many scans")
+    }
+
+    /**
+     * T.81 B.2.1, E.2.3–5, F.2.2/F.2.3. No coefficient or pixel buffer is allocated.
+     * Frame limits bound MCU count; each block consumes at most 64 Huffman symbols.
+     * Check cancellation every MCU (at most ten blocks), also during reader refills.
+     */
+    private fun sequentialEntropy(): Int {
+        val maxH = horizontalSampling.values.max()
+        val maxV = verticalSampling.values.max()
+        val interleaved = scanComponents.size > 1
+        val first = scanComponents.first().id
+        val columns = if (interleaved) (width + 8 * maxH - 1) / (8 * maxH)
+            else (width * horizontalSampling.getValue(first) + 8 * maxH - 1) / (8 * maxH)
+        val rows = if (interleaved) (height + 8 * maxV - 1) / (8 * maxV)
+            else (height * verticalSampling.getValue(first) + 8 * maxV - 1) / (8 * maxV)
+        val mcus = columns * rows
+        val bits = JpegEntropyBits(reader)
+        var nextRestart = 0
+        repeat(mcus) { mcu ->
+            checkActive()
+            for (selected in scanComponents) {
+                val dc = requireNotNull(decodingTables[0][selected.dc])
+                val ac = requireNotNull(decodingTables[1][selected.ac])
+                val blocks = if (interleaved) samplingBlocks.getValue(selected.id) else 1
+                repeat(blocks) {
+                    bits.receive(bits.symbol(dc))
+                    var coefficient = 1
+                    while (coefficient < 64) {
+                        val symbol = bits.symbol(ac)
+                        val run = symbol shr 4
+                        val size = symbol and 15
+                        if (size == 0) {
+                            if (run == 0) break
+                            jpegRequire(run == 15, "invalid sequential AC run")
+                            coefficient += 16
+                            jpegRequire(coefficient <= 64, "AC zero run exceeds the block")
+                        } else {
+                            coefficient += run
+                            jpegRequire(coefficient < 64, "AC coefficient exceeds the block")
+                            bits.receive(size)
+                            coefficient++
+                        }
+                    }
+                }
+            }
+            if (restartInterval > 0 && (mcu + 1) % restartInterval == 0 && mcu + 1 < mcus) {
+                jpegRequire(bits.finishSegment() == 0xd0 + nextRestart, "missing or misplaced restart marker")
+                countMarker()
+                nextRestart = (nextRestart + 1) % 8
+            }
+        }
+        return bits.finishSegment()
     }
 
     private fun entropy(): Int {
@@ -334,6 +428,65 @@ private class AutomaticJpegParser(input: InputStream, expected: Long, private va
                 bytesSinceRestart = 0
             } else return next
         }
+    }
+}
+
+private data class JpegScanComponent(val id: Int, val dc: Int, val ac: Int)
+
+private class JpegHuffmanTable(val counts: IntArray, val symbols: IntArray) {
+    val firstCodes = IntArray(16)
+    val offsets = IntArray(16)
+
+    init {
+        var code = 0
+        var offset = 0
+        for (length in 0 until 16) {
+            firstCodes[length] = code
+            offsets[length] = offset
+            code = (code + counts[length]) shl 1
+            offset += counts[length]
+        }
+    }
+}
+
+/** MSB-first Huffman bits with FF00 stuffing; markers can never supply missing image bits. */
+private class JpegEntropyBits(private val reader: JpegReader) {
+    private var value = 0
+    private var remaining = 0
+
+    private fun bit(): Int {
+        if (remaining == 0) {
+            value = reader.byte()
+            jpegRequire(value >= 0, "truncated sequential entropy")
+            if (value == 0xff) jpegRequire(reader.byte() == 0, "marker before all sequential blocks completed")
+            remaining = 8
+        }
+        remaining--
+        return (value shr remaining) and 1
+    }
+
+    fun receive(count: Int) { repeat(count) { bit() } }
+
+    fun symbol(table: JpegHuffmanTable): Int {
+        var code = 0
+        for (length in 0 until 16) {
+            code = (code shl 1) or bit()
+            val index = code - table.firstCodes[length]
+            if (index >= 0 && index < table.counts[length]) return table.symbols[table.offsets[length] + index]
+        }
+        throw InvalidAutomaticJpegException("invalid sequential Huffman code")
+    }
+
+    fun finishSegment(): Int {
+        // T.81 B.1.1.5 / F.1.2.3 permits only 1-bit padding up to the next byte.
+        val mask = (1 shl remaining) - 1
+        jpegRequire(value and mask == mask, "invalid entropy padding")
+        remaining = 0
+        jpegRequire(reader.byte() == 0xff, "surplus sequential entropy")
+        var marker = reader.byte()
+        while (marker == 0xff) marker = reader.byte()
+        jpegRequire(marker in 1..254, "invalid or truncated sequential entropy marker")
+        return marker
     }
 }
 

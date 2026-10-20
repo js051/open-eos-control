@@ -1,5 +1,5 @@
 # One-shot supplemental Android device validation; never substitutes for PR ci-complete.
-# Only this approved push may run the two original KVM-enabled emulator jobs.
+# Only the next explicitly approved push may run the two original KVM-enabled emulator jobs.
 name: Android device dev validation
 
 on:
@@ -18,7 +18,7 @@ concurrency:
 jobs:
   secret-scan:
     # This one-shot gate prevents future pushes or reruns from repeating KVM changes.
-    if: github.event.before == '2886e62b280fcc9a60db522b2a3b6f149f77623f' && github.run_attempt == 1
+    if: github.event.before == '575eb20d006072a133bbb8df6f7f95b3975a6985' && github.run_attempt == 1
     runs-on: ubuntu-latest
     steps:
       - name: Checkout full history
@@ -47,8 +47,50 @@ jobs:
       - name: Validate GitHub Actions workflows
         run: bash scripts/ci/run-actionlint.sh
 
-  android-ui:
+  instrumentation-compile:
+    # Shared barrier: neither emulator job may change KVM access before all
+    # instrumentation Kotlin and its production dependencies compile at this SHA.
     needs: secret-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Prepare Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Compile all instrumentation Kotlin before either KVM operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :app:compileDebugAndroidTestKotlin -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true \
+            | tee "$RUNNER_TEMP/android-instrumentation-compile.log"
+
+      - name: Upload instrumentation compilation log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-instrumentation-compile
+          path: ${{ runner.temp }}/android-instrumentation-compile.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  android-ui:
+    needs: instrumentation-compile
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -125,7 +167,7 @@ jobs:
           overwrite: true
 
   android-ui-api36:
-    needs: secret-scan
+    needs: instrumentation-compile
     runs-on: ubuntu-latest
     defaults:
       run:

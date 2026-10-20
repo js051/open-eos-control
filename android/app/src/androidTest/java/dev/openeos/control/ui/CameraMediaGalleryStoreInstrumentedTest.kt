@@ -141,7 +141,8 @@ class CameraMediaGalleryStoreInstrumentedTest {
     @Test fun supportedOriginalsUseTheSameModelFolderWithoutTranscoding() = runBlocking {
         // Synthetic format bodies test storage, not a codec or a physical camera.
         listOf("MP4" to "video/mp4", "CR2" to "image/x-canon-cr2").forEach { (extension, mime) ->
-            val media = item.copy(name = "TEST_0001.$extension", contentType = "application/octet-stream")
+            val media = item.copy(name = "TEST_0001.$extension",
+                kind = if (extension == "MP4") "video" else "image", contentType = "application/octet-stream")
             val uri = store.save(model, media) { output ->
                 output.write(jpeg)
                 CameraMediaDownloadResult(media, jpeg.size.toLong(), null)
@@ -170,6 +171,30 @@ class CameraMediaGalleryStoreInstrumentedTest {
             assertFalse(invoked)
             assertTrue(testUris().isEmpty())
         }
+    }
+
+    @Test fun conflictingMediaKindsRequireDocumentDestinationBeforeCreatingOrDownloading() = runBlocking {
+        var downloads = 0
+        var completions = 0
+        var publications = 0
+        listOf(
+            item.copy(name = "TEST.MP4", kind = "image"),
+            item.copy(name = "TEST.JPG", kind = "video"),
+        ).forEach { media ->
+            assertNull(galleryMimeType(media))
+            assertFalse(canSaveMediaToGallery(media))
+            val failure = runCatching {
+                store.save(model, media, onFinalized = { completions++ }, onPublished = { publications++ }) {
+                    downloads++
+                    error("Conflicting format must be rejected before requesting an original")
+                }
+            }.exceptionOrNull()
+            assertTrue(failure is IllegalArgumentException)
+            assertTrue(testUris().isEmpty())
+        }
+        assertEquals(0, downloads)
+        assertEquals(0, completions)
+        assertEquals(0, publications)
     }
 
     @Test fun ccapiOriginalStreamPublishesToAndroidGallery() = runBlocking {
@@ -491,7 +516,8 @@ class CameraMediaGalleryStoreInstrumentedTest {
         var publications = 0
         var completions = 0
         listOf("MP4", "CR2").forEach { extension ->
-            val media = item.copy(name = "TEST.$extension", contentType = "application/octet-stream")
+            val media = item.copy(name = "TEST.$extension",
+                kind = if (extension == "MP4") "video" else "image", contentType = "application/octet-stream")
             val uri = store.save(
                 model, media,
                 onFinalized = { completions++ },

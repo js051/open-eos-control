@@ -28,5 +28,6 @@ class CameraMediaGalleryStoreTest {
         assertNull(galleryMimeType(item.copy(name = "IMG_0001.XMP")))
         // An explicit image-kind/video-extension conflict must remain rejected.
         assertNull(galleryMimeType(item.copy(name = "MVI_0001.MP4", kind = "image")))
+        assertNull(galleryMimeType(item.copy(name = "IMG_0001.JPG", kind = "video")))
     }
 }
