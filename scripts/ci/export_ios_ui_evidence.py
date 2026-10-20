@@ -361,10 +361,27 @@ def _collect_fixture_journal(container: Path, output: Path, report: dict, *,
         report["warnings"].append(str(error))
 
 
+PICKER_STAGES = (
+    "selection-created", "coordinator-created", "controller-created",
+    "presentation-requested", "presentation-completed", "presenter-disappeared",
+    "selected", "cancelled", "dismantle", "retirement-observed",
+    "retirement-no-modal", "retirement-dismiss", "transition-registered",
+    "transition-completed", "dismiss-completed", "completion-begin",
+    "completion-end", "delegate-returning", "sheet-clear", "sheet-disappeared",
+    "sheet-dismissed", "upload-returned", "outcome-not-sent", "outcome-uncertain",
+    "outcome-verified", "presenter-deinit", "coordinator-deinit",
+)
+
+
 def collect_picker_journal(container: Path, output: Path, report: dict) -> None:
+    legacy = r"(?:success|cancel|lost-ack) (?:coordinator-created|controller-created|selected|cancelled|dismantle|completion-begin|completion-end) presented=[01] transitioning=[01] dismissing=[01]"
+    current = (r"v2 ticket=[1-9][0-9]{0,3} ms=(?:0|[1-9][0-9]{0,5}) "
+               r"language=(?:english|traditionalChinese) scenario=(?:success|cancel|lost-ack) "
+               r"stage=(?:" + "|".join(PICKER_STAGES) + r") "
+               r"presented=[01] transitioning=[01] dismissing=[01] flag=[01]")
     _collect_fixture_journal(container, output, report,
         source_name="eos-picker-lifecycle.txt", name="picker-lifecycle.txt", label="synthetic-picker-lifecycle",
-        pattern=r"(?:success|cancel|lost-ack) (?:coordinator-created|controller-created|selected|cancelled|dismantle|completion-begin|completion-end) presented=[01] transitioning=[01] dismissing=[01]")
+        pattern="(?:" + legacy + "|" + current + ")")
 
 
 def collect_capture_mode_journal(container: Path, output: Path, report: dict) -> None:

@@ -7,6 +7,11 @@ import UniformTypeIdentifiers
 struct MediaUploadSelection: Identifiable, Equatable {
     let id = UUID()
     let owner: UUID
+    let fixtureTicket = PickerFixtureJournal.makeTicket()
+    // Observation must not participate in the original admission identity.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && lhs.owner == rhs.owner
+    }
 }
 
 struct MediaUploadResult {
@@ -49,12 +54,12 @@ struct MediaUploadPicker: UIViewControllerRepresentable {
         }
         #endif
         picker.view.accessibilityIdentifier = "media-upload-document-picker"
-        Self.trace(.controllerCreated, picker)
+        Self.trace(.controllerCreated, picker, ticket: selection.fixtureTicket)
         return Presenter(picker: picker, coordinator: context.coordinator)
     }
     func updateUIViewController(_ controller: Presenter, context: Context) {}
     static func dismantleUIViewController(_ controller: Presenter, coordinator: Coordinator) {
-        trace(.dismantle, controller.picker)
+        trace(.dismantle, controller.picker, ticket: coordinator.selection.fixtureTicket)
         coordinator.invalidate()
         controller.retire()
     }
@@ -65,18 +70,25 @@ struct MediaUploadPicker: UIViewControllerRepresentable {
     final class Presenter: UIViewController {
         let picker: UIDocumentPickerViewController
         private let coordinator: Coordinator
+        private let fixtureTicket: PickerFixtureJournal.Ticket
         private var presentedPicker = false
         private var retired = false
 
         init(picker: UIDocumentPickerViewController, coordinator: Coordinator) {
             self.picker = picker
             self.coordinator = coordinator
+            fixtureTicket = coordinator.selection.fixtureTicket
             super.init(nibName: nil, bundle: nil)
             coordinator.retirement = { [weak self] completion in
                 self?.retire(completion: completion)
             }
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+        deinit { PickerFixtureJournal.record(.presenterDeinit, ticket: fixtureTicket) }
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            MediaUploadPicker.trace(.presenterDisappeared, picker, ticket: fixtureTicket)
+        }
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
             guard !presentedPicker, !retired else { return }
@@ -84,20 +96,46 @@ struct MediaUploadPicker: UIViewControllerRepresentable {
             // Keep the SwiftUI ticket host visible in the hierarchy; covering
             // it must not trigger its external-removal cancellation boundary.
             picker.modalPresentationStyle = .overFullScreen
+            #if DEBUG && OEC_REQUIRE_SIMULATOR_E2E
+            let ticket = fixtureTicket
+            if ticket.isEnabled {
+                MediaUploadPicker.trace(.presentationRequested, picker, ticket: ticket)
+                // Observers are weak; a diagnostic completion must not extend owner lifetime.
+                present(picker, animated: true) { [weak self, weak picker] in
+                    guard let picker else {
+                        PickerFixtureJournal.record(.presentationCompleted, ticket: ticket)
+                        return
+                    }
+                    MediaUploadPicker.trace(.presentationCompleted, picker, ticket: ticket,
+                        flag: self?.presentedViewController === picker)
+                }
+                return
+            }
+            #endif
             present(picker, animated: true)
         }
         func retire(completion: (() -> Void)? = nil) {
             retired = true
             let retirement = Retirement(
                 isPresented: { [picker] in picker.presentingViewController != nil },
-                dismiss: { [picker] done in picker.dismiss(animated: true, completion: done) },
-                completion: { completion?() }
+                dismiss: { [picker, fixtureTicket] done in
+                    guard fixtureTicket.isEnabled else { picker.dismiss(animated: true, completion: done); return }
+                    picker.dismiss(animated: true) {
+                        PickerFixtureJournal.record(.dismissCompleted, ticket: fixtureTicket)
+                        done()
+                    }
+                },
+                completion: { completion?() }, fixtureTicket: fixtureTicket
             )
             // A provider may already be dismissing when it calls the delegate.
             // A cancelled/unregistered transition is not a dismissal receipt.
             if picker.isBeingDismissed, let transition = picker.transitionCoordinator {
-                retirement.observe { done in
-                    transition.animate(alongsideTransition: nil) { context in done(context.isCancelled) }
+                PickerFixtureJournal.record(.retirementObserved, ticket: fixtureTicket)
+                retirement.observe { [fixtureTicket] done in
+                    transition.animate(alongsideTransition: nil) { context in
+                        PickerFixtureJournal.record(.transitionCompleted, ticket: fixtureTicket, flag: context.isCancelled)
+                        done(context.isCancelled)
+                    }
                 }
             } else {
                 retirement.dismiss()
@@ -111,25 +149,32 @@ struct MediaUploadPicker: UIViewControllerRepresentable {
         private let isPresented: () -> Bool
         private let requestDismiss: (@escaping () -> Void) -> Void
         private let completion: () -> Void
+        private let fixtureTicket: PickerFixtureJournal.Ticket
         private var dismissRequested = false
         private var completed = false
         init(isPresented: @escaping () -> Bool,
              dismiss: @escaping (@escaping () -> Void) -> Void,
-             completion: @escaping () -> Void) {
+             completion: @escaping () -> Void, fixtureTicket: PickerFixtureJournal.Ticket = .disabled) {
             self.isPresented = isPresented
             self.requestDismiss = dismiss
             self.completion = completion
+            self.fixtureTicket = fixtureTicket
         }
         func observe(_ register: (@escaping (Bool) -> Void) -> Bool) {
             let registered = register { [self] cancelled in
                 if cancelled || isPresented() { dismiss() }
                 else { finish() }
             }
+            PickerFixtureJournal.record(.transitionRegistered, ticket: fixtureTicket, flag: registered)
             if !registered { dismiss() }
         }
         func dismiss() {
             guard !completed, !dismissRequested else { return }
-            guard isPresented() else { finish(); return }
+            guard isPresented() else {
+                PickerFixtureJournal.record(.retirementNoModal, ticket: fixtureTicket)
+                finish(); return
+            }
+            PickerFixtureJournal.record(.retirementDismiss, ticket: fixtureTicket)
             dismissRequested = true
             requestDismiss { [self] in
                 guard !isPresented() else { return }
@@ -143,31 +188,37 @@ struct MediaUploadPicker: UIViewControllerRepresentable {
         }
     }
 
-    private static func trace(_ stage: PickerFixtureJournal.Stage, _ controller: UIDocumentPickerViewController) {
-        PickerFixtureJournal.record(stage, presented: controller.presentingViewController != nil,
-            transitioning: controller.transitionCoordinator != nil, dismissing: controller.isBeingDismissed)
+    private static func trace(_ stage: PickerFixtureJournal.Stage, _ controller: UIDocumentPickerViewController,
+                              ticket: PickerFixtureJournal.Ticket, flag: Bool = false) {
+        PickerFixtureJournal.record(stage, ticket: ticket, presented: controller.presentingViewController != nil,
+            transitioning: controller.transitionCoordinator != nil, dismissing: controller.isBeingDismissed, flag: flag)
     }
 
     @MainActor
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
         let selection: MediaUploadSelection
+        private let fixtureTicket: PickerFixtureJournal.Ticket
         private let completion: (MediaUploadSelection, [URL]?) -> Void
         private var delivered = false
         private var invalidated = false
         private var completed = false
         var retirement: (@escaping () -> Void) -> Void = { $0() }
         func invalidate() { invalidated = true }
+        deinit { PickerFixtureJournal.record(.coordinatorDeinit, ticket: fixtureTicket) }
         init(selection: MediaUploadSelection, completion: @escaping (MediaUploadSelection, [URL]?) -> Void) {
             self.selection = selection
+            fixtureTicket = selection.fixtureTicket
             self.completion = completion
-            PickerFixtureJournal.record(.coordinatorCreated)
+            PickerFixtureJournal.record(.coordinatorCreated, ticket: fixtureTicket)
         }
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            MediaUploadPicker.trace(.selected, controller)
+            MediaUploadPicker.trace(.selected, controller, ticket: fixtureTicket)
+            defer { PickerFixtureJournal.record(.delegateReturning, ticket: fixtureTicket) }
             finish(urls, controller: controller)
         }
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            MediaUploadPicker.trace(.cancelled, controller)
+            MediaUploadPicker.trace(.cancelled, controller, ticket: fixtureTicket)
+            defer { PickerFixtureJournal.record(.delegateReturning, ticket: fixtureTicket) }
             finish(nil, controller: controller)
         }
         private func finish(_ urls: [URL]?, controller: UIDocumentPickerViewController) {
@@ -176,44 +227,10 @@ struct MediaUploadPicker: UIViewControllerRepresentable {
             retirement { [self, controller] in
                 guard !invalidated, !completed else { return }
                 completed = true
-                MediaUploadPicker.trace(.completionBegin, controller)
+                MediaUploadPicker.trace(.completionBegin, controller, ticket: fixtureTicket)
                 completion(selection, urls)
-                MediaUploadPicker.trace(.completionEnd, controller)
+                MediaUploadPicker.trace(.completionEnd, controller, ticket: fixtureTicket)
             }
         }
-    }
-}
-
-/// Fixed synthetic stages only. Ordinary builds never write this journal.
-private enum PickerFixtureJournal {
-    enum Stage: String {
-        case coordinatorCreated = "coordinator-created"
-        case controllerCreated = "controller-created"
-        case selected, cancelled, dismantle
-        case completionBegin = "completion-begin"
-        case completionEnd = "completion-end"
-    }
-    static func record(_ stage: Stage, presented: Bool = false,
-                       transitioning: Bool = false, dismissing: Bool = false) {
-        #if DEBUG && OEC_REQUIRE_SIMULATOR_E2E
-        guard let scenario = ProcessInfo.processInfo.environment["OEC_UPLOAD_JOURNEY_FIXTURE"],
-              ["success", "cancel", "lost-ack"].contains(scenario),
-              let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
-        let url = cache.appendingPathComponent("eos-picker-lifecycle.txt")
-        do {
-            let old: Data
-            if FileManager.default.fileExists(atPath: url.path) {
-                let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .fileSizeKey])
-                guard values.isSymbolicLink != true, (values.fileSize ?? Int.max) <= 16_384 else { return }
-                old = try Data(contentsOf: url)
-            } else { old = Data() }
-            guard let previous = String(data: old, encoding: .utf8) else { return }
-            var lines = previous.split(separator: "\n").map(String.init)
-            lines.append("\(scenario) \(stage.rawValue) presented=\(presented ? 1 : 0) transitioning=\(transitioning ? 1 : 0) dismissing=\(dismissing ? 1 : 0)")
-            let bytes = Data((lines.suffix(128).joined(separator: "\n") + "\n").utf8)
-            guard bytes.count <= 16_384 else { return }
-            try bytes.write(to: url, options: .atomic)
-        } catch { /* Diagnostic failure cannot alter picker admission or outcomes. */ }
-        #endif
     }
 }
