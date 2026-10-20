@@ -361,9 +361,14 @@ final class RTPAudioLifecycleTests: XCTestCase {
         defer { f.controller.retireDelivery() }
         f.controller.setAudioEnabled(true)
         f.submit()
-        await eventually { f.output.count == 1 }
+        // A fake schedule records entry before its native call returns. Wait for
+        // completed submission, not merely entry, before testing watchdog expiry.
+        await eventually { f.acceptedStatus?.submittedSampleFrames == 1_024 }
+        XCTAssertEqual(f.output.count, 1)
         XCTAssertTrue(f.output.prepared)
         f.clock.set(1)
+        // Publication can be superseded before delivery; virtual time stays at 1.
+        await eventually { f.acceptedStatus?.expiredOutputBuffers == 1 }
         XCTAssertEqual(f.status.expiredOutputBuffers, 1)
         await eventually { !f.output.prepared && !f.status.retiringResources }
         XCTAssertTrue(f.status.enabled, "Fresh input can rebuild output before the failure deadline")
@@ -375,6 +380,52 @@ final class RTPAudioLifecycleTests: XCTestCase {
         await eventually { f.status.renderedSampleFrames == 1_024 }
         f.clock.set(2.1)
         XCTAssertEqual(f.status.outputProgress, .unknown, "Historical render progress is not current proof")
+    }
+
+    func testNativeScheduleReturnAccountsExpiryAtExactBoundary() async throws {
+        try await assertScheduledExpiry(order: .nativeReturn)
+    }
+
+    func testTimerFirstScheduledExpiryIsCountedExactlyOnce() async throws {
+        try await assertScheduledExpiry(order: .timer)
+    }
+
+    func testSnapshotFirstScheduledExpiryIsCountedExactlyOnce() async throws {
+        try await assertScheduledExpiry(order: .snapshot)
+    }
+
+    func testRevokedNativeScheduleAndExpiryTimerCannotRetireReplacement() async throws {
+        let f = AudioExpiryFixture()
+        let entered = expectation(description: "old native schedule entered")
+        let returned = expectation(description: "old consume returned")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal(); f.pipeline.retire() }
+        f.output.blockNextSchedule(entered: { entered.fulfill() }, release: release)
+        f.submit { returned.fulfill() }
+        await fulfillment(of: [entered], timeout: 2)
+        let oldTimer = try XCTUnwrap(f.timers.last)
+        let replacement = IOSRTPAudioPlaybackToken(owner: f.token.owner, epoch: UUID())
+        f.pipeline.retire()
+        f.pipeline.activate(replacement)
+        f.clock.set(1)
+        release.signal()
+        await fulfillment(of: [returned], timeout: 2)
+        let rebuilt = expectation(description: "replacement consume returned")
+        f.submit(token: replacement, expiresAt: 2) { rebuilt.fulfill() }
+        await fulfillment(of: [rebuilt], timeout: 2)
+        XCTAssertEqual(f.output.count, 2)
+        XCTAssertTrue(oldTimer.cancelled)
+        oldTimer.fire() // A cancelled timer may already have a queued callback.
+        f.output.complete(0, as: .rendered)
+        XCTAssertEqual(f.pipeline.snapshot(for: replacement)?.pendingBuffers, 1)
+        f.output.complete(1, as: .rendered)
+        await eventually { f.pipeline.snapshot(for: replacement)?.pendingBuffers == 0 }
+        let current = try XCTUnwrap(f.pipeline.snapshot(for: replacement))
+        XCTAssertEqual(current.expiredBuffers, 0)
+        XCTAssertEqual(current.renderedSampleFrames, 1_024)
+        XCTAssertFalse(current.retiring)
+        XCTAssertTrue(f.output.prepared)
+        XCTAssertNil(f.pipeline.snapshot(for: f.token))
     }
 
     func testRealAACFixtureTraversesProductionPipelineAndNoDataNowDrain() async throws {
@@ -479,6 +530,65 @@ final class RTPAudioLifecycleTests: XCTestCase {
         release.signal()
         await eventually { f.output.count == 2 && !f.status.retiringResources }
         XCTAssertEqual(f.output.maximumConcurrentCalls, 1)
+    }
+
+    private enum ScheduledExpiryOrder { case nativeReturn, timer, snapshot }
+
+    private func assertScheduledExpiry(order: ScheduledExpiryOrder,
+                                       file: StaticString = #filePath, line: UInt = #line) async throws {
+        let f = AudioExpiryFixture()
+        let entered = expectation(description: "native schedule retained")
+        let returned = expectation(description: "consume returned")
+        let stopEntered = expectation(description: "expired native output stopping")
+        let release = DispatchSemaphore(value: 0)
+        let stopRelease = DispatchSemaphore(value: 0)
+        defer { release.signal(); stopRelease.signal(); f.pipeline.retire() }
+        f.output.blockNextSchedule(entered: { entered.fulfill() }, release: release)
+        f.submit { returned.fulfill() }
+        await fulfillment(of: [entered], timeout: 2)
+        let expiry = try XCTUnwrap(f.timers.last, file: file, line: line)
+        XCTAssertEqual(expiry.delay, 1, file: file, line: line)
+        f.clock.set(0.999)
+        let before = try XCTUnwrap(f.pipeline.snapshot(for: f.token), file: file, line: line)
+        XCTAssertEqual(before.expiredBuffers, 0, file: file, line: line)
+        XCTAssertEqual(before.pendingBuffers, 1, file: file, line: line)
+        XCTAssertTrue(f.output.prepared, file: file, line: line)
+        f.output.blockNextStop(entered: { stopEntered.fulfill() }, release: stopRelease)
+        f.clock.set(1)
+        switch order {
+        case .nativeReturn:
+            break // Neither a watchdog nor a snapshot may expire this buffer first.
+        case .timer:
+            expiry.fire()
+        case .snapshot:
+            XCTAssertEqual(f.pipeline.snapshot(for: f.token)?.expiredBuffers, 1, file: file, line: line)
+        }
+        release.signal()
+        await fulfillment(of: [returned, stopEntered], timeout: 2)
+        let expired = try XCTUnwrap(f.pipeline.snapshot(for: f.token), file: file, line: line)
+        XCTAssertEqual(expired.expiredBuffers, 1, file: file, line: line)
+        XCTAssertEqual(expired.pendingBuffers, 0, file: file, line: line)
+        XCTAssertEqual(expired.renderedSampleFrames, 0, file: file, line: line)
+        XCTAssertTrue(expired.retiring, file: file, line: line)
+        XCTAssertTrue(f.output.prepared, "Physical stop is still blocked", file: file, line: line)
+        stopRelease.signal()
+        await eventually({ !f.output.prepared && !f.pipeline.isRetiring }, file: file, line: line)
+        let rebuilt = expectation(description: "fresh output submission returned")
+        f.submit(expiresAt: 2) { rebuilt.fulfill() }
+        await fulfillment(of: [rebuilt], timeout: 2)
+        XCTAssertEqual(f.output.count, 2, file: file, line: line)
+        XCTAssertTrue(expiry.cancelled, file: file, line: line)
+        expiry.fire()
+        f.output.complete(0, as: .rendered)
+        XCTAssertEqual(f.pipeline.snapshot(for: f.token)?.pendingBuffers, 1, file: file, line: line)
+        f.output.complete(1, as: .rendered)
+        // Waiting for removal of the new buffer drains both FIFO callbacks.
+        await eventually({ f.pipeline.snapshot(for: f.token)?.pendingBuffers == 0 }, file: file, line: line)
+        let recovered = try XCTUnwrap(f.pipeline.snapshot(for: f.token), file: file, line: line)
+        XCTAssertEqual(recovered.expiredBuffers, 1, file: file, line: line)
+        XCTAssertEqual(recovered.renderedSampleFrames, 1_024, file: file, line: line)
+        XCTAssertTrue(f.output.prepared, file: file, line: line)
+        XCTAssertEqual(f.clock.now, 1, "Delivery waits cannot advance the deadline", file: file, line: line)
     }
 
     private func eventually(_ condition: @MainActor () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
@@ -586,6 +696,74 @@ private final class AudioTestClock: @unchecked Sendable {
     private var value: TimeInterval = 0
     var now: TimeInterval { lock.audioLocked { value } }
     func set(_ value: TimeInterval) { lock.audioLocked { self.value = value } }
+}
+
+/// No controller watchdog participates: only the selected expiry ordering can win.
+private final class AudioExpiryFixture: @unchecked Sendable {
+    let clock: AudioTestClock
+    let output: AudioTestOutput
+    let timers: AudioTestExpiryTimers
+    let token = IOSRTPAudioPlaybackToken(owner: UUID(), epoch: UUID())
+    let pipeline: IOSCcapiRTPAudioPipeline
+    private let decodeQueue = DispatchQueue(label: "dev.openeos.test.audio-expiry-decode")
+
+    init() {
+        let clock = AudioTestClock()
+        let output = AudioTestOutput(supportsRenderProgress: true)
+        let timers = AudioTestExpiryTimers()
+        self.clock = clock
+        self.output = output
+        self.timers = timers
+        pipeline = IOSCcapiRTPAudioPipeline(decoder: AudioTestDecoder(), output: output,
+                                           now: { clock.now }, expiryTimerFactory: { _ in timers.make() })
+        pipeline.activate(token)
+    }
+
+    func submit(token: IOSRTPAudioPlaybackToken? = nil, expiresAt: TimeInterval = 1,
+                completed: @escaping () -> Void) {
+        let token = token ?? self.token
+        decodeQueue.async { [self] in
+            defer { completed() }
+            // Mirror the controller's serial retirement barrier before new work.
+            pipeline.resetRetiredDecoder()
+            let format = CCAPIAACStreamFormat(sampleRate: 48_000, channels: 2, framesPerPacket: 1_024,
+                                              audioSpecificConfig: Data([0x11, 0x90]), codec: "mp4a.40.2")
+            let unit = CCAPIAACAccessUnit(bytes: Data([0x01]), presentationTimeMicroseconds: 0,
+                                           format: format, discontinuity: false)
+            do { _ = try pipeline.consume(unit, token: token, expiresAt: expiresAt) }
+            catch { XCTFail("Unexpected expiry fixture decode failure: \(error)") }
+        }
+    }
+}
+
+private final class AudioTestExpiryTimers: @unchecked Sendable {
+    private let lock = NSLock()
+    private var timers: [AudioTestExpiryTimer] = []
+    var last: AudioTestExpiryTimer? { lock.audioLocked { timers.last } }
+    func make() -> AudioTestExpiryTimer {
+        let timer = AudioTestExpiryTimer()
+        lock.audioLocked { timers.append(timer) }
+        return timer
+    }
+}
+
+private final class AudioTestExpiryTimer: IOSRTPAudioExpiryTimer {
+    private let lock = NSLock()
+    private var interval: TimeInterval = 0
+    private var handler: (() -> Void)?
+    private var resumed = false
+    private var isCancelled = false
+    var delay: TimeInterval { lock.audioLocked { interval } }
+    var cancelled: Bool { lock.audioLocked { isCancelled } }
+    func schedule(after delay: TimeInterval) { lock.audioLocked { interval = delay } }
+    func setEventHandler(_ handler: @escaping () -> Void) { lock.audioLocked { self.handler = handler } }
+    func resume() { lock.audioLocked { resumed = true } }
+    func cancel() { lock.audioLocked { isCancelled = true } }
+    func fire() {
+        // Deliberately allow cancelled callbacks to test the incarnation fence.
+        let callback = lock.audioLocked { resumed ? handler : nil }
+        callback?()
+    }
 }
 
 private final class AudioTestDeliveries: @unchecked Sendable {

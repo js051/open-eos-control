@@ -51,6 +51,24 @@ protocol IOSRTPAudioOutput: AnyObject {
     func stop()
 }
 
+/// Tests control expiry delivery without changing the monotonic clock or deadline.
+/// Production preserves Dispatch's scheduling, cancellation and activation order.
+protocol IOSRTPAudioExpiryTimer: AnyObject {
+    func schedule(after delay: TimeInterval)
+    func setEventHandler(_ handler: @escaping () -> Void)
+    func resume()
+    func cancel()
+}
+
+final class IOSRTPAudioDispatchExpiryTimer: IOSRTPAudioExpiryTimer {
+    private let timer: any DispatchSourceTimer
+    init(queue: DispatchQueue) { timer = DispatchSource.makeTimerSource(queue: queue) }
+    func schedule(after delay: TimeInterval) { timer.schedule(deadline: .now() + delay) }
+    func setEventHandler(_ handler: @escaping () -> Void) { timer.setEventHandler(handler: handler) }
+    func resume() { timer.resume() }
+    func cancel() { timer.cancel() }
+}
+
 final class IOSAACDecoder: IOSAACDecoding {
     private var converter: AVAudioConverter?
     private var configuredFormat: CCAPIAACStreamFormat?
@@ -170,6 +188,7 @@ final class IOSCcapiRTPAudioPipeline {
     private let decoder: any IOSAACDecoding
     private let output: any IOSRTPAudioOutput
     private let now: () -> TimeInterval
+    private let expiryTimerFactory: (DispatchQueue) -> any IOSRTPAudioExpiryTimer
     private let outputLock = NSLock()
     private let callbackQueue = DispatchQueue(label: "dev.openeos.control.audio-render-callback")
     // Native calls never hold outputLock. A hung device operation must not block
@@ -185,7 +204,7 @@ final class IOSCcapiRTPAudioPipeline {
     private var outputIncarnation = UUID()
     private var playbackFormat: AVAudioFormat? // nativeQueue only
     private var pendingBuffers: [UUID: TimeInterval] = [:]
-    private var outputExpiryWatch: DispatchSourceTimer?
+    private var outputExpiryWatch: (any IOSRTPAudioExpiryTimer)?
     private var expiredBuffers = 0
     // Converter input provenance stays on the serial decode queue. Delayed PCM
     // inherits the oldest contributing input deadline, not the time of draining.
@@ -200,10 +219,14 @@ final class IOSCcapiRTPAudioPipeline {
 
     init(decoder: any IOSAACDecoding = IOSAACDecoder(),
          output: any IOSRTPAudioOutput = IOSAVAudioEngineOutput(),
-         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         expiryTimerFactory: @escaping (DispatchQueue) -> any IOSRTPAudioExpiryTimer = {
+             IOSRTPAudioDispatchExpiryTimer(queue: $0)
+         }) {
         self.decoder = decoder
         self.output = output
         self.now = now
+        self.expiryTimerFactory = expiryTimerFactory
     }
 
     func activate(_ token: IOSRTPAudioPlaybackToken) {
@@ -409,11 +432,21 @@ final class IOSCcapiRTPAudioPipeline {
             }
             // A mute may arrive while schedule itself is blocked. Its pending stop
             // owns retirement; no later epoch's native prepare can overtake that stop.
-            guard outputLock.synchronized({ token == expected && outputIncarnation == scheduledIncarnation }) else { return nil }
-            guard now() < expiresAt else {
-                outputLock.synchronized { retireOutputLocked() }
-                return result(format, inputs: inputs, dropped: true)
+            let submitted = outputLock.synchronized { () -> Bool? in
+                guard token == expected, outputIncarnation == scheduledIncarnation else { return nil }
+                guard now() < expiresAt else {
+                    // As with timer/snapshot expiry, retiring the player flushes every
+                    // pending buffer. Account once before invalidation clears them.
+                    expiredBuffers += pendingBuffers.count
+                    retireOutputLocked()
+                    return false
+                }
+                return true
             }
+            // The final identity, deadline and retirement decision is atomic. Old
+            // schedule work cannot validate A, then retire a replacement B.
+            guard let submitted else { return nil }
+            guard submitted else { return result(format, inputs: inputs, dropped: true) }
             return result(format, inputs: inputs, pcm: frames, submitted: frames)
         }
     }
@@ -445,8 +478,8 @@ final class IOSCcapiRTPAudioPipeline {
         outputExpiryWatch = nil
         guard let deadline = pendingBuffers.values.min() else { return }
         let incarnation = outputIncarnation
-        let timer = DispatchSource.makeTimerSource(queue: callbackQueue)
-        timer.schedule(deadline: .now() + max(0, deadline - now()))
+        let timer = expiryTimerFactory(callbackQueue)
+        timer.schedule(after: max(0, deadline - now()))
         timer.setEventHandler { [weak self] in
             guard let self else { return }
             self.outputLock.synchronized {
