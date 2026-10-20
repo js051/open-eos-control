@@ -970,6 +970,10 @@ final class OpenEOSControlUITests: XCTestCase {
     }
 
     func testOfflineMediaDateRangeApplyCancelAndClearInBothLanguages() throws {
+        // Only photo <-> filter travel in this XXXL journey uses this budget.
+        // Native AX resolution plus two ~3.5s seeks can exhaust 8s before the
+        // final stopped correction. Sheet-local and nearby interactions stay 8s.
+        let longMediaNavigationTimeout: TimeInterval = 15
         for (language, appleLanguage, locale, label) in [
             ("english", "en", "en_US", "Media date range"),
             ("traditionalChinese", "zh-Hant", "zh_TW", "素材日期區間"),
@@ -1021,11 +1025,11 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertTrue(scrollToInteraction(clear, in: app, timeout: 8))
             clear.tap()
             XCTAssertFalse(applied.exists)
-            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-002"], in: app, timeout: 8))
+            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-002"], in: app, timeout: longMediaNavigationTimeout))
             XCTAssertTrue(app.staticTexts["R6M3_0001.JPG"].exists)
             addScreenshot(name: "media-date-range-cleared-\(language)")
             let rating = app.buttons["media-rating-filter"]
-            XCTAssertTrue(scrollToInteraction(rating, in: app, timeout: 8))
+            XCTAssertTrue(scrollToInteraction(rating, in: app, timeout: longMediaNavigationTimeout))
             XCTAssertEqual(rating.label, language == "english" ? "Media rating filter" : "素材評分篩選")
             rating.tap()
             let five = app.buttons["media-rating-choice-five"]
@@ -1041,14 +1045,14 @@ final class OpenEOSControlUITests: XCTestCase {
             let ratingApplied = app.staticTexts["media-rating-applied"]
             XCTAssertTrue(ratingApplied.waitForExistence(timeout: 5))
             XCTAssertEqual(ratingApplied.label, language == "english" ? "5 stars" : "5 星")
-            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: 8))
+            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: longMediaNavigationTimeout))
             XCTAssertFalse(app.buttons["media-actions-preview-002"].exists)
             let folder = app.buttons["media-folder-filter"]
             // Accessibility XXXL: the measured return from the photo consumed
             // ~6.5s resolving native AX geometry plus ~3.2s for its first gesture,
             // leaving the folder above the viewport. Budget a stopped correction;
             // preserve real gestures, hittability and all filter assertions.
-            XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 15))
+            XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: longMediaNavigationTimeout))
             folder.tap()
             let knownFolder = app.buttons["media-folder-choice-known-synthetic:preview-folder"]
             XCTAssertTrue(scrollToInteraction(knownFolder, in: app, timeout: 8))
@@ -1067,10 +1071,10 @@ final class OpenEOSControlUITests: XCTestCase {
             // native search gestures consumed ~9s before the lazy card appeared;
             // allow a fourth stopped correction, without changing gesture speed
             // or the original interaction/visibility/filter assertions.
-            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: 15))
+            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: longMediaNavigationTimeout))
             XCTAssertFalse(app.buttons["media-actions-preview-002"].exists)
             // This control belongs to the media content, not fixed sheet chrome.
-            XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 8, knownScrollableContent: true))
+            XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: longMediaNavigationTimeout, knownScrollableContent: true))
             folder.tap()
             let unknownFolder = app.buttons["media-folder-choice-unknown"]
             XCTAssertTrue(scrollToInteraction(unknownFolder, in: app, timeout: 8))
@@ -1081,12 +1085,12 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertTrue(scrollToInteraction(folderClear, in: app, timeout: 8))
             folderClear.tap()
             XCTAssertTrue(ratingApplied.exists)
-            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: 8))
+            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: longMediaNavigationTimeout))
             let ratingClear = app.buttons["media-rating-clear"]
-            XCTAssertTrue(scrollToInteraction(ratingClear, in: app, timeout: 8))
+            XCTAssertTrue(scrollToInteraction(ratingClear, in: app, timeout: longMediaNavigationTimeout))
             ratingClear.tap()
             XCTAssertFalse(ratingApplied.exists)
-            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-002"], in: app, timeout: 8))
+            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-002"], in: app, timeout: longMediaNavigationTimeout))
             addScreenshot(name: "media-rating-cleared-\(language)")
             app.terminate()
         }

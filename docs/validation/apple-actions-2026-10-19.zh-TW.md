@@ -241,3 +241,12 @@
 - The only failure was the long XXXL return from the filtered photo to the folder control. Native AX resolution and the first gesture exhausted the eight-second navigation budget while the control remained above the viewport. This does not demonstrate a date/filter semantic failure.
 - 僅這一個明確 XXXL 長距離返回呼叫由8改15秒（兩語各適用），依既有同旅程照片導航的實測有界預算；不改其他呼叫、手勢、速度、helper、產品或相機期限。原真 hittable、篩選、取消與44pt斷言保持。這是測試導航預算調整，並非產品性能改善；本地 parse／來源守門不能替代下一輪 Apple UI。
 - Only this explicit XXXL return call changes from eight to fifteen seconds, for each language. Other calls, gestures, helper logic and product deadlines remain unchanged. All interaction/filter assertions remain. This is a measured harness budget adjustment, not a performance fix; native validation is pending.
+
+## Apple 29 結果與 XXXL 長距離腿整批界定 / Results and scoped long-distance legs
+
+- [Run 39346606167](https://github.com/js051/open-eos-control/actions/runs/39346606167)，source `4fb64ccce2e176040c70f699bd2eab431bb0e40d`：App 833/833、UI 42/43。兩類原生 picker 的八組取消／重開與六組選取再次全過，未有本輪 crash；間歇性可靠性仍不能僅以兩輪推為永久保證。
+- All 833 App tests passed; 42 of 43 UI tests passed. Both native picker journeys passed again, including eight cancellation/reopening and six selection combinations. Two successful runs are not a permanent reliability guarantee.
+- 唯一紅是同日期 XXXL case 的第二個照片→folder返回（1073）。第一個已調15秒返回通過。第二個仍8秒，兩次原生seek各約3.3／3.5秒；folder從y=-2493到-1327再-148.33，viewport y=180.67，尚缺最後校正。8.429秒後exists/enabled真、hittable假。原knownScrollableContent快取成功reuse，並非可再刪除冗餘hittable查詢來補足。
+- The remaining failure was the second photo-to-folder return, still using eight seconds. Two native seeks consumed about seven seconds; the control remained above the viewport. The existing cached scroll surface was reused successfully. No date/filter assertion failed.
+- 本批將這一個明確XXXL雙語case的九個照片↔filter長距離腿統一使用局部15秒常數：其中兩個原已15，七個由8改15，每語名目上限合計最多增加49秒。明確列為日期clear→photo、photo→rating、rating apply→photo、photo→folder、known folder apply→photo、photo→folder、folder clear→photo、photo→rating clear、rating clear→photo。所有sheet內選擇、取消後重開、鄰近clear與其他case仍原預算；所有原斷言、手勢、真正hittable不改。不是產品速度改善或相機期限修改。
+- A local fifteen-second budget now consistently covers the nine photo/filter long-distance legs of this single XXXL bilingual case. Two were already fifteen seconds; seven change from eight, adding at most 49 nominal seconds per language. Sheet-local, nearby and all other-case budgets remain unchanged. This is a bounded harness adjustment, with all original assertions and real gestures retained; native results remain pending.
