@@ -3,7 +3,6 @@
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[3]
 DATA = ROOT / "android/app/src/main/java/dev/openeos/control/data"
 
