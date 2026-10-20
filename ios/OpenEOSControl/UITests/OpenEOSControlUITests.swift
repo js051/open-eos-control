@@ -1044,7 +1044,11 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: 8))
             XCTAssertFalse(app.buttons["media-actions-preview-002"].exists)
             let folder = app.buttons["media-folder-filter"]
-            XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 8))
+            // Accessibility XXXL: the measured return from the photo consumed
+            // ~6.5s resolving native AX geometry plus ~3.2s for its first gesture,
+            // leaving the folder above the viewport. Budget a stopped correction;
+            // preserve real gestures, hittability and all filter assertions.
+            XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 15))
             folder.tap()
             let knownFolder = app.buttons["media-folder-choice-known-synthetic:preview-folder"]
             XCTAssertTrue(scrollToInteraction(knownFolder, in: app, timeout: 8))
