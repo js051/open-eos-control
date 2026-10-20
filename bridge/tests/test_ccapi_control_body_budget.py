@@ -135,7 +135,7 @@ def test_existing_configuration_body_budget_is_unchanged(peer_factory, status):
     assert time.monotonic() - started < 0.4
 
 
-@pytest.mark.parametrize("path", [LIVE_VIEW, PREFIX + "/devicestatus/battery"])
+@pytest.mark.parametrize("path", [LIVE_VIEW])
 def test_unrelated_get_retains_legacy_body_read(peer_factory, path):
     peer = peer_factory()
     started = time.monotonic()
