@@ -826,6 +826,11 @@ _STATUS_BODY_PATHS = (
     "/shooting/information/recordable",
     "/devicestatus/lens",
     "/devicestatus/temperature",
+    # Advertised optional settings also run inside status()'s provider lock.
+    "/functions/cardselection/stillimage",
+    "/functions/cardselection/movie",
+    "/functions/beep",
+    "/functions/displayoff",
 )
 
 # Receipt integrity only: these focus operations keep their existing body,

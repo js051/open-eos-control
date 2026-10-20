@@ -44,6 +44,19 @@ Apple dev run [39492150199](https://github.com/js051/open-eos-control/actions/ru
 
 Linux 只會驗證來源完整性、既有來源／workflow helpers、Swift 語法，以及抽出原 production pipeline 與測試後配合最小 AV 型別替身的合成順序。這不是 Apple SDK typecheck、AVFoundation、真實音訊、喇叭或實機驗收。
 
-離線 gate 與來源審查已通過；原生 Apple runtime 尚未執行本候選。發布前仍須確認精確 dev HEAD、沒有 open head:dev PR、正常 hooks 及實際 workflow fanout。三檔候選在既有規則下只觸發完整 Apple dev validation，沒有 Android/KVM 或 workflow 修改。Apple job／test step 原有 55／45 分鐘限制不變，不做自動重跑。
+原始發布前離線 gate 與來源審查已通過；下節補記其後取得的 Apple runtime 證據。後續任何發布仍須確認精確 dev HEAD、沒有 open head:dev PR、正常 hooks 及實際 workflow fanout。三檔候選在既有規則下只觸發完整 Apple dev validation，沒有 Android/KVM 或 workflow 修改。Apple job／test step 原有 55／45 分鐘限制不變，不做自動重跑。
 
 同次舊 run 的 real document-picker failure 已由匹配 `.ips` 確認為 DOCWeakProxy/XPC 的 SIGABRT；它是獨立未解問題。本批不改 picker、原始 real-picker UI 測試或其識別／安全範圍契約，RTP 綠燈不能當作 picker 已修復。
+
+
+## Source-pinned Apple runtime 補記
+
+實際發布 source：[`134fd67b8b99bf0d4c3daad482f6fb8c0af8961f`](https://github.com/js051/open-eos-control/commit/134fd67b8b99bf0d4c3daad482f6fb8c0af8961f)，tree `0f08121b2eed88ec3f22c0022904117f923c054c`。既有 Apple dev run [39501409561](https://github.com/js051/open-eos-control/actions/runs/39501409561) 為 push／attempt 1，沒有其他平台 fanout 或重跑。
+
+- 857 項 App tests 全通過，其中 RTP lifecycle 25／25，包括原 `testScheduledBufferExpiryFlushesBeforeFiveSecondFailureDeadline` 與新增 native-return、timer-first、snapshot-first、replacement 四案。這提供原 controller/runtime 與 Apple SDK 下的實際驗證，不再只依賴 Linux 型別替身。
+- Picker ownership App tests 為 36／36；UI 為 43／44。雙語 real cancel/reopen 通過，原 real selection 六情境測試在第二個 English lost-ack 情境的 line 1327 失敗；第一個 English cancel/reconnect 已通過，後四個情境未到達。
+- App/UI step 為 2026-10-20 21:39:11–22:15:53 UTC，36 分 42 秒，沒有超過原 45 分鐘限制。整個 Apple run 於 22:17:14 以 failure 結束，不能把 RTP milestone 的 native GREEN 寫成全 Apple GREEN。
+- 本次 completed job log 記錄 real file tap 後的 unexpected termination check，但沒有同次 crash stack／reason；不把前次確認的 DOCWeakProxy stack 自動套用於本次。Picker 仍是獨立未解問題，本批沒有 retention、UI 識別或結果斷言變更。
+- 保留原 1 秒／5 秒邊界、相鄰未修改的 logical-cleanup 限制、原 UI SHA-256，以及不得拼接不同 source SHA 的成功為共同 HEAD 全綠的界線。這不是實體音訊裝置、耳聽、相機或 release 驗收。
+
+此補記隨下一個有實質功能修正的 Bridge 批次交付，不為補文件獨立啟動另一輪 Apple。
