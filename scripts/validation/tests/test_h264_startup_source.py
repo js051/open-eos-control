@@ -6,7 +6,6 @@ import re
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[3]
 DATA = ROOT / "android/app/src/main/java/dev/openeos/control/data"
 
@@ -48,7 +47,9 @@ class H264StartupSourceTests(unittest.TestCase):
 
     def test_production_and_native_pixel_test_use_the_same_format_builder(self):
         session = (DATA / "AndroidCcapiRtpSession.kt").read_text()
-        fixture = (ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/NativeRtpLutRenderingTest.kt").read_text()
+        fixture = (
+            ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/NativeRtpLutRenderingTest.kt"
+        ).read_text()
         self.assertIn("createNativeRtpAvcFormat(", session)
         self.assertIn("createNativeRtpAvcFormat(prepared.configuration, codec)", fixture)
         self.assertNotIn("MediaFormat.createVideoFormat", session)
@@ -58,7 +59,9 @@ class H264StartupSourceTests(unittest.TestCase):
         self.assertNotIn("latestPps", session)
 
     def test_original_fixture_and_first_picture_acceptance_are_unchanged(self):
-        fixture = (ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/NativeRtpLutRenderingTest.kt").read_text()
+        fixture = (
+            ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/NativeRtpLutRenderingTest.kt"
+        ).read_text()
         encoded = re.search(r'Base64.getDecoder\(\).decode\("([A-Za-z0-9+/=]+)"\)', fixture)
         self.assertIsNotNone(encoded)
         self.assertEqual(

@@ -42,6 +42,31 @@ After an acknowledged shutter and any required release, a failed status read ret
 
 This workflow is covered by an independent synthetic HTTP peer and automated tests; physical-camera validation remains pending.
 
+### Selected CCAPI status body deadlines
+
+Finite GET responses for `/devicestatus/batterylist`, `/devicestatus/battery`,
+`/devicestatus/storage`, `/devicestatus/currentstorage`, `/contents`,
+`/shooting/information/recordable`, `/devicestatus/lens`, and
+`/devicestatus/temperature` use the existing request timeout as an absolute
+response-body budget. The default remains 15 seconds. Bytes arriving at or after
+that deadline are not published as success; an already-received HTTP rejection
+keeps its status even if its optional diagnostic body cannot finish.
+
+These reads share the provider lock with saved camera Stop operations. The
+original request must unwind and close its body before the saved Stop runs;
+timeout does not detach that producer, transfer its owner, or replay Start.
+A successful release ACK remains confirmed even if its later status read fails.
+
+This is a cooperative check between buffered reads, not a total Stop-latency
+guarantee or forced cancellation of DNS, connection, headers, or a blocking
+read. Each response has its own budget. Optional status refreshes through
+`/functions/cardselection/stillimage`, `/functions/cardselection/movie`,
+`/functions/beep`, and `/functions/displayoff` remain outside this selected
+deadline policy. Media-file streams, Live View GET, and event polling retain
+their separate behavior. See the [source scope and synthetic RED/GREEN evidence](
+../docs/validation/bridge-ccapi-status-body-deadline-2026-10-20.zh-TW.md);
+this evidence does not establish physical-camera Stop or network reliability.
+
 ## Local USB cleanup failures
 
 If closing a registered local USB session raises, the Bridge retains that exact retired owner's reservation. New local connections, including AUTO, and camera discovery return `CAMERA_BUSY` for the rest of that Bridge process. Reconnecting, polling, and shutdown do not retry its close or clear the reservation: an already-closed provider can return successfully on a second close without performing any cleanup.
