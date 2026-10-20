@@ -18,7 +18,7 @@ concurrency:
 jobs:
   secret-scan:
     # This one-shot gate prevents future pushes or reruns from repeating KVM changes.
-    if: github.event.before == '575eb20d006072a133bbb8df6f7f95b3975a6985' && github.run_attempt == 1
+    if: github.event.before == 'a78e7a08840cf063a60a13d3fdfc8fe2ef99349e' && github.run_attempt == 1
     runs-on: ubuntu-latest
     steps:
       - name: Checkout full history
@@ -150,7 +150,7 @@ jobs:
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           working-directory: android
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
+          script: python ../scripts/ci/run_android_device_health.py --evidence-dir "$RUNNER_TEMP/android-device-health" -- ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
 
       - name: Upload Android UI test results
         if: always()
@@ -161,6 +161,7 @@ jobs:
             android/app/build/reports/androidTests/connected/debug
             android/app/build/outputs/androidTest-results/connected/debug
             android/app/build/outputs/connected_android_test_additional_output
+            ${{ runner.temp }}/android-device-health
             ${{ runner.temp }}/android-camera-simulator.log
           if-no-files-found: ignore
           retention-days: 7
@@ -227,7 +228,7 @@ jobs:
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           working-directory: android
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
+          script: python ../scripts/ci/run_android_device_health.py --evidence-dir "$RUNNER_TEMP/android-device-health" -- ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
 
       - name: Upload Android 16 UI test results
         if: always()
@@ -238,6 +239,7 @@ jobs:
             android/app/build/reports/androidTests/connected/debug
             android/app/build/outputs/androidTest-results/connected/debug
             android/app/build/outputs/connected_android_test_additional_output
+            ${{ runner.temp }}/android-device-health
             ${{ runner.temp }}/android-camera-simulator-api36.log
           if-no-files-found: ignore
           retention-days: 7

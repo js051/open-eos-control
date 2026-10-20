@@ -1,5 +1,7 @@
 # Android shared device-failure repair candidate
 
+> Historical candidate record. The third-attempt results and subsequent local corrections below supersede its pre-run status and reference-decoder recommendation.
+
 ## Baseline and boundaries
 
 Both API 34 and API 36 at `575eb20d006072a133bbb8df6f7f95b3975a6985`
@@ -113,3 +115,30 @@ Impact: patch candidate for existing Android behavior. No version, main merge,
 release or delivery-state promotion is performed. Required full host/CI and
 native acceptance remain gates; no assertion/threshold was lowered to obtain a
 passing result. Physical-camera validation remains pending.
+
+## Third approved attempt and follow-up corrections
+
+Published commit `a78e7a08840cf063a60a13d3fdfc8fe2ef99349e` used exactly the reviewed 30-file tree.
+The full instrumentation Kotlin compile succeeded before either approved KVM operation.
+
+- Device run: https://github.com/js051/open-eos-control/actions/runs/39399454712
+- Host companion: https://github.com/js051/open-eos-control/actions/runs/39399454654 (success).
+- Apple companion: https://github.com/js051/open-eos-control/actions/runs/39399454683 (success; app 833 and UI 43 tests, zero failures). The unchanged Apple workflow also matched the changed CI/validation script paths; that fanout was missed in the prepublication prediction and reported immediately.
+- API 34: 460 cases, 455 passed, 5 failed, zero skipped/errors. Eighteen of the prior 22 failing cases passed; four remained and one new single-access-unit RTP regression appeared.
+- API 36: 460 cases, 396 passed, **64 failed**, zero skipped/errors. The same five genuine failures preceded 59 SystemUI-blocked failures. Fifty-three focus-wait failures each recorded the same `Application Not Responding: com.android.systemui` focus owner; all six OS SAF picker dumps instead showed the SystemUI ANR dialog. Screenshots confirm the blocking dialog from 09:28, with focus evidence continuing through 10:14. These 59 cases remain failed, not accepted passes. The initiating SystemUI ANR cause is not established.
+
+The next local correction removes the forced Android reference AVC decoder. That component's display-order queue retained the only picture, regressing the existing one-access-unit/no-EOS readiness contract. System decoder selection is restored without changing fixture bytes, injecting EOS/dummy frames, or relaxing any pixel tolerance. The original goldfish color-conversion failure remains an unresolved native acceptance gate. Separate CSD/color-at-configure handling is diagnostic follow-up, not a claimed fix.
+
+Two further product defects explain the other shared failures. Persistent recording/owned-Bulb warnings were still positioned using only generic shutter uncertainty, placing actionable guidance over capture controls. Placement now covers those retained receipts, and E2E adds rendered non-overlap checks while retaining real touch input. A successful owned Stop requested preview resumption before clearing its own SHUTTER_RELEASE marker; it now settles only that marker first, preserving every other interlock and fresh-response/owner gate. The original failed-Stop assertions remain, and a new receipt-only regression requires no restart after background retirement.
+
+No fourth device attempt, new security operation, or publication is part of these local corrections.
+
+### Future environment-health strategy, not yet implemented
+
+Before a separately approved device attempt, verify no SystemUI ANR dialog owns focus. A bounded read-only watchdog can record exact ANR signals, screenshots, focused windows and system-process logs, then fail visibly as environment-unhealthy rather than repeatedly attempting blocked interactions. Preserve completed results and explicitly report unexecuted cases. Do not dismiss the ANR, skip acceptance checks, relax deadlines, mark failures passed, or automatically rerun. Workflow changes and any new KVM operation require their applicable approvals.
+
+### Local follow-up validation
+
+All 71 current production data Kotlin files and the intact ViewModel/model dependency closure compiled offline with existing tools, bounded to 768 MiB and two active processors. Seven focused host classes passed 69/69 tests. RTP source guards passed 17/17 and pre-KVM workflow guards passed 4/4. Removing the six obsolete decoder-selection unit cases removes tests for deleted policy, not the retained native first-picture or color assertions.
+
+The first ad-hoc UI compilation used a stale classpath because its copied harness resolved `__file__` relatively; absolute path resolution corrected the harness and the same source compiled. Its failed exit remains in the results record; the retried UI log replaced that initial full log. No product/test change was made to address the harness issue. The standalone host closure does not compile the full application Composables or instrumentation tests, and does not validate the new overlap or receipt-only tests on a device. Exact-candidate full native compilation and runtime acceptance remain pending.

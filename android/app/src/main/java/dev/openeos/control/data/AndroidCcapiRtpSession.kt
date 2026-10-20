@@ -4,7 +4,6 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.net.Network
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -89,8 +88,8 @@ internal class AndroidCcapiRtpSession(
             keyFramesReceived = videoKeyFramesReceived.get(),
             lastDatagramAtMillis = videoLastDatagramAtMillis.get().takeIf { it > 0 },
             lastAccessUnitAtMillis = videoLastAccessUnitAtMillis.get().takeIf { it > 0 },
-            hasSequenceParameterSet = latestSps != null,
-            hasPictureParameterSet = latestPps != null,
+            hasSequenceParameterSet = h264Configurations.hasSequenceParameterSet,
+            hasPictureParameterSet = h264Configurations.hasPictureParameterSet,
             ready = videoReady.get() && !closed.get() && !terminalFailure.get(),
             error = videoError.get(),
             decodedFrames = frameProgress.decodedCount,
@@ -100,7 +99,7 @@ internal class AndroidCcapiRtpSession(
         )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val accessUnits = Channel<Pair<NativeRtpInputIdentity, H264AccessUnit>>(
+    private val accessUnits = Channel<NativeRtpDecoderSeed<H264PreparedAccessUnit>>(
         capacity = RTP_ACCESS_UNIT_QUEUE_CAPACITY,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
@@ -112,6 +111,7 @@ internal class AndroidCcapiRtpSession(
     private val firstDecodableVideo = CompletableDeferred<Unit>()
     private val videoDatagramsReceived = AtomicLong()
     private val videoAccessUnitsReceived = AtomicLong()
+    private val videoPictureSequence = NativeRtpPictureSequence()
     private val videoKeyFramesReceived = AtomicLong()
     private val videoLastDatagramAtMillis = AtomicLong()
     private val videoLastAccessUnitAtMillis = AtomicLong()
@@ -147,11 +147,8 @@ internal class AndroidCcapiRtpSession(
     private var receiverJob: Job? = null
     private var decoderJob: Job? = null
     private var audioReceiverJob: Job? = null
-    private val sdpParameterSets = description.video.h264ParameterSets()
-    @Volatile
-    private var latestSps: ByteArray? = sdpParameterSets?.sequenceParameterSet
-    @Volatile
-    private var latestPps: ByteArray? = sdpParameterSets?.pictureParameterSet
+    private val h264Configurations = H264DecoderConfigurationStore(description.video.h264ParameterNalUnits().orEmpty())
+    private val decoderSeeds = NativeRtpDecoderSeedOwner<H264PreparedAccessUnit>()
 
     override fun start() {
         check(!closed.get()) { "RTP Live View session is closed." }
@@ -224,15 +221,23 @@ internal class AndroidCcapiRtpSession(
         lutRevision.incrementAndGet()
         renderedFrameState.value = null
         videoLutState.value = if (lut == null) NativeVideoLutStatus.OFF else NativeVideoLutStatus.WAITING
-        surface.get()?.takeIf { it.isValid }?.let(::restartDecoder)
+        surface.get()?.takeIf { it.isValid }?.let { restartDecoder(it) }
     }
 
     override fun setMonitorSamplingEnabled(enabled: Boolean) {
         monitorSamplingEnabled.set(enabled && !closed.get())
     }
 
-    private fun restartDecoder(target: Surface?) = synchronized(decoderGuard) {
+    private fun restartDecoder(
+        target: Surface?,
+        seed: NativeRtpDecoderSeed<H264PreparedAccessUnit>? = null,
+    ) = synchronized(decoderGuard) {
         val generation = decoderGeneration.incrementAndGet()
+        decoderSeeds.restart(generation, renderingGeneration.get(), seed)
+        // Surface/LUT replacement discards queued history, but not an IDR already reserved
+        // for a configuration change. That seed lives outside the lossy input channel until
+        // native submission succeeds. A configuration restart keeps its following pictures.
+        if (seed == null) while (accessUnits.tryReceive().isSuccess) Unit
         frameProgress.reset(generation)
         videoReady.set(false)
         decodedDeadline.arm(System.nanoTime())
@@ -268,6 +273,7 @@ internal class AndroidCcapiRtpSession(
         if (renderingEnabled.getAndSet(enabled) != enabled) {
             surfaceWait.setRenderingEnabled(enabled, System.nanoTime())
             renderingGeneration.incrementAndGet()
+            h264Configurations.discardPendingMedia()
             if (enabled && surface.get()?.isValid == true) presentationDeadline.arm(System.nanoTime())
         }
         audioPlayback.setForeground(enabled)
@@ -299,6 +305,8 @@ internal class AndroidCcapiRtpSession(
         videoReady.set(false)
         renderingEnabled.set(false)
         decoderGeneration.incrementAndGet()
+        h264Configurations.discardPendingMedia()
+        decoderSeeds.clear()
         renderedFrameState.value = null
         firstDecodableVideo.completeExceptionally(
             IllegalStateException("Canon RTP session closed before producing a decoded H.264 picture.")
@@ -357,7 +365,7 @@ internal class AndroidCcapiRtpSession(
 
     private suspend fun receivePackets(datagramSocket: DatagramSocket) {
         var receiveGeneration = renderingGeneration.get()
-        var depacketizer = H264RtpDepacketizer(description.video.payloadType)
+        val depacketizer = H264RtpDepacketizer(description.video.payloadType)
         val buffer = ByteArray(MAX_RTP_DATAGRAM_BYTES)
         val packet = DatagramPacket(buffer, buffer.size)
 
@@ -365,8 +373,11 @@ internal class AndroidCcapiRtpSession(
             try {
                 val inputGeneration = renderingGeneration.get()
                 if (inputGeneration != receiveGeneration) {
-                    // Discard partial pre-change NAL assembly as well as completed queued input.
-                    depacketizer = H264RtpDepacketizer(description.video.payloadType)
+                    // Discard partial pre-change assembly through the next marker, retaining
+                    // a sticky loss boundary until a subsequent complete IDR is resolved.
+                    // A fresh unflagged instance could admit a new-generation dependent P
+                    // without ever encountering a stale queued picture at the decoder gate.
+                    depacketizer.resetAfterDiscontinuity()
                     receiveGeneration = inputGeneration
                 }
                 packet.length = buffer.size
@@ -376,19 +387,25 @@ internal class AndroidCcapiRtpSession(
                 videoDatagramsReceived.incrementAndGet()
                 videoLastDatagramAtMillis.set(nowMillis)
                 depacketizer.accept(packet.data, packet.length)?.let { accessUnit ->
-                    val sequence = videoAccessUnitsReceived.incrementAndGet()
+                    videoAccessUnitsReceived.incrementAndGet()
                     videoLastAccessUnitAtMillis.set(nowMillis)
-                    if (accessUnit.hasPicture) inputDeadline.observe(System.nanoTime())
+                    val sequence = videoPictureSequence.observe(accessUnit.hasPicture)
                     if (accessUnit.keyFrame) videoKeyFramesReceived.incrementAndGet()
-                    accessUnit.sequenceParameterSet?.let { latestSps = it }
-                    accessUnit.pictureParameterSet?.let { latestPps = it }
-                    accessUnits.trySend(NativeRtpInputIdentity(sequence, inputGeneration) to accessUnit)
-                    if (accessUnit.keyFrame && latestSps != null && latestPps != null) {
-                        // Core cannot wait for a UI Surface created only after Start returns.
-                        // Encoded admission starts one headless decoder; only its output is ready.
-                        synchronized(decoderGuard) {
-                            if (!closed.get() && decoderJob == null && surface.get() == null) restartDecoder(null)
-                        }
+                    synchronized(decoderGuard) {
+                        if (closed.get() || inputGeneration != renderingGeneration.get()) return@synchronized
+                        if (accessUnit.hasPicture) inputDeadline.observe(System.nanoTime())
+                        // Parsing is bounded by the AU/NAL limits. Commit the resolver's cache
+                        // under the retirement lock: a post-parse check cannot undo stale sets.
+                        val prepared = h264Configurations.prepare(accessUnit) ?: return@synchronized
+                        // Parameter-only packets update the bounded resolver, never picture
+                        // continuity, decoder readiness, or native presentation progress.
+                        if (sequence == null) return@synchronized
+                        val input = NativeRtpDecoderSeed(NativeRtpInputIdentity(sequence, inputGeneration), prepared)
+                        if (decoderJob == null && surface.get() == null) {
+                            // Core cannot wait for a UI Surface created only after Start returns.
+                            // A matched real IDR starts headless decode; only output is ready.
+                            if (prepared.keyFrame) restartDecoder(null, input)
+                        } else accessUnits.trySend(input)
                     }
                 }
             } catch (_: SocketTimeoutException) {
@@ -415,7 +432,7 @@ internal class AndroidCcapiRtpSession(
             "(UDP datagrams=${videoDatagramsReceived.get()}, " +
             "H.264 access units=${videoAccessUnitsReceived.get()}, " +
             "key frames=${videoKeyFramesReceived.get()}, decoded=${frameProgress.decodedCount}, " +
-            "SPS=${latestSps != null}, PPS=${latestPps != null})."
+            "SPS=${h264Configurations.hasSequenceParameterSet}, PPS=${h264Configurations.hasPictureParameterSet})."
 
     private suspend fun receiveAudioPackets(
         datagramSocket: DatagramSocket,
@@ -504,13 +521,42 @@ internal class AndroidCcapiRtpSession(
 
     private class LutFallback(val reason: NativeVideoLutStatus) : Exception()
 
+    private fun ownsDecoder(targetSurface: Surface?, generation: Long): Boolean =
+        !closed.get() && !terminalFailure.get() && decoderGeneration.get() == generation &&
+            surface.get() === targetSurface && (targetSurface == null || targetSurface.isValid)
+
+    private suspend fun awaitDecoderSeed(
+        targetSurface: Surface?,
+        generation: Long,
+    ): NativeRtpDecoderSeed<H264PreparedAccessUnit>? {
+        while (currentCoroutineContext().isActive && ownsDecoder(targetSurface, generation)) {
+            synchronized(decoderGuard) {
+                if (!ownsDecoder(targetSurface, generation)) return null
+                decoderSeeds.peek(generation, renderingGeneration.get())?.let { return it }
+            }
+            val candidate = accessUnits.receiveCatching().getOrNull() ?: return null
+            if (!candidate.input.keyFrame) continue
+            synchronized(decoderGuard) {
+                if (ownsDecoder(targetSurface, generation)) {
+                    decoderSeeds.offer(generation, renderingGeneration.get(), candidate)
+                }
+            }
+        }
+        return null
+    }
+
     private suspend fun decodeTo(targetSurface: Surface?, generation: Long) {
         val selected = videoLut.get().takeIf { targetSurface != null }
         try {
             decodeSurface(targetSurface, generation, selected)
         } catch (fallback: LutFallback) {
-            if (!closed.get() && decoderGeneration.get() == generation && surface.get() === targetSurface) {
-                if (selected != null) videoLutState.value = fallback.reason
+            val retryOwned = synchronized(decoderGuard) {
+                if (ownsDecoder(targetSurface, generation)) {
+                    if (selected != null) videoLutState.value = fallback.reason
+                    true
+                } else false
+            }
+            if (retryOwned) {
                 // One same-session native fallback. No camera reconnect, command replay or retry loop.
                 decodeSurface(targetSurface, generation, null, bypassGpu = true)
             }
@@ -518,8 +564,10 @@ internal class AndroidCcapiRtpSession(
     }
 
     private suspend fun decodeSurface(targetSurface: Surface?, generation: Long, selectedLut: NativeVideoLut?, bypassGpu: Boolean = false) {
-        // A replacement must start at a new IDR; the first headless decoder keeps pre-start input.
-        if (targetSurface != null) while (accessUnits.tryReceive().isSuccess) Unit
+        // No default-size decoder and no guessed/latest parameter pair. Its immutable CSD
+        // and the first real picture are selected together, before creating native resources.
+        val seed = awaitDecoderSeed(targetSurface, generation) ?: return
+        val configuration = seed.input.configuration
         val revision = lutRevision.get()
         var codec: MediaCodec? = null
         var lutRenderer: NativeRtpLutRenderer? = null
@@ -529,9 +577,10 @@ internal class AndroidCcapiRtpSession(
         )
         val pendingRendered = linkedMapOf<Long, PendingPresentation>()
         var formatGeneration = 0L
+        var ownsCodecPass = true
         fun ownsPresentation(timeUs: Long): Boolean = synchronized(renderedGuard) {
             val metadata = pendingRendered[timeUs]
-            metadata != null && metadata.format == formatGeneration && renderingEnabled.get() &&
+            ownsCodecPass && metadata != null && metadata.format == formatGeneration && renderingEnabled.get() &&
                 surface.get() === targetSurface && metadata.rendering == renderingGeneration.get() && revision == lutRevision.get() && targetSurface?.isValid == true &&
                 LiveViewLifecycleEvidence(sameOwner = !closed.get(),
                     sameAttempt = decoderGeneration.get() == generation, terminal = terminalFailure.get(),
@@ -563,10 +612,20 @@ internal class AndroidCcapiRtpSession(
         }
         try {
             val codecSurface = if (targetSurface != null && !bypassGpu) {
-                if (selectedLut != null) videoLutState.value = NativeVideoLutStatus.WAITING
+                synchronized(decoderGuard) {
+                    if (!ownsDecoder(targetSurface, generation)) return
+                    if (selectedLut != null) videoLutState.value = NativeVideoLutStatus.WAITING
+                }
                 val renderer = NativeRtpLutRenderer(targetSurface, selectedLut, ::ownsPresentation,
                     { timeUs, pixels -> publishPresentation(timeUs, System.nanoTime(), pixels) }, {
-                        if (!closed.get() && decoderGeneration.get() == generation && selectedLut != null) videoLutState.value = NativeVideoLutStatus.FAILED
+                        synchronized(decoderGuard) {
+                            synchronized(renderedGuard) {
+                                if (ownsCodecPass && ownsDecoder(targetSurface, generation) &&
+                                    revision == lutRevision.get() && selectedLut != null) {
+                                    videoLutState.value = NativeVideoLutStatus.FAILED
+                                }
+                            }
+                        }
                     }, { monitorSamplingEnabled.get() && renderingEnabled.get() })
                 lutRenderer = renderer
                 try { renderer.inputSurface() }
@@ -574,21 +633,7 @@ internal class AndroidCcapiRtpSession(
                 catch (_: Exception) { throw LutFallback(NativeVideoLutStatus.UNSUPPORTED_GPU) }
             } else targetSurface
             codec = createNativeRtpAvcDecoder()
-            val format = MediaFormat.createVideoFormat(MIME_AVC, DEFAULT_VIDEO_WIDTH, DEFAULT_VIDEO_HEIGHT).apply {
-                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_H264_DECODER_INPUT_BYTES)
-                setInteger(MediaFormat.KEY_PRIORITY, 0)
-                setInteger(MediaFormat.KEY_OPERATING_RATE, MAX_RTP_RENDER_FPS)
-                if (
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                    runCatching {
-                        codec.codecInfo.getCapabilitiesForType(MIME_AVC)
-                            .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)
-                    }.getOrDefault(false)
-                ) {
-                    setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                }
-            }
-            codec.configure(format, codecSurface, null, 0)
+            codec.configure(createNativeRtpAvcFormat(configuration, codec), codecSurface, null, 0)
             if (lutRenderer == null && targetSurface != null) {
                 codec.setOnFrameRenderedListener({ _, timeUs, nanoTime ->
                     publishPresentation(timeUs, nanoTime)
@@ -596,44 +641,70 @@ internal class AndroidCcapiRtpSession(
             }
             codec.start()
 
-            val continuity = NativeVideoDecodeContinuity()
-            var firstTimestamp: Long? = null
+            val inputGate = NativeRtpDecoderInputGate(configuration)
+            val firstTimestamp = seed.input.rtpTimestamp
+            var pendingSeed: NativeRtpDecoderSeed<H264PreparedAccessUnit>? = seed
+            var seedBytes: ByteArray? = null
+            var seedPresentationTimeUs: Long? = null
             var lastRenderedAtNanos = 0L
-            var videoWidth = DEFAULT_VIDEO_WIDTH
-            var videoHeight = DEFAULT_VIDEO_HEIGHT
+            var videoWidth = configuration.width
+            var videoHeight = configuration.height
             val bytesByPresentationTime = linkedMapOf<Long, Pair<Int, NativeRtpInputIdentity>>()
             val codecTimeline = NativeRtpCodecTimeline()
             val bufferInfo = MediaCodec.BufferInfo()
 
-            while (currentCoroutineContext().isActive && !closed.get() && decoderGeneration.get() == generation &&
-                surface.get() === targetSurface && (targetSurface == null || targetSurface.isValid)) {
+            while (currentCoroutineContext().isActive && ownsDecoder(targetSurface, generation)) {
                 if (lutRenderer?.hasFailed == true) throw LutFallback(NativeVideoLutStatus.FAILED)
                 // Output is polled even when RTP has gone quiet; delayed decoder output must drain.
-                val next = withTimeoutOrNull(DECODER_OUTPUT_POLL_MILLIS) { accessUnits.receive() }
-                if (next != null && !next.first.ownsRendering(renderingGeneration.get())) continuity.dropped()
-                if (next != null && next.first.ownsRendering(renderingGeneration.get()) &&
-                    continuity.admit(next.first.frameId, next.second.keyFrame)) {
-                    val (identity, accessUnit) = next
-                    val encoded = if (continuity.needsKeyFrame) {
-                        concatenateParameterSets(latestSps, latestPps, accessUnit.bytes)
-                    } else {
-                        accessUnit.bytes
+                val next = pendingSeed ?: withTimeoutOrNull(DECODER_OUTPUT_POLL_MILLIS) { accessUnits.receive() }
+                val admission = next?.let { inputGate.admit(it.identity, renderingGeneration.get(),
+                    it.input.configuration, it.input.keyFrame) }
+                if (next != null && !next.identity.ownsRendering(renderingGeneration.get())) {
+                    inputGate.dropped()
+                    if (pendingSeed === next) {
+                        synchronized(decoderGuard) { decoderSeeds.peek(generation, renderingGeneration.get()) }
+                        pendingSeed = null
+                        seedBytes = null
+                        seedPresentationTimeUs = null
                     }
-                    val baseTimestamp = firstTimestamp ?: accessUnit.rtpTimestamp.also { firstTimestamp = it }
+                } else if (next != null && admission == NativeRtpInputAdmission.RECONFIGURE) {
+                    // A newly referenced configuration cannot reuse the previous prediction
+                    // state. Wait for its own IDR, then retire through the same writer barrier.
+                    val restarted = synchronized(decoderGuard) {
+                        if (ownsDecoder(targetSurface, generation) && next.identity.ownsRendering(renderingGeneration.get())) {
+                            restartDecoder(targetSurface, next)
+                            true
+                        } else false
+                    }
+                    if (restarted) return
+                } else if (next != null && admission == NativeRtpInputAdmission.QUEUE) {
+                    val (identity, accessUnit) = next
+                    val isSeed = pendingSeed === next
+                    val encoded = if (isSeed) seedBytes ?: accessUnit.mediaBytes.also { seedBytes = it }
+                        else accessUnit.mediaBytes
                     // Unique codec timestamps preserve callback identity through repeated/out-of-order RTP PTS.
-                    val mediaTimeUs = rtpTimestampDelta(baseTimestamp, accessUnit.rtpTimestamp) * 1_000_000L /
+                    val mediaTimeUs = rtpTimestampDelta(firstTimestamp, accessUnit.rtpTimestamp) * 1_000_000L /
                         description.video.clockRate
-                    val presentationTimeUs = codecTimeline.next(mediaTimeUs)
+                    val presentationTimeUs = if (isSeed) seedPresentationTimeUs ?: codecTimeline.next(mediaTimeUs)
+                        .also { seedPresentationTimeUs = it } else codecTimeline.next(mediaTimeUs)
 
-                    val queued = queueDecoderInput(codec, encoded, presentationTimeUs)
+                    val queued = queueDecoderInput(codec, encoded, presentationTimeUs, targetSurface, generation, next)
+                    // A rendering change after dequeue owns an input slot on the old codec.
+                    // Its retirement must drain now, not resume polling the abandoned owner.
+                    if (!ownsDecoder(targetSurface, generation)) return
                     if (queued) {
+                        if (isSeed) {
+                            pendingSeed = null
+                            seedBytes = null
+                            seedPresentationTimeUs = null
+                        }
                         bytesByPresentationTime[presentationTimeUs] = encoded.size to identity
                         while (bytesByPresentationTime.size > MAX_PENDING_FRAME_STATS) {
                             bytesByPresentationTime.remove(bytesByPresentationTime.keys.first())
                         }
-                        continuity.accepted()
-                    } else {
-                        continuity.dropped()
+                        inputGate.submitted()
+                    } else if (!isSeed) {
+                        inputGate.dropped()
                     }
                 }
 
@@ -676,38 +747,41 @@ internal class AndroidCcapiRtpSession(
 
                         outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                             val outputFormat = codec.outputFormat
-                            if (lutRenderer != null) {
-                                fun optional(key: String): Int? = if (outputFormat.containsKey(key)) outputFormat.getInteger(key) else null
-                                val profile = optional(MediaFormat.KEY_PROFILE)
-                                val highBitDepth = profile in setOf(
-                                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh10,
-                                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh422,
-                                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh444,
-                                )
-                                if (!nativeLutH264ProfileSupported(latestSps) || highBitDepth || !nativeLutColorSupported(
-                                        optional(MediaFormat.KEY_COLOR_STANDARD), optional(MediaFormat.KEY_COLOR_TRANSFER), optional("bit-depth"))) {
-                                    throw LutFallback(NativeVideoLutStatus.UNSUPPORTED_COLOR)
+                            synchronized(decoderGuard) {
+                                synchronized(renderedGuard) {
+                                    if (!ownsDecoder(targetSurface, generation) || !ownsCodecPass) return
+                                    if (lutRenderer != null) {
+                                        fun optional(key: String): Int? = if (outputFormat.containsKey(key)) outputFormat.getInteger(key) else null
+                                        val profile = optional(MediaFormat.KEY_PROFILE)
+                                        val highBitDepth = profile in setOf(
+                                            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh10,
+                                            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh422,
+                                            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh444,
+                                        )
+                                        if (!nativeLutH264ProfileSupported(configuration.csd0) || highBitDepth || !nativeLutColorSupported(
+                                                optional(MediaFormat.KEY_COLOR_STANDARD), optional(MediaFormat.KEY_COLOR_TRANSFER), optional("bit-depth"))) {
+                                            throw LutFallback(NativeVideoLutStatus.UNSUPPORTED_COLOR)
+                                        }
+                                    }
+                                    formatGeneration = videoFormatGeneration.incrementAndGet()
+                                    pendingRendered.clear()
+                                    renderedFrameState.value = null
+                                    val dimensions = nativeVideoDisplayDimensions(
+                                        outputFormat.getIntegerOrDefault(MediaFormat.KEY_WIDTH, videoWidth),
+                                        outputFormat.getIntegerOrDefault(MediaFormat.KEY_HEIGHT, videoHeight),
+                                        outputFormat.getIntegerOrDefault("crop-left", 0),
+                                        outputFormat.getIntegerOrDefault("crop-top", 0),
+                                        outputFormat.getIntegerOrDefault("crop-right", -1),
+                                        outputFormat.getIntegerOrDefault("crop-bottom", -1),
+                                        outputFormat.getIntegerOrDefault(MediaFormat.KEY_ROTATION, 0),
+                                    )
+                                    check(dimensions.first in 1..4096 && dimensions.second in 1..4096 &&
+                                        dimensions.first.toLong() * dimensions.second <= 8_388_608L) { "Decoded RTP dimensions exceed preview limits." }
+                                    videoWidth = dimensions.first
+                                    videoHeight = dimensions.second
+                                    listener.get()?.invoke(NativeLiveViewEvent.VideoSizeChanged(videoWidth, videoHeight))
                                 }
                             }
-                            synchronized(renderedGuard) {
-                                formatGeneration = videoFormatGeneration.incrementAndGet()
-                                pendingRendered.clear()
-                                if (decoderGeneration.get() == generation) renderedFrameState.value = null
-                            }
-                            val dimensions = nativeVideoDisplayDimensions(
-                                outputFormat.getIntegerOrDefault(MediaFormat.KEY_WIDTH, videoWidth),
-                                outputFormat.getIntegerOrDefault(MediaFormat.KEY_HEIGHT, videoHeight),
-                                outputFormat.getIntegerOrDefault("crop-left", 0),
-                                outputFormat.getIntegerOrDefault("crop-top", 0),
-                                outputFormat.getIntegerOrDefault("crop-right", -1),
-                                outputFormat.getIntegerOrDefault("crop-bottom", -1),
-                                outputFormat.getIntegerOrDefault(MediaFormat.KEY_ROTATION, 0),
-                            )
-                            check(dimensions.first in 1..4096 && dimensions.second in 1..4096 &&
-                                dimensions.first.toLong() * dimensions.second <= 8_388_608L) { "Decoded RTP dimensions exceed preview limits." }
-                            videoWidth = dimensions.first
-                            videoHeight = dimensions.second
-                            listener.get()?.invoke(NativeLiveViewEvent.VideoSizeChanged(videoWidth, videoHeight))
                         }
 
                         else -> break
@@ -723,7 +797,15 @@ internal class AndroidCcapiRtpSession(
                 reportFailure("Canon H.264 decode failed", exception)
             }
         } finally {
-            if (decoderGeneration.get() == generation) renderedFrameState.value = null
+            // A same-generation GPU fallback also retires this specific codec pass. Its
+            // late callbacks must not publish while the replacement is waiting for an IDR.
+            synchronized(decoderGuard) {
+                synchronized(renderedGuard) {
+                    ownsCodecPass = false
+                    pendingRendered.clear()
+                    if (decoderGeneration.get() == generation) renderedFrameState.value = null
+                }
+            }
             val stopError = runCatching { codec?.stop() }.exceptionOrNull()
             val releaseError = runCatching { codec?.release() }.exceptionOrNull()
             val rendererError = runCatching { lutRenderer?.close() }.exceptionOrNull()
@@ -735,16 +817,40 @@ internal class AndroidCcapiRtpSession(
         }
     }
 
-    private fun queueDecoderInput(codec: MediaCodec, encoded: ByteArray, presentationTimeUs: Long): Boolean {
+    private fun queueDecoderInput(
+        codec: MediaCodec,
+        encoded: ByteArray,
+        presentationTimeUs: Long,
+        targetSurface: Surface?,
+        generation: Long,
+        picture: NativeRtpDecoderSeed<H264PreparedAccessUnit>,
+    ): Boolean {
         val inputIndex = codec.dequeueInputBuffer(DECODER_INPUT_TIMEOUT_US)
         if (inputIndex < 0) return false
-        val input = codec.getInputBuffer(inputIndex) ?: error("H.264 decoder returned no input buffer.")
-        if (encoded.size > input.remaining()) {
-            error("Canon H.264 access unit (${encoded.size} bytes) exceeds decoder input capacity (${input.remaining()} bytes).")
+        return synchronized(decoderGuard) {
+            when (nativeRtpInputSlotAdmission(ownsDecoder(targetSurface, generation),
+                    picture.identity, renderingGeneration.get())) {
+                NativeRtpInputSlotAdmission.RETIRED -> return@synchronized false
+                NativeRtpInputSlotAdmission.RETIRE_CODEC -> {
+                    // Pause/resume changed rendering identity without replacing this codec.
+                    // MediaCodec has no input-slot release API. Drain the owner rather than
+                    // leak the acquired slot or inject an empty/dummy picture.
+                    restartDecoder(targetSurface)
+                    return@synchronized false
+                }
+                NativeRtpInputSlotAdmission.SUBMIT -> Unit
+            }
+            val input = codec.getInputBuffer(inputIndex) ?: error("H.264 decoder returned no input buffer.")
+            if (encoded.size > input.remaining()) {
+                error("Canon H.264 access unit (${encoded.size} bytes) exceeds decoder input capacity (${input.remaining()} bytes).")
+            }
+            input.put(encoded)
+            codec.queueInputBuffer(inputIndex, 0, encoded.size, presentationTimeUs, 0)
+            // Retirement cannot transfer this seed between native acceptance and its
+            // consumption mark. A fallback may retain only a picture never submitted.
+            decoderSeeds.submitted(generation, picture)
+            true
         }
-        input.put(encoded)
-        codec.queueInputBuffer(inputIndex, 0, encoded.size, presentationTimeUs, 0)
-        return true
     }
 
     private fun reportFailure(prefix: String, exception: Exception) {
@@ -808,23 +914,6 @@ internal class AndroidCcapiRtpSession(
     }
 }
 
-private fun concatenateParameterSets(sps: ByteArray?, pps: ByteArray?, frame: ByteArray): ByteArray {
-    val prefixSize = (sps?.size ?: 0) + (pps?.size ?: 0)
-    if (prefixSize == 0) return frame
-    return ByteArray(prefixSize + frame.size).also { result ->
-        var offset = 0
-        sps?.let {
-            it.copyInto(result, offset)
-            offset += it.size
-        }
-        pps?.let {
-            it.copyInto(result, offset)
-            offset += it.size
-        }
-        frame.copyInto(result, offset)
-    }
-}
-
 private fun rtpTimestampDelta(first: Long, current: Long): Long = (current - first) and 0xFFFF_FFFFL
 
 private fun MediaFormat.getIntegerOrDefault(key: String, fallback: Int): Int =
@@ -832,9 +921,6 @@ private fun MediaFormat.getIntegerOrDefault(key: String, fallback: Int): Int =
 
 private val rtpSurfaceWriters = NativeVideoSurfaceDrainRegistry()
 
-private const val MIME_AVC = "video/avc"
-private const val DEFAULT_VIDEO_WIDTH = 1920
-private const val DEFAULT_VIDEO_HEIGHT = 1080
 private const val DEFAULT_RTP_RENDER_FPS = 30
 private const val MIN_RTP_RENDER_FPS = 1
 private const val MAX_RTP_RENDER_FPS = 30
@@ -843,7 +929,6 @@ private const val MAX_RTP_DATAGRAM_BYTES = 65_535
 private const val RTP_RECEIVE_BUFFER_BYTES = 2 * 1024 * 1024
 private const val RTP_AUDIO_RECEIVE_BUFFER_BYTES = 512 * 1024
 private const val RTP_SOCKET_TIMEOUT_MILLIS = 1_000
-private const val MAX_H264_DECODER_INPUT_BYTES = 8 * 1024 * 1024
 private const val MAX_PENDING_FRAME_STATS = 16
 private const val DECODER_INPUT_TIMEOUT_US = 20_000L
 private const val DECODER_OUTPUT_POLL_MILLIS = 10L

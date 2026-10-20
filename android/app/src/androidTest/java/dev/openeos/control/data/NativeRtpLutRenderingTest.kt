@@ -173,14 +173,22 @@ class NativeRtpLutRenderingTest {
             codec = createNativeRtpAvcDecoder()
             decoder = codec.name.take(96)
             phase = "decoder-configure"
-            codec.configure(MediaFormat.createVideoFormat("video/avc", 64, 48), inputSurface, null, 0)
+            // Keep the original fixture intact. Use the production startup contract:
+            // its exact SPS/PPS are submitted once as CSD, its real IDR once as media.
+            val prepared = requireNotNull(H264DecoderConfigurationStore().prepare(
+                H264AccessUnit(fixture, 0, true, null, null),
+            ))
+            assertEquals(64, prepared.configuration.width)
+            assertEquals(48, prepared.configuration.height)
+            val picture = prepared.mediaBytes
+            codec.configure(createNativeRtpAvcFormat(prepared.configuration, codec), inputSurface, null, 0)
             phase = "decoder-start"
             codec.start()
             phase = "input-dequeue"
             val index = codec.dequeueInputBuffer(TimeUnit.SECONDS.toMicros(2))
             assertTrue(index >= 0)
-            requireNotNull(codec.getInputBuffer(index)).put(fixture)
-            codec.queueInputBuffer(index, 0, fixture.size, 1_000, 0)
+            requireNotNull(codec.getInputBuffer(index)).put(picture)
+            codec.queueInputBuffer(index, 0, picture.size, 1_000, 0)
             phase = "decode-present"
             val info = MediaCodec.BufferInfo()
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6)
@@ -207,8 +215,8 @@ class NativeRtpLutRenderingTest {
                     val expectedTimeUs = nextTimeUs++
                     val inputIndex = activeCodec.dequeueInputBuffer(TimeUnit.SECONDS.toMicros(2))
                     check(inputIndex >= 0)
-                    requireNotNull(activeCodec.getInputBuffer(inputIndex)).put(fixture)
-                    activeCodec.queueInputBuffer(inputIndex, 0, fixture.size, expectedTimeUs, 0)
+                    requireNotNull(activeCodec.getInputBuffer(inputIndex)).put(picture)
+                    activeCodec.queueInputBuffer(inputIndex, 0, picture.size, expectedTimeUs, 0)
                     val nextDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4)
                     while (submittedFrame.get()?.sequence != expectedTimeUs && System.nanoTime() < nextDeadline) {
                         val output = activeCodec.dequeueOutputBuffer(info, 10_000)

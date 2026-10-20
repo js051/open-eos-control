@@ -168,6 +168,15 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
         encoded = re.search(r'Base64.getDecoder\(\).decode\("([A-Za-z0-9+/=]+)"\)', source)
         self.assertIsNotNone(encoded)
         payload = base64.b64decode(encoded.group(1), validate=True)
+        self.assertEqual(
+            hashlib.sha256(payload).hexdigest(), "b48b0a7e9a6a54e6b3f34298ef8cbde86034fe1ed850bb3035f1d35c43d88fdf"
+        )
+        journey = (
+            ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/AndroidRtpPresentationJourneyTest.kt"
+        ).read_text()
+        journey_encoded = re.search(r'Base64.getDecoder\(\).decode\("([A-Za-z0-9+/=]+)"\)', journey)
+        self.assertIsNotNone(journey_encoded)
+        self.assertEqual(base64.b64decode(journey_encoded.group(1), validate=True), payload)
         units = [nal for nal in re.split(b"\x00\x00(?:\x00)?\x01", payload) if nal]
         self.assertEqual([nal[0] & 31 for nal in units], [7, 8, 5])
         # The original PPS and IDR are unchanged. Only the SPS color description changed.
@@ -217,7 +226,7 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
     def test_decoder_targets_gpu_input_and_sampler_targets_visible_surface(self):
         session = (DATA / "AndroidCcapiRtpSession.kt").read_text()
         gpu = (DATA / "NativeRtpLutRenderer.kt").read_text()
-        self.assertIn("codec.configure(format, codecSurface, null, 0)", session)
+        self.assertIn("codec.configure(createNativeRtpAvcFormat(configuration, codec), codecSurface, null, 0)", session)
         self.assertIn("renderer.inputSurface()", session)
         self.assertIn("eglCreateWindowSurface(display, config, target", gpu)
         self.assertIn("source.getTransformMatrix(transform)", gpu)
@@ -244,21 +253,27 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
         self.assertIn("currentCoroutineContext().ensureActive()", registry)
         self.assertIn("launchDrainedNativeVideoJob(scope, previous, priorWriter, block)", registry)
         self.assertIn("if (writers[target] === replacement) writers.remove(target)", registry)
-        self.assertIn("continuity.admit(next.first.frameId, next.second.keyFrame)", session)
-        self.assertIn("continuity.dropped()", session)
+        gate = (DATA / "NativeRtpDecoderSeed.kt").read_text()
+        self.assertIn("val inputGate = NativeRtpDecoderInputGate(configuration)", session)
+        self.assertIn("inputGate.admit(it.identity, renderingGeneration.get()", session)
+        self.assertIn("continuity.admit(identity.frameId, keyFrame)", gate)
+        self.assertIn("continuity.dropped()", gate)
+        self.assertIn("inputGate.dropped()", session)
 
     def test_float_lut_interpolates_before_clamping_and_color_guard_precedes_presentation(self):
         gpu = (DATA / "NativeRtpLutRenderer.kt").read_text()
         session = (DATA / "AndroidCcapiRtpSession.kt").read_text()
         self.assertIn("GLES30.GL_RGBA32F", gpu)
         self.assertIn("texelFetch(cube", gpu)
-        self.assertIn("nativeLutH264ProfileSupported(latestSps)", session)
+        self.assertIn("nativeLutH264ProfileSupported(configuration.csd0)", session)
         self.assertIn("NativeVideoLutStatus.UNSUPPORTED_COLOR", session)
         self.assertIn("decodeSurface(targetSurface, generation, null, bypassGpu = true)", session)
         fallback = session.split("catch (fallback: LutFallback)", 1)[1].split("private suspend fun decodeSurface", 1)[0]
-        self.assertIn(
-            "!closed.get() && decoderGeneration.get() == generation && surface.get() === targetSurface", fallback
-        )
+        self.assertIn("if (ownsDecoder(targetSurface, generation))", fallback)
+        owner = session.split("private fun ownsDecoder(", 1)[1].split("private suspend fun awaitDecoderSeed", 1)[0]
+        self.assertIn("!closed.get() && !terminalFailure.get() && decoderGeneration.get() == generation", owner)
+        self.assertIn("surface.get() === targetSurface", owner)
+        self.assertIn("targetSurface == null || targetSurface.isValid", owner)
         self.assertIn("videoLutState.value = fallback.reason", fallback)
 
     def test_native_fixture_retains_numeric_assertions_and_bounded_failure_evidence(self):
@@ -276,7 +291,7 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
         self.assertNotIn("format.toString()", fixture)
         self.assertNotIn("takeScreenshot", fixture)
 
-    def test_native_fixture_and_production_share_the_bounded_decoder_workaround(self):
+    def test_native_fixture_and_production_preserve_the_system_decoder_choice(self):
         fixture = (
             ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/NativeRtpLutRenderingTest.kt"
         ).read_text()
@@ -285,12 +300,44 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
         self.assertIn("codec = createNativeRtpAvcDecoder()", fixture)
         self.assertIn("codec = createNativeRtpAvcDecoder()", session)
         self.assertNotIn("MediaCodec.createDecoderByType", fixture)
-        self.assertIn("nativeRtpUsesGoldfishHostDecoder(defaultDecoder.name, Build.HARDWARE)", factory)
-        self.assertIn("if (replacement == null) return defaultDecoder", factory)
-        self.assertIn("!it.isEncoder", factory)
-        self.assertIn("type.equals(mime, ignoreCase = true)", factory)
-        self.assertLess(factory.index("defaultDecoder.release()"), factory.index("MediaCodec.createByCodecName"))
-        self.assertEqual(factory.count("MediaCodec.createDecoderByType(mime)"), 2)
+        self.assertIn(
+            'internal fun createNativeRtpAvcDecoder(): MediaCodec = MediaCodec.createDecoderByType("video/avc")',
+            factory,
+        )
+        self.assertEqual(factory.count("MediaCodec.createDecoderByType"), 1)
+        for source in (factory, session, fixture):
+            self.assertNotIn("MediaCodec.createByCodecName", source)
+            self.assertNotIn("MediaCodecList", source)
+        self.assertNotIn("Build.HARDWARE", factory)
+        self.assertFalse((DATA / "NativeRtpDecoderSelection.kt").exists())
+
+    def test_one_access_unit_remains_a_live_output_contract_without_eos_or_extra_input(self):
+        fixture = (
+            ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/NativeRtpLutRenderingTest.kt"
+        ).read_text()
+        journey = (
+            ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/AndroidRtpPresentationJourneyTest.kt"
+        ).read_text()
+        session = (DATA / "AndroidCcapiRtpSession.kt").read_text()
+        single = journey.split(
+            "@Test fun oneAccessUnitDrainsDecodedOutputWithoutWaitingForAnotherPacket()", 1
+        )[1].split("@Test", 1)[0]
+        self.assertEqual(single.count("sender.send("), 1)
+        self.assertIn("session.awaitReady(4_000)", single)
+        self.assertIn("assertEquals(1L, session.videoStatus.accessUnitsReceived)", single)
+        self.assertIn("assertEquals(1L, session.videoStatus.decodedFrames)", single)
+        self.assertLess(single.index("session.awaitReady"), single.index("session.close()"))
+        first_picture = fixture.split("private suspend fun render(", 1)[1].split(
+            "if (swap && overrideLut == null)", 1
+        )[0]
+        self.assertEqual(first_picture.count("codec.queueInputBuffer("), 1)
+        self.assertIn("codec.queueInputBuffer(index, 0, picture.size, 1_000, 0)", first_picture)
+        self.assertIn('assertEquals("Decoder/GPU did not present fixture", 0L, completed.count)', first_picture)
+        self.assertIn("withTimeoutOrNull(DECODER_OUTPUT_POLL_MILLIS) { accessUnits.receive() }", session)
+        factory_source = (DATA / "AndroidNativeRtpDecoder.kt").read_text()
+        for source in (factory_source, session, fixture, journey):
+            self.assertNotIn("BUFFER_FLAG_END_OF_STREAM", source)
+        self.assertNotIn("queueInputBuffer", factory_source)
 
     def test_native_fixture_retires_prior_captures_when_a_later_phase_fails(self):
         fixture = (

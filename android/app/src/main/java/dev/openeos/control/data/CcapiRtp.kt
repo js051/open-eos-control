@@ -27,21 +27,29 @@ internal data class H264ParameterSets(
 )
 
 internal fun RtpMediaDescription.h264ParameterSets(): H264ParameterSets? {
+    val decoded = h264ParameterNalUnits() ?: return null
+    val sps = decoded.firstOrNull { it[4].toInt() and H264_NAL_TYPE_MASK == H264_SPS } ?: return null
+    val pps = decoded.firstOrNull { it[4].toInt() and H264_NAL_TYPE_MASK == H264_PPS } ?: return null
+    return H264ParameterSets(sequenceParameterSet = sps, pictureParameterSet = pps)
+}
+
+/** Retain all bounded advertised sets so picture admission can resolve their actual IDs. */
+internal fun RtpMediaDescription.h264ParameterNalUnits(): List<ByteArray>? {
     val encoded = parameter("sprop-parameter-sets")?.takeIf(String::isNotBlank) ?: return null
+    // Bound both text and each token before split/decode allocates attacker-controlled output.
+    if (encoded.length > MAX_H264_PARAMETER_SET_COUNT * (MAX_H264_PARAMETER_BASE64_CHARS + 1)) return null
     val values = encoded.split(',').map(String::trim)
     if (values.isEmpty() || values.size > MAX_H264_PARAMETER_SET_COUNT) return null
+    if (values.any { it.isEmpty() || it.length > MAX_H264_PARAMETER_BASE64_CHARS }) return null
     val decoded = values.mapNotNull { value ->
         runCatching { Base64.getDecoder().decode(value) }
             .getOrNull()
             ?.takeIf { it.size in 1..MAX_H264_PARAMETER_SET_BYTES }
+            ?.takeIf { it[0].toInt() and H264_NAL_TYPE_MASK in setOf(H264_SPS, H264_PPS) }
+            ?.takeIf { it[0].toInt() and 0x80 == 0 }
     }
     if (decoded.size != values.size) return null
-    val sps = decoded.firstOrNull { it.first().toInt() and H264_NAL_TYPE_MASK == H264_SPS } ?: return null
-    val pps = decoded.firstOrNull { it.first().toInt() and H264_NAL_TYPE_MASK == H264_PPS } ?: return null
-    return H264ParameterSets(
-        sequenceParameterSet = sps.withStartCode(),
-        pictureParameterSet = pps.withStartCode(),
-    )
+    return decoded.map { it.withStartCode() }
 }
 
 object CcapiRtpSessionDescriptionParser {
@@ -212,6 +220,7 @@ internal data class H264AccessUnit(
     val sequenceParameterSet: ByteArray?,
     val pictureParameterSet: ByteArray?,
     val hasPicture: Boolean = keyFrame,
+    val discontinuity: Boolean = false,
 )
 
 internal class H264RtpDepacketizer(
@@ -220,33 +229,59 @@ internal class H264RtpDepacketizer(
     private var timestamp: Long? = null
     private var expectedSequence: Int? = null
     private var validAccessUnit = true
+    private var pendingDiscontinuity = false
+    private var awaitingBoundary = false
     private var fragmentedNal = false
+    private var fragmentedNalHeader: Int? = null
     private var keyFrame = false
     private var hasPicture = false
     private var sequenceParameterSet: ByteArray? = null
     private var pictureParameterSet: ByteArray? = null
     private var output = ByteArrayOutputStream()
+    internal val bufferedByteCount: Int get() = output.size()
 
     fun accept(datagram: ByteArray, length: Int = datagram.size): H264AccessUnit? {
-        val packet = RtpPacketParser.parse(datagram, length) ?: return null
+        val packet = RtpPacketParser.parse(datagram, length) ?: run {
+            invalidateAccessUnit()
+            // No trustworthy timestamp/marker tells whether the next packet is an AU tail.
+            // Keep the last known sequence, but quarantine through a real boundary.
+            resetAccessUnit(null)
+            awaitingBoundary = true
+            return null
+        }
         if (packet.payloadType != payloadType) return null
 
-        val previousTimestamp = timestamp
-        if (previousTimestamp != packet.timestamp) {
-            resetAccessUnit(packet.timestamp)
-        } else if (expectedSequence != null && packet.sequenceNumber != expectedSequence) {
-            validAccessUnit = false
-            fragmentedNal = false
+        // RTP sequence belongs to the stream, not the current timestamp/marker-delimited AU.
+        val sequenceDelta = expectedSequence?.let { (packet.sequenceNumber - it) and 0xFFFF }
+        // Do not rewind on duplicate/late packets and accidentally replay an old IDR.
+        // Exactly half a sequence space is ambiguous; reject it conservatively as well.
+        if (sequenceDelta != null && sequenceDelta >= 0x8000) {
+            return null
         }
+        val sequenceGap = sequenceDelta != null && sequenceDelta != 0
         expectedSequence = (packet.sequenceNumber + 1) and 0xFFFF
+        if (awaitingBoundary) {
+            // A reset may occur between complete NALs of one multi-NAL AU. Even an
+            // IDR-looking first packet can be only its tail; wait through a marker.
+            if (packet.marker) awaitingBoundary = false
+            return null
+        }
+        if (timestamp != packet.timestamp) {
+            // No marker completed the preceding AU. Its missing tail may be reference data.
+            if (timestamp != null) pendingDiscontinuity = true
+            resetAccessUnit(packet.timestamp)
+        }
+        // Even an IDR-looking remaining NAL cannot prove this gap-containing AU is complete.
+        if (sequenceGap) invalidateAccessUnit()
 
         val payload = packet.payload
         val nalType = payload[0].toInt() and H264_NAL_TYPE_MASK
-        when (nalType) {
+        if (payload[0].toInt() and 0x80 != 0) invalidateAccessUnit()
+        else when (nalType) {
             in H264_SINGLE_NAL_MIN..H264_SINGLE_NAL_MAX -> appendNal(payload)
             H264_STAP_A -> appendStapA(payload)
             H264_FU_A -> appendFuA(payload)
-            else -> validAccessUnit = false
+            else -> invalidateAccessUnit()
         }
 
         if (!packet.marker) return null
@@ -259,32 +294,52 @@ internal class H264RtpDepacketizer(
                 sequenceParameterSet = sequenceParameterSet,
                 pictureParameterSet = pictureParameterSet,
                 hasPicture = hasPicture,
+                discontinuity = pendingDiscontinuity,
             )
         } else {
+            pendingDiscontinuity = true
             null
         }
+        // Configuration-only/P AUs cannot acknowledge reference recovery. A rejected IDR
+        // remains the downstream resolver's responsibility; that IDR still carries the flag.
+        if (completed?.keyFrame == true) pendingDiscontinuity = false
         resetAccessUnit(null)
         return completed
     }
 
+    /** Drop pre-retirement assembly through a marker, then require a new complete IDR. */
+    fun resetAfterDiscontinuity() {
+        pendingDiscontinuity = true
+        awaitingBoundary = true
+        // Rendering changes do not create a new RTP stream. Retain its cursor so an
+        // old duplicate marker cannot finish quarantine before the current AU's tail.
+        resetAccessUnit(null)
+    }
+
     private fun appendStapA(payload: ByteArray) {
+        if (payload.size < 4) {
+            invalidateAccessUnit()
+            return
+        }
         var offset = 1
         while (offset + 2 <= payload.size) {
+            if (!validAccessUnit) return
             val size = ((payload[offset].toInt() and 0xFF) shl 8) or (payload[offset + 1].toInt() and 0xFF)
             offset += 2
             if (size <= 0 || offset + size > payload.size) {
-                validAccessUnit = false
+                invalidateAccessUnit()
                 return
             }
             appendNal(payload.copyOfRange(offset, offset + size))
             offset += size
         }
-        if (offset != payload.size) validAccessUnit = false
+        if (offset != payload.size) invalidateAccessUnit()
     }
 
     private fun appendFuA(payload: ByteArray) {
+        if (!validAccessUnit) return
         if (payload.size < 3) {
-            validAccessUnit = false
+            invalidateAccessUnit()
             return
         }
         val fuIndicator = payload[0].toInt() and 0xFF
@@ -292,47 +347,56 @@ internal class H264RtpDepacketizer(
         val start = fuHeader and H264_FU_START != 0
         val end = fuHeader and H264_FU_END != 0
         val nalType = fuHeader and H264_NAL_TYPE_MASK
-        if ((start && end) || fuHeader and H264_FU_RESERVED != 0) {
-            validAccessUnit = false
-            fragmentedNal = false
+        val reconstructedHeader = (fuIndicator and H264_NAL_PREFIX_MASK) or nalType
+        if ((start && end) || fuHeader and H264_FU_RESERVED != 0 ||
+            nalType !in H264_SINGLE_NAL_MIN..H264_SINGLE_NAL_MAX) {
+            invalidateAccessUnit()
             return
         }
 
         if (start) {
             if (fragmentedNal) {
-                validAccessUnit = false
+                invalidateAccessUnit()
                 return
             }
+            if (!reserveAppend(H264_START_CODE.size + 1 + payload.size - 2)) return
             fragmentedNal = true
-            val reconstructedHeader = ((fuIndicator and H264_NAL_PREFIX_MASK) or nalType).toByte()
+            fragmentedNalHeader = reconstructedHeader
             appendStartCode()
-            output.write(reconstructedHeader.toInt())
+            output.write(reconstructedHeader)
             output.write(payload, 2, payload.size - 2)
             observeNalType(nalType, null)
         } else {
-            if (!fragmentedNal) {
-                validAccessUnit = false
+            if (!fragmentedNal || fragmentedNalHeader != reconstructedHeader) {
+                invalidateAccessUnit()
                 return
             }
+            if (!reserveAppend(payload.size - 2)) return
             output.write(payload, 2, payload.size - 2)
         }
-        if (end) fragmentedNal = false
-        enforceSizeLimit()
+        if (end) {
+            fragmentedNal = false
+            fragmentedNalHeader = null
+        }
     }
 
     private fun appendNal(nal: ByteArray) {
-        if (nal.isEmpty()) {
-            validAccessUnit = false
+        if (!validAccessUnit) return
+        if (nal.isEmpty() || fragmentedNal || nal[0].toInt() and 0x80 != 0 ||
+            nal[0].toInt() and H264_NAL_TYPE_MASK !in H264_SINGLE_NAL_MIN..H264_SINGLE_NAL_MAX) {
+            invalidateAccessUnit()
             return
         }
+        if (!reserveAppend(H264_START_CODE.size + nal.size)) return
         appendStartCode()
         output.write(nal)
         observeNalType(nal[0].toInt() and H264_NAL_TYPE_MASK, nal)
-        enforceSizeLimit()
     }
 
     private fun observeNalType(type: Int, nal: ByteArray?) {
-        if (type == 1 || type == H264_IDR) hasPicture = true
+        // Unsupported partitioned/extended pictures still consume picture continuity.
+        // Otherwise rejecting one would make the next dependent P picture look consecutive.
+        if (type in H264_VCL_NAL_TYPES) hasPicture = true
         when (type) {
             H264_IDR -> keyFrame = true
             H264_SPS -> sequenceParameterSet = nal?.withStartCode()
@@ -342,14 +406,26 @@ internal class H264RtpDepacketizer(
 
     private fun appendStartCode() = output.write(H264_START_CODE)
 
-    private fun enforceSizeLimit() {
-        if (output.size() > MAX_H264_ACCESS_UNIT_BYTES) validAccessUnit = false
+    private fun reserveAppend(bytes: Int): Boolean {
+        if (bytes < 0 || bytes > MAX_H264_ACCESS_UNIT_BYTES - output.size()) {
+            invalidateAccessUnit()
+            return false
+        }
+        return true
+    }
+
+    private fun invalidateAccessUnit() {
+        validAccessUnit = false
+        pendingDiscontinuity = true
+        fragmentedNal = false
+        fragmentedNalHeader = null
     }
 
     private fun resetAccessUnit(nextTimestamp: Long?) {
         timestamp = nextTimestamp
         validAccessUnit = true
         fragmentedNal = false
+        fragmentedNalHeader = null
         keyFrame = false
         hasPicture = false
         sequenceParameterSet = null
@@ -376,7 +452,9 @@ private const val H264_FU_A = 28
 private const val H264_FU_START = 0x80
 private const val H264_FU_END = 0x40
 private const val H264_FU_RESERVED = 0x20
+private val H264_VCL_NAL_TYPES = setOf(1, 2, 3, 4, 5, 19, 20, 21)
 private const val MAX_H264_ACCESS_UNIT_BYTES = 8 * 1024 * 1024
 private const val MAX_H264_PARAMETER_SET_COUNT = 8
 private const val MAX_H264_PARAMETER_SET_BYTES = 64 * 1024
+private const val MAX_H264_PARAMETER_BASE64_CHARS = ((MAX_H264_PARAMETER_SET_BYTES + 2) / 3) * 4
 private val H264_START_CODE = byteArrayOf(0, 0, 0, 1)
