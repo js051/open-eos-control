@@ -1880,6 +1880,8 @@ button.media-thumbnail:focus-visible {
 .toast {
   position: fixed;
   z-index: 100;
+  /* Status-only text must not intercept controls beneath this temporary overlay. */
+  pointer-events: none;
   right: max(20px, env(safe-area-inset-right));
   bottom: max(20px, env(safe-area-inset-bottom));
   max-width: min(420px, calc(100% - 40px));

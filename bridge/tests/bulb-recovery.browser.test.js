@@ -77,6 +77,51 @@ async function assertWarningDoesNotOverlapControls(page) {
   assert.deepEqual(result, { normalFlow: true, shutter: false, exposure: false });
 }
 
+async function assertInformationalToastHitTesting(browser) {
+  const html = fs.readFileSync(path.join(root, "open_eos_bridge", "static", "index.html"), "utf8");
+  const toastMarkup = html.match(/<div id="toast"[^>]*><\/div>/)?.[0];
+  const retryMarkup = html.match(/<button id="latest-media-retry"[^>]*>[^<]*<\/button>/)?.[0];
+  assert.ok(toastMarkup && retryMarkup, "Use the production status and retry elements");
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: "en-US" });
+  try {
+    await page.setContent(`${retryMarkup}${toastMarkup}`);
+    await page.addStyleTag({ path: path.join(root, "open_eos_bridge", "static", "styles.css") });
+    const geometry = await page.evaluate(() => {
+      const retry = document.querySelector("#latest-media-retry");
+      const toast = document.querySelector("#toast");
+      // Freeze the exact observed failure geometry, not a new product layout.
+      Object.assign(retry.style, { position: "fixed", left: "967px", top: "774.96875px",
+        width: "297px", height: "48px" });
+      Object.assign(toast.style, { width: "420px", height: "74px" });
+      retry.hidden = false;
+      toast.hidden = false;
+      toast.classList.add("error");
+      toast.textContent = "Synthetic capture status readback warning";
+      window.syntheticReadOnlyClicks = 0;
+      retry.addEventListener("click", () => { window.syntheticReadOnlyClicks += 1; });
+      const rect = element => {
+        const box = element.getBoundingClientRect();
+        return [box.x, box.y, box.width, box.height];
+      };
+      return { target: rect(retry), toast: rect(toast) };
+    });
+    assert.deepEqual(geometry, { target: [967, 774.96875, 297, 48], toast: [840, 806, 420, 74] });
+    assert.equal(await page.getAttribute("#toast", "role"), "status");
+    assert.equal(await page.getAttribute("#toast", "aria-live"), "polite");
+    assert.equal(await page.locator("#toast button, #toast a, #toast [tabindex]").count(), 0);
+    assert.equal(await page.isVisible("#toast"), true);
+    // Keep the original five-point helper, including the point covered by the visible toast.
+    await assertActionable(page, "#latest-media-retry");
+    await page.mouse.click(967 + 297 * 0.5, 774.96875 + 48 * 0.75);
+    assert.equal(await page.evaluate(() => window.syntheticReadOnlyClicks), 1);
+    assert.equal(await page.isVisible("#toast"), true);
+    assert.equal(await page.textContent("#toast"), "Synthetic capture status readback warning");
+    console.log("PASS: visible informational toast preserves five-point retry hit testing and read-only click");
+  } finally {
+    await page.close();
+  }
+}
+
 async function run() {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
@@ -110,6 +155,8 @@ async function run() {
       headless: true,
       ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
     });
+    fs.mkdirSync(path.join(root, "test-results"), { recursive: true });
+    await assertInformationalToastHitTesting(browser);
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: "en-US" });
     // Status refresh updates the server's settings cache. A second settled refresh avoids
     // depending on the unrelated pre-existing parallel status/capability cache ordering.
