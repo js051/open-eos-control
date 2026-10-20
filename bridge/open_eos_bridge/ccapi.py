@@ -814,6 +814,20 @@ _CONTROL_BODY_ROUTES = (
     ("DELETE", "/shooting/liveview/multipart"),
 )
 
+# These finite status reads can hold the same provider lock as a saved Stop.
+# Bound their bodies without opting them into control ACK or strict framing
+# rules. This is not a whole-status/Stop deadline or a streaming-media budget.
+_STATUS_BODY_PATHS = (
+    "/devicestatus/batterylist",
+    "/devicestatus/battery",
+    "/devicestatus/storage",
+    "/devicestatus/currentstorage",
+    "/contents",
+    "/shooting/information/recordable",
+    "/devicestatus/lens",
+    "/devicestatus/temperature",
+)
+
 # Receipt integrity only: these focus operations keep their existing body,
 # deadline, redirect and retry policy rather than joining _CONTROL_BODY_ROUTES.
 _FOCUS_CONTROL_ACK_ROUTES = (
@@ -880,7 +894,8 @@ class UrllibCcapiTransport:
             method == control_method and resource_path.endswith(suffix)
             for control_method, suffix in _CONTROL_BODY_ROUTES
         )
-        deadline = time.monotonic() + timeout if configuration_resource or control_resource else None
+        status_resource = method == "GET" and resource_path.endswith(_STATUS_BODY_PATHS)
+        deadline = time.monotonic() + timeout if configuration_resource or control_resource or status_resource else None
         response = self._open(
             method, url, body=body, headers=headers, timeout=timeout,
             follow_redirects=method != "DELETE" and not configuration_resource, strict_control=strict_control,
