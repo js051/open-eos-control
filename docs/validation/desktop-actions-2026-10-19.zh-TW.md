@@ -143,3 +143,10 @@ The real browser failure retained valid Bridge framing but an unknown Stop-prepa
 - Three stale tests expected replacement after an unconfirmed release. They now assert admission quarantine, no additional CLI command, and the precise persistent shutdown error. Production retirement safeguards are unchanged.
 - 凍結本地 gate：974 passed（17.63 秒），含原取消／queued／playback 矩陣、gphoto、Bulb／短控制、API／metadata；Ruff、diff check 過。使用與專案範圍相符的官方 pytest 8.4.2，共用 wheel hash 驗證後隔離到 EOS cache，無重下載。原紅與修後 logs 保留。JPEG 全檔本地收集因缺 PyAV 未執行，未重試已拒下載；完整 codec 與 package 仍交原 Actions 驗。
 - The frozen local slice passed 974 tests plus lint and diff checks. Native codec tests could not collect locally because PyAV is unavailable; the denied download was not retried. Complete CI and package results remain pending.
+
+## Desktop 30 完整終態 / Complete terminal result
+
+- [Run 39342666839](https://github.com/js051/open-eos-control/actions/runs/39342666839)，exact source `1e7929f71099a179c74083cb46e6ea40e7b25d4e`：原完整 Chromium suites 於23:45:32 UTC通過，完整 Python gate 於23:48:54通過，wheel/sdist 於23:48:58建置成功。相同SHA Windows run `39342666985` 亦 success。這些為 supplemental gates，不等同原PR ci-complete或真相機驗收。
+- All original Chromium suites, the complete Python gate, and wheel/sdist packaging passed on the exact source above. The same-SHA Windows supplemental run also passed. These results do not establish original PR ci-complete or physical-camera validation.
+- `release-candidate-desktop-bridge` artifact `12230500441`：1,020,555 bytes，GitHub報告SHA256 `80b25a558c7fd2381cf7c666357e812da4e5f3b8e30d71c742364ec4537e2cd7`；包含0.13.0 wheel/sdist。Screenshots artifact `12230565364`：13,131,229 bytes，GitHub報告SHA256 `b56bb663b43ce0783f42f527b99ca03c65c87ef1b833e15f109caae46e86100b`。此處是遠端artifact metadata，未聲稱已下載逐byte重驗。
+- Artifact sizes and digests above are GitHub metadata; local archive download/hash verification is not claimed.
