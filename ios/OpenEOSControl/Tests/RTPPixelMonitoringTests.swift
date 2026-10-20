@@ -261,32 +261,79 @@ final class RTPPixelMonitorOwnershipTests: XCTestCase {
     func testNewerFrameDoesNotStarveSampledScopesButClearsSpatialOverlay() async throws {
         let source = try makeRTPMonitorSample(width: 12, height: 8)
         let gate = RTPAnalysisGate()
+        let clock = RTPManualMonitorClock(now: 100)
         defer { gate.release.signal() }
         let monitor = IOSRTPPixelMonitor(analyze: { _, _ in
             gate.started.fulfill()
             _ = gate.release.wait(timeout: .now() + 5)
             return LiveViewMonitorAnalysis(width: 1, height: 1, histogram: [1], waveform: nil, overlayRGBA: [0, 0, 0, 255])
-        })
+        }, clock: clock.clock)
+        let sampled = expectation(description: "Retained sample published before its logical deadline")
+        let stale = expectation(description: "Retained sample expires at its original deadline")
+        let subscription = monitor.$status.sink {
+            // @Published emits before assignment. Observe the event here;
+            // inspect monitor state only after the awaited continuation resumes.
+            if $0 == .sampled { sampled.fulfill() }
+            if $0 == .stale { stale.fulfill() }
+        }
         var settings = LiveViewMonitorSettings(); settings.histogramVisible = true
         let view = UUID(), first = makeMonitorToken()
         let second = IOSRTPFrameToken(owner: first.owner, epoch: first.epoch,
                                       lutRevision: first.lutRevision, sequence: 2)
+        defer {
+            subscription.cancel()
+            monitor.deactivate(owner: view)
+            clock.cancelAll()
+        }
         monitor.configure(settings: settings, owner: view)
         monitor.frameAvailable(token: first, format: source.format, buffer: source.buffer,
-                               outputAt: ProcessInfo.processInfo.systemUptime)
+                               outputAt: clock.now)
         await fulfillment(of: [gate.started], timeout: 2)
+        clock.advance(to: 100.25)
         monitor.presentationChanged(to: nil)
         monitor.frameAvailable(token: second, format: source.format, buffer: source.buffer,
-                               outputAt: ProcessInfo.processInfo.systemUptime)
+                               outputAt: clock.now)
         monitor.presentationChanged(to: second)
+        clock.advance(to: 100.5)
         gate.release.signal()
-        let deadline = ProcessInfo.processInfo.systemUptime + 0.8
-        while monitor.isProcessing, ProcessInfo.processInfo.systemUptime < deadline { await Task.yield() }
+        await fulfillment(of: [sampled], timeout: 2)
+        XCTAssertFalse(monitor.isProcessing)
         XCTAssertNotNil(monitor.currentAnalysis(settings: settings, owner: view), "A bounded retained sample may finish at live frame rates")
         XCTAssertEqual(monitor.analysisFrame, first)
         XCTAssertNil(monitor.currentOverlayAnalysis(settings: settings, frame: second, owner: view))
         XCTAssertNil(monitor.currentOverlayAnalysis(settings: settings, frame: first, owner: view))
-        monitor.deactivate(owner: view)
+        clock.advance(to: 100.999)
+        XCTAssertNotNil(monitor.currentAnalysis(settings: settings, owner: view))
+        clock.advance(to: 101)
+        // Neither publication at 100.5 nor the newer source at 100.25 grants a
+        // fresh second. Readback rejects immediately, then expiry clears storage.
+        XCTAssertNil(monitor.currentAnalysis(settings: settings, owner: view))
+        await fulfillment(of: [stale], timeout: 2)
+        XCTAssertNil(monitor.analysis)
+        XCTAssertNil(monitor.analysisFrame)
+        // Re-reading the original token cannot refresh output identity or age.
+        monitor.frameAvailable(token: first, format: source.format, buffer: source.buffer, outputAt: clock.now)
+        XCTAssertFalse(monitor.isProcessing)
+        XCTAssertNil(monitor.currentAnalysis(settings: settings, owner: view))
+    }
+
+    func testExactDeadlineAndFutureOutputNeverStartWithControlledClock() throws {
+        let source = try makeRTPMonitorSample(width: 12, height: 8)
+        let clock = RTPManualMonitorClock(now: 100)
+        let monitor = IOSRTPPixelMonitor(
+            analyze: { _, _ in XCTFail("Untrusted output age"); return nil }, clock: clock.clock
+        )
+        var settings = LiveViewMonitorSettings(); settings.histogramVisible = true
+        let view = UUID(), first = makeMonitorToken()
+        defer { monitor.deactivate(owner: view); clock.cancelAll() }
+        monitor.configure(settings: settings, owner: view)
+        monitor.frameAvailable(token: first, format: source.format, buffer: source.buffer, outputAt: 99)
+        let second = IOSRTPFrameToken(owner: first.owner, epoch: first.epoch,
+                                      lutRevision: first.lutRevision, sequence: 2)
+        monitor.frameAvailable(token: second, format: source.format, buffer: source.buffer, outputAt: 100.001)
+        XCTAssertFalse(monitor.isProcessing)
+        XCTAssertNil(monitor.currentAnalysis(settings: settings, owner: view))
+        XCTAssertEqual(clock.pendingWaitCount, 0)
     }
 
     func testStaleOrFutureOutputAgeNeverStartsAnalysis() throws {
@@ -378,6 +425,129 @@ final class RTPPixelMonitorOwnershipTests: XCTestCase {
 private final class RTPAnalysisGate: @unchecked Sendable {
     let started = XCTestExpectation(description: "Analysis is physically in flight")
     let release = DispatchSemaphore(value: 0)
+}
+
+/// All mutation and continuation ownership are main-actor confined. Advancing
+/// logical time, not host scheduling, controls freshness in ownership tests.
+@MainActor
+private final class RTPManualMonitorClock {
+    private struct Waiter {
+        let deadline: TimeInterval
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
+    private(set) var now: TimeInterval
+    private var waiters: [UUID: Waiter] = [:]
+    var didRegisterWait: (() -> Void)?
+    var pendingWaitCount: Int { waiters.count }
+    var clock: IOSRTPMonitorClock {
+        IOSRTPMonitorClock(now: { self.now }, sleepUntil: { try await self.sleep(until: $0) })
+    }
+
+    init(now: TimeInterval) { self.now = now }
+
+    func advance(to next: TimeInterval) {
+        precondition(next.isFinite && next >= now)
+        now = next
+        for id in waiters.keys.filter({ waiters[$0]!.deadline <= now }) {
+            waiters.removeValue(forKey: id)?.continuation.resume()
+        }
+    }
+
+    func cancelAll() {
+        let pending = Array(waiters.values)
+        waiters.removeAll()
+        for waiter in pending { waiter.continuation.resume(throwing: CancellationError()) }
+    }
+
+    private func sleep(until deadline: TimeInterval) async throws {
+        try Task.checkCancellation()
+        guard deadline > now else { return }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                // Cancellation before registration cannot leave an orphan waiter.
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else if deadline <= now {
+                    continuation.resume()
+                } else {
+                    waiters[id] = Waiter(deadline: deadline, continuation: continuation)
+                    didRegisterWait?()
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.waiters.removeValue(forKey: id)?.continuation.resume(throwing: CancellationError())
+            }
+        }
+    }
+}
+
+@MainActor
+final class RTPManualMonitorClockTests: XCTestCase {
+    func testCancellationBeforeRegistrationLeavesNoWaiter() async {
+        let clock = RTPManualMonitorClock(now: 100)
+        let finished = expectation(description: "Cancelled before clock registration")
+        let task = Task { @MainActor in
+            do {
+                try await clock.clock.sleepUntil(101)
+                XCTFail("A cancelled wait cannot succeed")
+            } catch {
+                XCTAssertTrue(error is CancellationError)
+            }
+            finished.fulfill()
+        }
+        // This synchronous main-actor turn cancels before the child can start.
+        task.cancel()
+        defer { task.cancel(); clock.cancelAll() }
+        await fulfillment(of: [finished], timeout: 2)
+        XCTAssertEqual(clock.pendingWaitCount, 0)
+    }
+
+    func testRegisteredCancellationAndExactDeadlineResumeOnlyTheirWaiters() async {
+        let clock = RTPManualMonitorClock(now: 100)
+        let registered = expectation(description: "Both waits registered")
+        registered.expectedFulfillmentCount = 2
+        clock.didRegisterWait = { registered.fulfill() }
+        let cancelled = expectation(description: "First waiter cancelled")
+        let expired = expectation(description: "Second waiter reaches its exact deadline")
+        var didExpire = false
+        let first = Task { @MainActor in
+            do {
+                try await clock.clock.sleepUntil(101)
+                XCTFail("Cancellation must not become expiry success")
+            } catch {
+                XCTAssertTrue(error is CancellationError)
+            }
+            cancelled.fulfill()
+        }
+        let second = Task { @MainActor in
+            do {
+                try await clock.clock.sleepUntil(101)
+                didExpire = true
+            } catch {
+                XCTFail("The uncancelled waiter must reach its deadline")
+            }
+            expired.fulfill()
+        }
+        defer { first.cancel(); second.cancel(); clock.cancelAll() }
+        await fulfillment(of: [registered], timeout: 2)
+        XCTAssertEqual(clock.pendingWaitCount, 2)
+        first.cancel()
+        await fulfillment(of: [cancelled], timeout: 2)
+        XCTAssertEqual(clock.pendingWaitCount, 1)
+        clock.advance(to: 100.999)
+        XCTAssertEqual(clock.pendingWaitCount, 1)
+        XCTAssertFalse(didExpire)
+        clock.advance(to: 101)
+        await fulfillment(of: [expired], timeout: 2)
+        XCTAssertTrue(didExpire)
+        XCTAssertEqual(clock.pendingWaitCount, 0)
+        // Repeated cancellation/advancement cannot resume a continuation twice.
+        first.cancel(); second.cancel(); clock.advance(to: 102)
+        XCTAssertEqual(clock.pendingWaitCount, 0)
+    }
 }
 
 private func makeRTPMonitorSample(width: Int, height: Int) throws -> IOSRTPPixelSample {
