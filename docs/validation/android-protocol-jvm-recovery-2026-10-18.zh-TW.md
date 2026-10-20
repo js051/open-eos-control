@@ -31,3 +31,9 @@
 ## Release Assessment
 
 `none`：只修正測試 fixture origin 並新增驗證證據，沒有 production／版本／發布變更。iOS Apple-only build、Android 全 App 與真機門檻仍分開保留。
+
+## 2026-10-20 後續 / Subsequent host verification
+
+上述限制為 2026-10-18 當時狀態。[完整 Gradle host 驗證與交接證據](android-ui-host-closure-2026-10-18.zh-TW.md) 記錄 exact dev `bd9cf61365809c4ad14a1fa8f4469bb6def936fc` 的 [run 39360736976](https://github.com/js051/open-eos-control/actions/runs/39360736976)：原 1,867 unit tests 零失敗／零略過、debug APK 與 signer smoke 已通過，包含先前五類 UI host 閉包與三個負向 RTP 案例。未改原測試斷言，不重複加總早期 focused runs。
+
+The complete Gradle host build/unit-suite gap is now closed for that exact head. This supersedes only the earlier host execution gap, not real codec decoding, instrumentation, GPU, physical-camera/USB/device evidence, PR `ci-complete`, or release acceptance. Prior failures and receipts remain preserved.
