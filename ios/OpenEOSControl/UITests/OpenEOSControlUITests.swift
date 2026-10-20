@@ -41,6 +41,41 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertNil(Self.scrollDragOffset(target: .null, viewport: .infinite))
     }
 
+    func testConnectionCorrectionPreservesFullTargetAndViewportBoundaries() throws {
+        let viewport = CGRect(x: 0, y: 0, width: 874, height: 285)
+        let clipped = CGRect(x: 157, y: -2 - 2.0 / 3.0, width: 560, height: 77 + 1.0 / 3.0)
+        let bottomClipped = CGRect(x: 157, y: 210, width: 560, height: clipped.height)
+        for target in [clipped, bottomClipped] {
+            XCTAssertFalse(Self.connectionButtonHasVisibleHitFrame(target, scroll: viewport, window: viewport))
+            let offset = try XCTUnwrap(Self.connectionCorrectionOffset(target: target, viewport: viewport))
+            XCTAssertLessThan(abs(offset), viewport.height * 0.8, "Clipping needs a correction, not a full swipe")
+            XCTAssertTrue(Self.connectionButtonHasVisibleHitFrame(
+                target.offsetBy(dx: 0, dy: -offset), scroll: viewport, window: viewport
+            ))
+            let points = try XCTUnwrap(Self.scrollDragOffsets(offset: offset, surface: viewport, viewport: viewport))
+            for point in [points.start, points.end] {
+                XCTAssertTrue(viewport.contains(CGPoint(x: point.dx, y: point.dy)),
+                              "A correction must not touch the warning footer")
+            }
+        }
+        let visible = CGRect(x: 157, y: 40, width: 560, height: clipped.height)
+        XCTAssertTrue(Self.connectionButtonHasVisibleHitFrame(visible, scroll: viewport, window: viewport))
+        XCTAssertNil(Self.connectionCorrectionOffset(target: visible, viewport: viewport))
+        for invalid in [
+            CGRect(x: -1, y: 10, width: 560, height: 77),
+            CGRect(x: 0, y: 10, width: 875, height: 77),
+            CGRect(x: 157, y: -2, width: 560, height: 286),
+            CGRect(x: 157, y: -2, width: 43, height: 77),
+            CGRect(x: 157, y: -2, width: 560, height: 43),
+            .null, .infinite, .zero, CGRect(x: CGFloat.nan, y: 0, width: 560, height: 77),
+        ] {
+            XCTAssertFalse(Self.connectionButtonHasVisibleHitFrame(invalid, scroll: viewport, window: viewport))
+            XCTAssertNil(Self.connectionCorrectionOffset(target: invalid, viewport: viewport))
+        }
+        XCTAssertNil(Self.connectionCorrectionOffset(target: clipped, viewport: .zero))
+        XCTAssertNil(Self.connectionCorrectionOffset(target: clipped, viewport: .infinite))
+    }
+
     func testScrollDragModeSeparatesDiscoveryDistantSeekAndNearCorrection() throws {
         let viewport = CGRect(x: 0, y: 180 + 2.0 / 3.0, width: 402, height: 693 + 1.0 / 3.0)
         // An absent AX row is represented by .null without querying its frame.
@@ -2907,6 +2942,15 @@ final class OpenEOSControlUITests: XCTestCase {
         return !viewport.isEmpty && viewport.contains(button) && viewport.contains(center)
     }
 
+    private static func connectionCorrectionOffset(target: CGRect, viewport: CGRect) -> CGFloat? {
+        guard validScrollFrame(target), validScrollFrame(viewport),
+              target.width >= 44, target.height >= 44, target.height <= viewport.height,
+              target.minX >= viewport.minX, target.maxX <= viewport.maxX,
+              scrollDragMode(target: target, viewport: viewport, cameraActions: false) == .targetCorrection
+        else { return nil }
+        return scrollDragOffset(target: target, viewport: viewport)
+    }
+
     private func scrollConnectionButtonIntoView(
         in app: XCUIApplication, buttonIdentifier: String = "connect-button", timeout: TimeInterval
     ) -> Bool {
@@ -2921,8 +2965,9 @@ final class OpenEOSControlUITests: XCTestCase {
             }
             let frame = connect.frame
             let window = app.windows.firstMatch.frame
-            let viewport = scroll.frame.intersection(window)
-            if Self.connectionButtonHasVisibleHitFrame(frame, scroll: scroll.frame, window: window) {
+            let surface = scroll.frame
+            let viewport = surface.intersection(window)
+            if Self.connectionButtonHasVisibleHitFrame(frame, scroll: surface, window: window) {
                 if connect.isEnabled && connect.isHittable { return true }
                 // A visible but disabled button needs state to settle, not a swipe.
                 Thread.sleep(forTimeInterval: min(0.05, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
@@ -2932,7 +2977,16 @@ final class OpenEOSControlUITests: XCTestCase {
             guard ProcessInfo.processInfo.systemUptime < deadline else { break }
             // Only this known scroll container may move. Do not trust AX's
             // isHittable for offscreen content or tap until the frame is visible.
-            if frame.maxY > viewport.maxY {
+            if let offset = Self.connectionCorrectionOffset(target: frame, viewport: viewport),
+               let points = Self.scrollDragOffsets(offset: offset, surface: surface, viewport: viewport) {
+                let origin = scroll.coordinate(withNormalizedOffset: .zero)
+                // The same stopped correction used by other known targets:
+                // no momentum flick across a nearly visible Connect button.
+                origin.withOffset(points.start).press(
+                    forDuration: 0.01, thenDragTo: origin.withOffset(points.end),
+                    withVelocity: .fast, thenHoldForDuration: ScrollDragMode.targetCorrection.holdDuration
+                )
+            } else if frame.maxY > viewport.maxY {
                 scroll.swipeUp()
             } else if frame.minY < viewport.minY {
                 scroll.swipeDown()
@@ -3078,6 +3132,10 @@ final class OpenEOSControlUITests: XCTestCase {
     }
 
     private func recordShutterRecoveryDisconnectGeometry(in app: XCUIApplication, phase: String) {
+        if phase == "after-tap" {
+            recordShutterRecoveryDisconnectSnapshot(in: app)
+            return
+        }
         let disconnect = app.buttons["disconnect-menu-button"]
         let disconnectFrame = disconnect.exists ? disconnect.frame : CGRect.null
         let disconnectCenter = CGPoint(x: disconnectFrame.midX, y: disconnectFrame.midY)
@@ -3115,6 +3173,51 @@ final class OpenEOSControlUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
         addScreenshot(name: "shutter-recovery-disconnect-\(phase)")
+    }
+
+    private func recordShutterRecoveryDisconnectSnapshot(in app: XCUIApplication) {
+        let snapshot: XCUIElementSnapshot
+        do {
+            snapshot = try app.snapshot()
+        } catch {
+            // Only optional observation retrieval is caught. The caller's
+            // connection/warning/Stop assertions still run and remain required.
+            // Never log an error description or a complete accessibility tree.
+            print("[OEC_SHUTTER_DISCONNECT_OBSERVATION] after-tap snapshot-unavailable")
+            return
+        }
+        let buttons = [
+            "disconnect-menu-button", "release-shutter-button", "shutter-button",
+            "more-actions-button", "connect-button",
+        ]
+        let warnings = ["shutter-release-warning", "previous-shutter-release-warning", "camera-model-status"]
+        var counts: [String: Int] = [:]
+        var hasNavigationBar = false
+        var window: CGRect?
+        func visit(_ node: XCUIElementSnapshot) {
+            if node.elementType == .navigationBar { hasNavigationBar = true }
+            if window == nil, node.elementType == .window { window = node.frame }
+            if (node.elementType == .button && buttons.contains(node.identifier))
+                || (node.elementType == .staticText && warnings.contains(node.identifier)) {
+                counts[node.identifier, default: 0] += 1
+            }
+            for child in node.children { visit(child) }
+        }
+        visit(snapshot)
+        var lines = ["[OEC_SHUTTER_DISCONNECT_GEOMETRY] after-tap"]
+        if let window { lines.append("window=\(window)") }
+        lines.append("more-actions-sheet-exists=\((counts["disconnect-menu-button"] ?? 0) > 0 && hasNavigationBar)")
+        for identifier in buttons { lines.append("\(identifier) count=\(counts[identifier] ?? 0)") }
+        for identifier in warnings { lines.append("\(identifier)-exists=\((counts[identifier] ?? 0) > 0)") }
+        // Snapshot attributes do not include hittability. Omit it rather than
+        // querying disappearing XCUIElements or fabricating an observed value.
+        let diagnostic = lines.joined(separator: "\n")
+        print(diagnostic)
+        let attachment = XCTAttachment(string: diagnostic)
+        attachment.name = "shutter-recovery-disconnect-after-tap-geometry"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        addScreenshot(name: "shutter-recovery-disconnect-after-tap")
     }
 
     private func assertSeparateRecoverySheetControls(

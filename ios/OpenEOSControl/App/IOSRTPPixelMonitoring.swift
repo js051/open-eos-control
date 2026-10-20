@@ -52,6 +52,21 @@ enum IOSRTPMonitorStatus: String {
     case stale = "native_monitor_stale"
 }
 
+/// Both reads and expiry waits use one monotonic time domain. Tests may control
+/// that domain without extending the production sample lifetime or cadence.
+struct IOSRTPMonitorClock: Sendable {
+    let now: @MainActor @Sendable () -> TimeInterval
+    let sleepUntil: @MainActor @Sendable (TimeInterval) async throws -> Void
+
+    static let continuous = Self(
+        now: { ProcessInfo.processInfo.systemUptime },
+        sleepUntil: { deadline in
+            let remaining = max(0, deadline - ProcessInfo.processInfo.systemUptime)
+            try await Task.sleep(for: .seconds(remaining))
+        }
+    )
+}
+
 /// One exact submitted output and one bounded analysis job. Histogram/waveform
 /// samples may complete after a newer frame; spatial overlays additionally need
 /// the exact currently confirmed presentation token. Never read an unbound image.
@@ -71,11 +86,14 @@ final class IOSRTPPixelMonitor: ObservableObject {
     private let queue = DispatchQueue(label: "dev.openeos.control.rtp-pixel-monitor", qos: .utility)
     private let isOwnerActive: @MainActor (IOSRTPFrameToken) -> Bool
     private let analyze: @Sendable (IOSRTPPixelSample, LiveViewMonitorSettings) -> LiveViewMonitorAnalysis?
+    private let clock: IOSRTPMonitorClock
 
     init(isOwnerActive: @escaping @MainActor (IOSRTPFrameToken) -> Bool = { _ in true },
-         analyze: @escaping @Sendable (IOSRTPPixelSample, LiveViewMonitorSettings) -> LiveViewMonitorAnalysis? = analyzeRTPPixelSample) {
+         analyze: @escaping @Sendable (IOSRTPPixelSample, LiveViewMonitorSettings) -> LiveViewMonitorAnalysis? = analyzeRTPPixelSample,
+         clock: IOSRTPMonitorClock = .continuous) {
         self.isOwnerActive = isOwnerActive
         self.analyze = analyze
+        self.clock = clock
     }
 
     static var supported: Bool {
@@ -119,7 +137,7 @@ final class IOSRTPPixelMonitor: ObservableObject {
     }
 
     func currentAnalysis(settings requested: LiveViewMonitorSettings, owner: UUID) -> LiveViewMonitorAnalysis? {
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = clock.now()
         guard configurationOwner == owner, settings == requested,
               let analysisFrame, let currentOutput, sameConfiguration(analysisFrame, currentOutput), isOwnerActive(analysisFrame),
               let publishedAt, let analysisOutputAt,
@@ -141,7 +159,7 @@ final class IOSRTPPixelMonitor: ObservableObject {
         // Do not allow a repeated/old token to replace the source's current identity.
         if let currentOutput, token.sequence <= currentOutput.sequence { return }
         currentOutput = token
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = clock.now()
         guard outputAt.isFinite, now >= outputAt, now - outputAt < IOSRTPMonitorLease.maximumAge,
               let ticket = lease.begin(at: now) else { return }
         let sample = IOSRTPPixelSample(buffer: buffer, format: format)
@@ -152,7 +170,7 @@ final class IOSRTPPixelMonitor: ObservableObject {
             let result = autoreleasepool { analyze(sample, settings) }
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let completedAt = ProcessInfo.processInfo.systemUptime
+                let completedAt = self.clock.now()
                 guard self.lease.complete(ticket, at: completedAt),
                       self.configurationOwner == configurationOwner, self.settings == settings, self.isOwnerActive(token),
                       let currentOutput = self.currentOutput, self.sameConfiguration(currentOutput, token) else { return }
@@ -180,9 +198,10 @@ final class IOSRTPPixelMonitor: ObservableObject {
 
     private func scheduleExpiry(_ ticket: IOSRTPMonitorLease.Ticket, outputAt: TimeInterval) {
         expiry?.cancel()
+        let clock = self.clock
+        let deadline = min(outputAt, ticket.acquiredAt) + IOSRTPMonitorLease.maximumAge
         expiry = Task { @MainActor [weak self] in
-            let remaining = max(0, min(outputAt, ticket.acquiredAt) + IOSRTPMonitorLease.maximumAge - ProcessInfo.processInfo.systemUptime)
-            try? await Task.sleep(for: .seconds(remaining))
+            try? await clock.sleepUntil(deadline)
             guard !Task.isCancelled, let self, self.lease.generation == ticket.generation else { return }
             self.analysis = nil; self.publishedAt = nil; self.analysisFrame = nil; self.analysisOutputAt = nil
             self.status = .stale

@@ -159,6 +159,33 @@ class IOSEvidenceTests(unittest.TestCase):
         scientific = GEOMETRY.replace(b"20.0", b"-2.2e-13")
         self.assertEqual(evidence.geometry_text(scientific), scientific)
 
+    def test_after_disconnect_snapshot_uses_existing_fixed_count_subset_without_hittability(self):
+        data = (
+            "[OEC_SHUTTER_DISCONNECT_GEOMETRY] after-tap\n"
+            "window=(0.0, 0.0, 402.0, 874.0)\n"
+            "more-actions-sheet-exists=false\n"
+            "disconnect-menu-button count=0\n"
+            "release-shutter-button count=0\n"
+            "shutter-button count=0\n"
+            "more-actions-button count=0\n"
+            "connect-button count=1\n"
+            "shutter-release-warning-exists=false\n"
+            "previous-shutter-release-warning-exists=true\n"
+            "camera-model-status-exists=false\n"
+        ).encode()
+        self.assertNotIn(b"hittable=", data)
+        self.assertEqual(evidence.geometry_text(data), data)
+        name = "shutter-recovery-disconnect-after-tap-geometry"
+        self.assertEqual(evidence.attachment_name(name, evidence.TESTS[0]), name)
+        self.manifest(self.attachment(name, "snapshot.txt", data))
+        self.collect()
+        self.assertEqual(next(self.output.iterdir()).read_bytes(), data)
+        for extra in (b"snapshot-error=private\n", b"label=private\n",
+                      b"unknown-control count=1\n", b"tree=private\n",
+                      b"connect-button[0] hittable=not-observed\n"):
+            with self.assertRaises(evidence.EvidenceError):
+                evidence.geometry_text(data + extra)
+
     def test_accepts_only_three_reconnect_phases_for_the_existing_four_cases(self):
         for case in evidence.HIT_TARGET_CASES:
             for phase in evidence.RECONNECT_PHASES:
