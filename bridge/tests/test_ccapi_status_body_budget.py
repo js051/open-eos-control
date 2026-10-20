@@ -220,7 +220,7 @@ def test_status_default_timeout_remains_fifteen_seconds():
     ("GET", BATTERY + "/unknown"), ("GET", PREFIX + "/contents/card/SYNTHETIC.JPG"),
     ("GET", PREFIX + "/shooting/liveview"), ("GET", PREFIX + "/event/polling"),
     ("GET", "/ccapi"), ("POST", PREFIX + "/shooting/control/recbutton"),
-    ("POST", PREFIX + "/shooting/control/drivefocus"),
+    ("PUT", PREFIX + "/shooting/control/drivefocus"),
 ])
 def test_unrelated_routes_keep_legacy_body_policy(method, path):
     body = BytesIO(b"{}")
