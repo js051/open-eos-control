@@ -18,7 +18,7 @@ concurrency:
 jobs:
   secret-scan:
     # This one-shot gate prevents future pushes or reruns from repeating KVM changes.
-    if: github.event.before == 'ecb51bc8515deccd3ee8e74de199d2cbb009b7f5' && github.run_attempt == 1
+    if: github.event.before == '2886e62b280fcc9a60db522b2a3b6f149f77623f' && github.run_attempt == 1
     runs-on: ubuntu-latest
     steps:
       - name: Checkout full history
