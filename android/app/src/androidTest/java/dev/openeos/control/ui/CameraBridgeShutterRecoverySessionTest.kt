@@ -129,21 +129,18 @@ class CameraBridgeShutterRecoverySessionTest {
         compose.onNodeWithTag("capture-mode-VIDEO").assertIsEnabled()
         compose.onNodeWithTag("exposure-control-ISO").assertIsEnabled()
         startAmbiguousExposure()
-        assertEquals(1, peer.count("POST", "bulb/start"))
-        assertEquals(0, peer.count("POST", "bulb/stop"))
+        assertEquals(1, peer.count("POST", "bulb/start/owned"))
+        assertEquals(0, peer.count("POST", "bulb/stop/owned"))
         val mutationsBefore = peer.mutations()
         val framesBefore = peer.frames.get()
 
         compose.runOnIdle {
             viewModel.captureStill()
             viewModel.setIso("200")
-            viewModel.toggleBulbExposure()
             viewModel.autofocus()
             viewModel.toggleRecording()
             viewModel.restartLiveView()
             viewModel.refreshLiveViewFrame()
-            viewModel.setAppForeground(false)
-            viewModel.setAppForeground(true)
             viewModel.clearError()
             // An allowed status read supplies a completion barrier for the blocked actions.
             viewModel.refresh()
@@ -153,12 +150,24 @@ class CameraBridgeShutterRecoverySessionTest {
         assertEquals(framesBefore, peer.frames.get())
         compose.onNodeWithTag("capture-mode-VIDEO").assertIsNotEnabled()
         compose.onNodeWithTag("exposure-control-ISO").assertIsNotEnabled()
-        assertRecoveryVisible()
+        assertOwnedRecoveryVisible()
+
+        // Both the Bulb toggle and backgrounding are safety Stop actions, never Start replays.
+        compose.runOnIdle { viewModel.toggleBulbExposure() }
+        awaitOwnedStop(1)
+        assertOwnedRecoveryVisible()
+        compose.runOnIdle {
+            viewModel.setAppForeground(false)
+            viewModel.setAppForeground(true)
+        }
+        awaitOwnedStop(2)
+        assertOwnedRecoveryVisible()
+        assertEquals(framesBefore, peer.frames.get())
 
         repeat(2) { index ->
-            retryRelease()
-            assertEquals(index + 1, peer.count("POST", "bulb/stop"))
-            assertRecoveryVisible()
+            retryOwnedRelease()
+            assertEquals(index + 3, peer.count("POST", "bulb/stop/owned"))
+            assertOwnedRecoveryVisible()
             assertEquals(framesBefore, peer.frames.get())
         }
         assertEquals(0, captureSuccesses.get())
@@ -167,10 +176,11 @@ class CameraBridgeShutterRecoverySessionTest {
         retryNode().performClick()
         compose.waitUntil(TIMEOUT) {
             val state = viewModel.uiState.value
-            !state.shutterReleaseUnconfirmed && state.pendingOperations.isEmpty() && peer.frames.get() > framesBefore
+            !state.bridgeBulbStopRequired && !state.bridgeBulbUnconfirmed &&
+                !state.shutterReleaseUnconfirmed && state.pendingOperations.isEmpty() && peer.frames.get() > framesBefore
         }
-        assertEquals(3, peer.count("POST", "bulb/stop"))
-        assertEquals(1, peer.count("POST", "bulb/start"))
+        assertEquals(5, peer.count("POST", "bulb/stop/owned"))
+        assertOwnedRequestsStayWithStart()
         assertFalse(viewModel.uiState.value.bulbExposureActive)
         assertEquals(false, viewModel.uiState.value.status?.shutterReleaseUnconfirmed)
         assertNull(viewModel.uiState.value.bulbStartedAtMillis)
@@ -183,24 +193,25 @@ class CameraBridgeShutterRecoverySessionTest {
         compose.runOnIdle { useLargeFontLayout.value = true }
         startAmbiguousExposure()
         assertWarningFitsAboveRetry()
-        assertEquals(1, peer.count("POST", "bulb/start"))
+        assertEquals(1, peer.count("POST", "bulb/start/owned"))
         val framesBefore = peer.frames.get()
         compose.runOnIdle {
             viewModel.clearError()
-            viewModel.toggleBulbExposure()
             viewModel.captureStill()
             viewModel.restartLiveView()
             viewModel.refresh()
         }
         awaitOperations()
-        assertRecoveryVisible()
-        assertEquals(1, peer.count("POST", "bulb/start"))
+        assertOwnedRecoveryVisible()
+        assertWarningFitsAboveRetry()
+        assertEquals(1, peer.count("POST", "bulb/start/owned"))
         assertEquals(0, peer.count("POST", "capture/still"))
         assertEquals(framesBefore, peer.frames.get())
         assertEquals(0, captureSuccesses.get())
-        retryRelease()
-        assertRecoveryVisible()
-        assertEquals(1, peer.count("POST", "bulb/stop"))
+        retryOwnedRelease()
+        assertOwnedRecoveryVisible()
+        assertEquals(1, peer.count("POST", "bulb/stop/owned"))
+        assertOwnedRequestsStayWithStart()
     }
 
     @Test fun statusOnlyUncertaintySurvivesCapabilitiesFailureAndManualModeWithoutBulbCapability() {
@@ -208,7 +219,7 @@ class CameraBridgeShutterRecoverySessionTest {
         peer.failCapabilities.set(true)
         compose.runOnIdle { viewModel.refresh() }
         awaitOperations()
-        assertRecoveryVisible()
+        assertUnownedRecoveryVisible()
         assertEquals(CameraOperation.STATUS, viewModel.uiState.value.errorOperation)
         assertEquals(0, peer.count("POST", "bulb/start"))
 
@@ -220,10 +231,12 @@ class CameraBridgeShutterRecoverySessionTest {
         awaitOperations()
         assertFalse(viewModel.uiState.value.bulbMode)
         assertFalse(viewModel.uiState.value.supports(CameraFeature.BULB_EXPOSURE))
-        assertRecoveryVisible()
-        retryRelease()
+        assertUnownedRecoveryVisible()
+        retryUnownedRelease()
         assertEquals(1, peer.count("POST", "bulb/stop"))
-        assertRecoveryVisible()
+        assertEquals(0, peer.count("POST", "bulb/start/owned"))
+        assertEquals(0, peer.count("POST", "bulb/stop/owned"))
+        assertUnownedRecoveryVisible()
         assertEquals(framesBefore, peer.frames.get())
         assertEquals(0, captureSuccesses.get())
     }
@@ -234,17 +247,20 @@ class CameraBridgeShutterRecoverySessionTest {
         peer.stopReply.set(StopReply.LEGACY_IDLE)
         startAmbiguousExposure()
         val framesBefore = peer.frames.get()
-        retryRelease()
-        assertRecoveryVisible()
+        retryOwnedRelease()
+        assertOwnedRecoveryVisible()
         compose.runOnIdle {
             viewModel.refresh()
             viewModel.captureStill()
-            viewModel.toggleBulbExposure()
         }
         awaitOperations()
-        assertRecoveryVisible()
-        assertEquals(1, peer.count("POST", "bulb/start"))
-        assertEquals(1, peer.count("POST", "bulb/stop"))
+        assertOwnedRecoveryVisible()
+        // Neither a legacy idle body nor a later status read may discharge this owner.
+        compose.runOnIdle { viewModel.toggleBulbExposure() }
+        awaitOwnedStop(2)
+        assertOwnedRecoveryVisible()
+        assertEquals(2, peer.count("POST", "bulb/stop/owned"))
+        assertOwnedRequestsStayWithStart()
         assertEquals(0, peer.count("POST", "capture/still"))
         assertEquals(framesBefore, peer.frames.get())
         assertEquals(0, captureSuccesses.get())
@@ -252,8 +268,11 @@ class CameraBridgeShutterRecoverySessionTest {
 
     @Test fun reconnectKeepsPreviousSessionWarningAndNeverSendsOldStopToBridgeB() {
         startAmbiguousExposure()
-        retryRelease()
-        assertRecoveryVisible()
+        retryOwnedRelease()
+        assertOwnedRecoveryVisible()
+        // Disconnect now performs a bounded saved-owner Stop before retiring A. Let that
+        // cleanup acknowledge A, rather than weakening the production retirement interlock.
+        peer.stopReply.set(StopReply.RELEASED)
         val cameraB = BridgeRecoveryPeer("B").also {
             replacement = it
             it.remote.set(RemoteState(mode = "Manual"))
@@ -263,6 +282,8 @@ class CameraBridgeShutterRecoverySessionTest {
             viewModel.disconnect()
             assertTrue(viewModel.uiState.value.shutterDisconnectWarning)
             assertFalse(viewModel.uiState.value.shutterReleaseUnconfirmed)
+            assertFalse(viewModel.uiState.value.bridgeBulbStopRequired)
+            assertFalse(viewModel.uiState.value.bridgeBulbUnconfirmed)
             viewModel.setBridgeBaseUrl(cameraB.baseUrl)
             viewModel.setLiveViewAutoRefresh(false)
             viewModel.connectBridge()
@@ -276,10 +297,14 @@ class CameraBridgeShutterRecoverySessionTest {
             viewModel.retryShutterRelease()
             assertTrue(viewModel.uiState.value.shutterDisconnectWarning)
             assertFalse(viewModel.uiState.value.shutterReleaseUnconfirmed)
+            assertFalse(viewModel.uiState.value.bridgeBulbStopRequired)
             assertFalse(viewModel.uiState.value.isBusy(CameraOperation.CAPTURE))
         }
-        assertEquals(1, peer.count("POST", "bulb/stop"))
+        assertEquals(2, peer.count("POST", "bulb/stop/owned"))
+        assertOwnedRequestsStayWithStart()
         assertEquals(0, cameraB.count("POST", "bulb/stop"))
+        assertEquals(0, cameraB.count("POST", "bulb/stop/owned"))
+        assertEquals(0, cameraB.count("POST", "bulb/start/owned"))
         assertTrue(cameraB.mutations().isEmpty())
         assertEquals(0, captureSuccesses.get())
 
@@ -289,6 +314,7 @@ class CameraBridgeShutterRecoverySessionTest {
                 viewModel.uiState.value.pendingOperations.isEmpty() && captureSuccesses.get() > 0
         }
         assertEquals(0, cameraB.count("POST", "bulb/stop"))
+        assertEquals(0, cameraB.count("POST", "bulb/stop/owned"))
         assertTrue(viewModel.uiState.value.shutterDisconnectWarning)
         compose.onNodeWithText(text(R.string.shutter_disconnect_warning)).assertIsDisplayed()
     }
@@ -315,7 +341,10 @@ class CameraBridgeShutterRecoverySessionTest {
         assertFalse(viewModel.uiState.value.bulbMode)
         assertFalse(viewModel.uiState.value.supports(CameraFeature.BULB_EXPOSURE))
         assertFalse(viewModel.uiState.value.shutterReleaseUnconfirmed)
+        assertFalse(viewModel.uiState.value.bridgeBulbStopRequired)
         assertEquals(0, cameraB.count("POST", "bulb/start"))
+        assertEquals(0, cameraB.count("POST", "bulb/start/owned"))
+        assertEquals(0, cameraB.count("POST", "bulb/stop/owned"))
         assertEquals(0, cameraB.count("POST", "liveview/start"))
         assertEquals(0, cameraB.frames.get())
         compose.onNodeWithContentDescription(text(R.string.capture_photo)).assertDoesNotExist()
@@ -342,12 +371,24 @@ class CameraBridgeShutterRecoverySessionTest {
     private fun startAmbiguousExposure() {
         compose.onNodeWithContentDescription(text(R.string.start_bulb_exposure)).performClick()
         compose.waitUntil(TIMEOUT) {
-            viewModel.uiState.value.shutterReleaseUnconfirmed && viewModel.uiState.value.pendingOperations.isEmpty()
+            val state = viewModel.uiState.value
+            state.bridgeBulbStopRequired && state.bridgeBulbUnconfirmed && state.pendingOperations.isEmpty()
         }
-        assertRecoveryVisible()
+        assertOwnedRecoveryVisible()
     }
 
-    private fun retryRelease() {
+    private fun retryOwnedRelease() {
+        val before = peer.count("POST", "bulb/stop/owned")
+        retryNode().performClick()
+        awaitOwnedStop(before + 1)
+    }
+
+    private fun awaitOwnedStop(expected: Int) = compose.waitUntil(TIMEOUT) {
+        peer.count("POST", "bulb/stop/owned") == expected &&
+            !viewModel.uiState.value.bridgeBulbStopPending && viewModel.uiState.value.pendingOperations.isEmpty()
+    }
+
+    private fun retryUnownedRelease() {
         val before = peer.count("POST", "bulb/stop")
         retryNode().performClick()
         compose.waitUntil(TIMEOUT) {
@@ -359,8 +400,32 @@ class CameraBridgeShutterRecoverySessionTest {
         viewModel.uiState.value.pendingOperations.isEmpty()
     }
 
-    private fun assertRecoveryVisible() {
+    private fun assertOwnedRecoveryVisible() {
+        val state = viewModel.uiState.value
+        assertTrue(state.bridgeBulbStopRequired)
+        assertTrue(state.bridgeBulbUnconfirmed)
+        assertFalse("Owned failure must not fall back to legacy GET-based recovery.", state.shutterReleaseUnconfirmed)
+        assertNull(state.bulbStartedAtMillis)
+        assertNull(state.captureFeedback)
+        compose.onNodeWithText(text(R.string.bridge_bulb_release_required)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.dismiss)).assertDoesNotExist()
+        retryNode().assertIsDisplayed().assertIsEnabled()
+    }
+
+    private fun assertOwnedRequestsStayWithStart() {
+        assertEquals(1, peer.count("POST", "bulb/start/owned"))
+        assertEquals(1, peer.ownedStartIds.size)
+        val ownerId = peer.ownedStartIds.single()
+        assertTrue(ownerId.isNotBlank())
+        assertEquals(peer.count("POST", "bulb/stop/owned"), peer.ownedStopIds.size)
+        assertTrue(peer.ownedStopIds.all { it == ownerId })
+        assertEquals("Owned requests must not fall back to a legacy Start.", 0, peer.count("POST", "bulb/start"))
+        assertEquals("Owned requests must not fall back to a legacy Stop.", 0, peer.count("POST", "bulb/stop"))
+    }
+
+    private fun assertUnownedRecoveryVisible() {
         assertTrue(viewModel.uiState.value.shutterReleaseUnconfirmed)
+        assertFalse(viewModel.uiState.value.bridgeBulbStopRequired)
         assertNull(viewModel.uiState.value.bulbStartedAtMillis)
         assertNull(viewModel.uiState.value.captureFeedback)
         compose.onNodeWithText(text(R.string.bridge_shutter_release_unconfirmed)).assertIsDisplayed()
@@ -375,7 +440,7 @@ class CameraBridgeShutterRecoverySessionTest {
     }
 
     private fun assertWarningFitsAboveRetry() {
-        val warningNode = compose.onNodeWithText(text(R.string.bridge_shutter_release_unconfirmed), useUnmergedTree = true)
+        val warningNode = compose.onNodeWithText(text(R.string.bridge_bulb_release_required), useUnmergedTree = true)
             .assertIsDisplayed()
         val warning = warningNode.fetchSemanticsNode()
         val layouts = mutableListOf<TextLayoutResult>()
@@ -420,6 +485,9 @@ private class BridgeRecoveryPeer(private val label: String) : AutoCloseable {
     val failCapabilities = AtomicBoolean(false)
     val advertiseBulb = AtomicBoolean(true)
     val frames = AtomicInteger()
+    val ownedStartIds = CopyOnWriteArrayList<String>()
+    val ownedStopIds = CopyOnWriteArrayList<String>()
+    private val bulbOwnerId = AtomicReference<String?>()
     private val requests = CopyOnWriteArrayList<String>()
     lateinit var baseUrl: String
         private set
@@ -447,26 +515,11 @@ private class BridgeRecoveryPeer(private val label: String) : AutoCloseable {
                     method == "GET" && path == "$sessionPath/status" -> status()
                     method == "GET" && path == "$sessionPath/capabilities" ->
                         if (failCapabilities.get()) error("SYNTHETIC_CAPABILITIES_FAILURE") else capabilities()
-                    method == "POST" && path == "$sessionPath/bulb/start" -> {
-                        remote.updateAndGet { it.copy(bulb = null, releaseUnconfirmed = true) }
-                        when (startReply.get()) {
-                            StartReply.UNCONFIRMED -> error("SHUTTER_RELEASE_UNCONFIRMED")
-                            StartReply.LOST_RESPONSE -> MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
-                        }
-                    }
-                    method == "POST" && path == "$sessionPath/bulb/stop" -> {
-                        when (stopReply.get()) {
-                            StopReply.UNCONFIRMED -> error("SHUTTER_RELEASE_UNCONFIRMED")
-                            StopReply.LEGACY_IDLE -> {
-                                remote.updateAndGet { it.copy(bulb = false, releaseUnconfirmed = null) }
-                                status()
-                            }
-                            StopReply.RELEASED -> {
-                                remote.updateAndGet { it.copy(bulb = false, releaseUnconfirmed = false) }
-                                status()
-                            }
-                        }
-                    }
+                    method == "POST" && path == "$sessionPath/bulb/start/owned" -> ownedStart(request)
+                    method == "POST" && path == "$sessionPath/bulb/stop/owned" -> ownedStop(request)
+                    // A preexisting status-only exposure has no client owner and retains the
+                    // legacy Stop path. Owned operations must never fall back to this endpoint.
+                    method == "POST" && path == "$sessionPath/bulb/stop" -> unownedStop()
                     method == "POST" && path == "$sessionPath/liveview/start" -> json("""{"active":true}""")
                     method == "POST" && path == "$sessionPath/liveview/stop" ->
                         json("""{"active":false,"liveViewStopUnconfirmed":false}""")
@@ -492,7 +545,64 @@ private class BridgeRecoveryPeer(private val label: String) : AutoCloseable {
 
     override fun close() { server.shutdown() }
 
-    private fun status(): MockResponse {
+    private fun readOwner(request: RecordedRequest): String? = runCatching {
+        val body = JSONObject(request.body.clone().readUtf8())
+        require(body.length() == 1)
+        (body.get("ownerId") as String).also { require(it.isNotBlank()) }
+    }.getOrNull()
+
+    private fun ownedStart(request: RecordedRequest): MockResponse {
+        val ownerId = readOwner(request) ?: return error("SYNTHETIC_INVALID_OWNER").setResponseCode(400)
+        ownedStartIds += ownerId
+        if (!bulbOwnerId.compareAndSet(null, ownerId)) {
+            return error("SYNTHETIC_OWNER_ALREADY_ACTIVE").setResponseCode(409)
+        }
+        remote.updateAndGet { it.copy(bulb = null, releaseUnconfirmed = true) }
+        return when (startReply.get()) {
+            StartReply.UNCONFIRMED -> error("SHUTTER_RELEASE_UNCONFIRMED").setHeader("Retry-After", "0")
+            StartReply.LOST_RESPONSE -> MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
+        }
+    }
+
+    private fun ownedStop(request: RecordedRequest): MockResponse {
+        val ownerId = readOwner(request) ?: return error("SYNTHETIC_INVALID_OWNER").setResponseCode(400)
+        ownedStopIds += ownerId
+        if (bulbOwnerId.get() != ownerId) return error("SYNTHETIC_OWNER_MISMATCH").setResponseCode(409)
+        return when (stopReply.get()) {
+            StopReply.UNCONFIRMED -> error("SHUTTER_RELEASE_UNCONFIRMED").setHeader("Retry-After", "0")
+            StopReply.LEGACY_IDLE -> {
+                remote.updateAndGet { it.copy(bulb = false, releaseUnconfirmed = null) }
+                // A legacy 200 body has neither owner receipt nor explicit release evidence.
+                // Do not discharge the peer's owner just because this observation is idle.
+                status()
+            }
+            StopReply.RELEASED -> {
+                remote.updateAndGet { it.copy(bulb = false, releaseUnconfirmed = false) }
+                bulbOwnerId.set(null)
+                json(JSONObject().put("ownerId", ownerId).put("outcome", "released")
+                    .put("status", statusBody()).toString())
+            }
+        }
+    }
+
+    private fun unownedStop(): MockResponse {
+        if (bulbOwnerId.get() != null) return error("SYNTHETIC_OWNED_STOP_REQUIRED").setResponseCode(409)
+        return when (stopReply.get()) {
+            StopReply.UNCONFIRMED -> error("SHUTTER_RELEASE_UNCONFIRMED")
+            StopReply.LEGACY_IDLE -> {
+                remote.updateAndGet { it.copy(bulb = false, releaseUnconfirmed = null) }
+                status()
+            }
+            StopReply.RELEASED -> {
+                remote.updateAndGet { it.copy(bulb = false, releaseUnconfirmed = false) }
+                status()
+            }
+        }
+    }
+
+    private fun status(): MockResponse = json(statusBody().toString())
+
+    private fun statusBody(): JSONObject {
         val state = remote.get()
         val body = JSONObject()
             .put("connected", true)
@@ -502,7 +612,7 @@ private class BridgeRecoveryPeer(private val label: String) : AutoCloseable {
             .put("battery", JSONObject().put("level", 90).put("status", "full"))
             .put("exposure", JSONObject().put("iso", "100").put("shutter", "1/125").put("aperture", "4"))
         if (!omitReleaseField.get()) body.put("shutterReleaseUnconfirmed", state.releaseUnconfirmed ?: JSONObject.NULL)
-        return json(body.toString())
+        return body
     }
 
     private fun capabilities(): MockResponse {

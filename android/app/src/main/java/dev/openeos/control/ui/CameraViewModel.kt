@@ -1378,7 +1378,7 @@ class CameraViewModel(
                 (!state.supports(CameraFeature.LIVE_VIEW) && !repository.isLiveViewStopRequired())
         ) return@withLock
         // Do not change the camera's remote-view session in the middle of a bulb exposure.
-        if (state.bulbExposureActive || state.shutterReleaseUnconfirmed) return@withLock
+        if (state.bulbExposureActive || state.shutterReleaseUnconfirmed || state.bridgeBulbStopRequired) return@withLock
         if (liveViewRecordingInterlocked(CameraOperation.RECORDING in state.pendingOperations,
                 state.pendingRecordingCommand != null, state.recordingStopAvailable)) return@withLock
         if (state.pendingOperations.any { it in LIVE_VIEW_INTERLOCK_OPERATIONS }) return@withLock
@@ -3672,7 +3672,12 @@ class CameraViewModel(
                 } else refresh()
             } catch (exception: CancellationException) {
                 throw exception
-            } catch (_: Exception) {
+            } catch (failure: Exception) {
+                // Preserve localizable app failures without changing dispatch/receipt evidence.
+                // A local staging error must not vanish merely because NOT_SENT is already known.
+                if (failure is CameraAppException) publish {
+                    it.copy(error = failure.error.messageToken, errorOperation = CameraOperation.MEDIA)
+                }
                 // Neither a transport error nor a failed local read authorizes retry or a success guess.
                 // The final status below is based solely on actual dispatch and receipt evidence.
             } finally {
@@ -4227,7 +4232,7 @@ class CameraViewModel(
     private suspend fun readLiveViewFrameInternal(reportErrors: Boolean) {
         if (
             !appInForeground || _uiState.value.maintenanceSuspended || !_uiState.value.liveViewAutoRefresh || !repository.isLiveViewRunning() ||
-            !_uiState.value.connected || _uiState.value.shutterReleaseUnconfirmed ||
+            !_uiState.value.connected || _uiState.value.shutterReleaseUnconfirmed || _uiState.value.bridgeBulbStopRequired ||
             _uiState.value.previewMode ||
             !_uiState.value.supports(CameraFeature.LIVE_VIEW)
             || !_uiState.value.liveViewTemperatureAllowed
@@ -4240,7 +4245,7 @@ class CameraViewModel(
         if (!repository.isRealCamera()) {
             val nextUrl = repository.nextLiveViewFrameUrl()
             _uiState.update {
-                if (it.connected && !it.shutterReleaseUnconfirmed && appInForeground && it.liveViewAutoRefresh && generation == liveViewGeneration && repository.ownsLiveView(owner)) {
+                if (it.connected && !it.shutterReleaseUnconfirmed && !it.bridgeBulbStopRequired && appInForeground && it.liveViewAutoRefresh && generation == liveViewGeneration && repository.ownsLiveView(owner)) {
                     it.copy(
                         liveViewFrameUrl = nextUrl,
                         liveViewBitmap = null,
@@ -4267,7 +4272,7 @@ class CameraViewModel(
             } ?: throw LiveViewFrameDecodeException(frame.bytes.size, frame.contentType)
 
             _uiState.update {
-                if (it.connected && !it.shutterReleaseUnconfirmed && it.liveViewAutoRefresh &&
+                if (it.connected && !it.shutterReleaseUnconfirmed && !it.bridgeBulbStopRequired && it.liveViewAutoRefresh &&
                     LiveViewLifecycleEvidence(sameOwner = repository.ownsLiveView(owner),
                         sameAttempt = generation == liveViewGeneration, foreground = appInForeground,
                         startAdmitted = repository.isLiveViewRunning(), frameEvidence = "decoded-frame")
@@ -4353,7 +4358,7 @@ class CameraViewModel(
         liveViewJob?.cancel()
         val state = _uiState.value
         if (
-            !state.connected || state.shutterReleaseUnconfirmed || state.maintenanceSuspended ||
+            !state.connected || state.shutterReleaseUnconfirmed || state.bridgeBulbStopRequired || state.maintenanceSuspended ||
             !appInForeground || !repository.isLiveViewRunning() ||
             state.previewMode ||
             !state.liveViewAutoRefresh ||
@@ -4365,7 +4370,7 @@ class CameraViewModel(
         liveViewJob = viewModelScope.launch {
             while (isActive) {
                 val latest = _uiState.value
-                if (!latest.connected || !latest.liveViewAutoRefresh || !appInForeground || !repository.isLiveViewRunning()) break
+                if (!latest.connected || latest.shutterReleaseUnconfirmed || latest.bridgeBulbStopRequired || !latest.liveViewAutoRefresh || !appInForeground || !repository.isLiveViewRunning()) break
                 val frameStartedAt = SystemClock.elapsedRealtime()
 
                 if (repository.isRealCamera()) {
@@ -4373,7 +4378,7 @@ class CameraViewModel(
                 } else {
                     val nextUrl = repository.nextLiveViewFrameUrl()
                     _uiState.update {
-                        if (it.connected && it.liveViewAutoRefresh) {
+                        if (it.connected && !it.shutterReleaseUnconfirmed && !it.bridgeBulbStopRequired && it.liveViewAutoRefresh) {
                             it.copy(
                                 liveViewFrameUrl = nextUrl,
                                 liveViewBitmap = null,

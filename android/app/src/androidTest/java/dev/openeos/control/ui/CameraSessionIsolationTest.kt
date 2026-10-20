@@ -357,9 +357,14 @@ class CameraSessionIsolationTest {
             viewModel.connect()
         }
         compose.runOnIdle {
-            assertFalse(oldOperation.isCompleted)
-            assertEquals(0, cameraB.server.requestCount)
-            assertFalse(viewModel.uiState.value.connected)
+            // HTTP cancellation can complete before the peer releases its response.
+            // Reconnection must join local work, not wait for a remote server to cooperate.
+            if (!oldOperation.isCompleted) {
+                assertEquals(0, cameraB.server.requestCount)
+                assertFalse(viewModel.uiState.value.connected)
+            }
+            assertTrue(oldOperation.isCancelled)
+            assertTrue("Retired operations must never mutate the replacement", cameraB.mutations.isEmpty())
         }
     }
 

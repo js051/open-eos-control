@@ -170,7 +170,7 @@ class NativeRtpLutRenderingTest {
         try {
             val inputSurface = renderer.inputSurface()
             phase = "decoder-create"
-            codec = MediaCodec.createDecoderByType("video/avc")
+            codec = createNativeRtpAvcDecoder()
             decoder = codec.name.take(96)
             phase = "decoder-configure"
             codec.configure(MediaFormat.createVideoFormat("video/avc", 64, 48), inputSurface, null, 0)

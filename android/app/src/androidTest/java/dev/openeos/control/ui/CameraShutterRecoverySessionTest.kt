@@ -238,10 +238,26 @@ class CameraShutterRecoverySessionTest {
         compose.runOnIdle { viewModel.setIso("200") }
         compose.waitUntil(TIMEOUT) {
             val state = viewModel.uiState.value
-            !state.busy && state.error != null && state.errorOperation == CameraOperation.SETTING
+            !state.busy && state.shootingSettingReceipt?.running == false
         }
         assertEquals(listOf("PATCH /ccapi/exposure"), cameraB.mutations.toList())
+        assertEquals(dev.openeos.control.data.ShootingSettingWriteEvidence.UNKNOWN,
+            viewModel.uiState.value.shootingSettingReceipt?.evidence?.writeEvidence)
+        assertEquals(dev.openeos.control.data.ShootingSettingReadEvidence.UNAVAILABLE,
+            viewModel.uiState.value.shootingSettingReceipt?.evidence?.readbackEvidence)
         assertTrue(viewModel.uiState.value.shutterDisconnectWarning)
+        // Scoped setting failures now belong to their receipt, not the generic banner.
+        // Exercise generic-error dismissal independently, without replaying that write.
+        cameraB.intercept = { request ->
+            if (request.method == "GET" && request.requestUrl?.encodedPath == "/ccapi/status") {
+                MockResponse().setResponseCode(503).setBody("Synthetic replacement status failure")
+            } else null
+        }
+        compose.runOnIdle { viewModel.refresh() }
+        compose.waitUntil(TIMEOUT) {
+            !viewModel.uiState.value.busy && viewModel.uiState.value.errorOperation == CameraOperation.STATUS
+        }
+        assertEquals(listOf("PATCH /ccapi/exposure"), cameraB.mutations.toList())
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.dismiss)).performClick()
         compose.runOnIdle {
             val state = viewModel.uiState.value

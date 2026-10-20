@@ -361,6 +361,16 @@ internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit
     }
     ErrorBanner(
         when {
+            // A permitted status refresh clears transient errors, not this saved owner's
+            // release duty. Keep its guidance measurable and non-dismissible until Stop.
+            state.bridgeBulbStopRequired -> when {
+                state.bridgeBulbStopPending -> CameraAppError.BRIDGE_BULB_STOP_PENDING.messageToken
+                state.bridgeBulbStartPending -> CameraAppError.BRIDGE_BULB_START_PENDING.messageToken
+                state.bridgeBulbUnconfirmed ->
+                    state.error.takeIf { it == CameraAppError.BRIDGE_BULB_OWNERSHIP_UNAVAILABLE.messageToken }
+                        ?: CameraAppError.BRIDGE_BULB_RELEASE_REQUIRED.messageToken
+                else -> state.error
+            }
             state.shutterReleaseUnconfirmed -> stringResource(
                 if (state.transport == CameraTransport.DESKTOP_BRIDGE) R.string.bridge_shutter_release_unconfirmed
                 else R.string.shutter_release_unconfirmed,
@@ -381,7 +391,8 @@ internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit
             else -> null
         },
         onDismiss,
-        dismissible = !state.shutterReleaseUnconfirmed && !state.needsLiveViewStopRecovery && !state.liveViewStopPending &&
+        dismissible = !state.bridgeBulbStopRequired && !state.shutterReleaseUnconfirmed &&
+            !state.needsLiveViewStopRecovery && !state.liveViewStopPending &&
             !state.connectionRetirementUnconfirmed,
     )
     }

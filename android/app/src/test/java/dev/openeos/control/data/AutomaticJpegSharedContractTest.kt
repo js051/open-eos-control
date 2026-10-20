@@ -6,6 +6,31 @@ import org.junit.Test
 import java.util.Base64
 
 class AutomaticJpegSharedContractTest {
+    @Test fun sequentialDecodeAdmissionPreservesStructureResultsAndRejectsEveryPrematureEntropyVector() {
+        val vectors = JSONObject(requireNotNull(javaClass.classLoader!!.getResourceAsStream("jpeg-original-vectors.json"))
+            .bufferedReader().use { it.readText() }).getJSONArray("byteVectors")
+        var structuralValid = 0
+        var admitted = 0
+        for (index in 0 until vectors.length()) {
+            val vector = vectors.getJSONObject(index)
+            val data = Base64.getDecoder().decode(vector.getString("base64"))
+            val actual = runCatching {
+                validateAutomaticJpegSequentialEntropy(data.inputStream(), vector.getLong("byteCount"), vector.getString("sha256"))
+            }
+            // The positive progressive vector must retain its existing native-decode path.
+            // This local gate does not independently establish progressive coefficient integrity.
+            assertEquals(vector.getString("id"), vector.getBoolean("decodedValid"), actual.isSuccess)
+            if (vector.getBoolean("structuralValid")) structuralValid++
+            if (actual.isSuccess) {
+                admitted++
+                assertEquals(vector.getInt("width"), actual.getOrThrow().width)
+                assertEquals(vector.getInt("height"), actual.getOrThrow().height)
+            }
+        }
+        assertEquals(15, structuralValid)
+        assertEquals(11, admitted)
+    }
+
     @Test fun fixedCrossPlatformOriginalByteAndMimeVectorsMatchTheStructuralGate() {
         val vectors = JSONObject(requireNotNull(javaClass.classLoader!!.getResourceAsStream("jpeg-original-vectors.json"))
             .bufferedReader().use { it.readText() })
