@@ -6001,6 +6001,13 @@
       state.localVideoTrack = opened.track;
       state.localVideoSettings = opened.settings;
       state.localVideoMuted = Boolean(opened.track.muted);
+      // An input can end while play() is pending. Own that terminal event
+      // before awaiting playback; listeners do not replay an earlier event.
+      opened.track.addEventListener("ended", () => handleLocalVideoEnded(generation), { once: true });
+      if (opened.track.readyState === "ended") {
+        handleLocalVideoEnded(generation);
+        return;
+      }
       ui.localVideo.srcObject = opened.stream;
       try {
         await ui.localVideo.play();
@@ -6017,6 +6024,10 @@
         }
         return;
       }
+      if (opened.track.readyState === "ended") {
+        handleLocalVideoEnded(generation);
+        return;
+      }
       state.localVideoActive = true;
       state.localVideoFrameTimes = [];
       state.localVideoFrameSamples = [];
@@ -6026,7 +6037,6 @@
       state.frameBytes = 0;
       state.frameContentType = "video/MediaStream";
       state.lastFrameAt = null;
-      opened.track.addEventListener("ended", () => handleLocalVideoEnded(generation), { once: true });
       opened.track.addEventListener("mute", () => {
         if (generation !== state.localVideoGeneration) return;
         state.localVideoMuted = true;
@@ -6114,7 +6124,8 @@
   }
 
   function handleLocalVideoEnded(generation) {
-    if (generation !== state.localVideoGeneration || !state.localVideoActive) return;
+    if (generation !== state.localVideoGeneration ||
+        (!state.localVideoActive && !state.localVideoStream)) return;
     stopLocalVideo({ announce: false });
     state.localVideoError = {
       at: new Date().toISOString(),
