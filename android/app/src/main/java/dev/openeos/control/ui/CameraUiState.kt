@@ -142,6 +142,8 @@ data class CameraUiState(
     val recordingDisconnectWarning: Boolean = false,
     val recordingStartNotConfirmed: Boolean = false,
     val mediaThumbnails: Map<String, Bitmap> = emptyMap(),
+    // Map equality ignores iteration order. Keep the bounded eviction order in value equality.
+    internal val mediaThumbnailCacheOrder: List<String> = mediaThumbnails.keys.toList(),
     val mediaThumbnailLoadingIds: Set<String> = emptySet(),
     val mediaPreviewItem: CameraMediaItem? = null,
     val mediaPreviewBytes: ByteArray? = null,
@@ -483,3 +485,14 @@ internal fun CameraUiState.withMediaFolderFilterForSession(
 ): CameraUiState = if (info === connection && mediaSessionGeneration == generation) {
     copy(mediaFolderFilter = filter)
 } else this
+
+/** Publish one immutable cache snapshot: ordering is state, not a second mutable owner.
+ * Production insertion bounds the map to 96 entries; this list holds only those same IDs. */
+internal fun CameraUiState.withMediaThumbnailCache(thumbnails: Map<String, Bitmap>): CameraUiState {
+    val order = thumbnails.keys.toList()
+    return if (mediaThumbnails === thumbnails && mediaThumbnailCacheOrder == order) this
+    else copy(mediaThumbnails = thumbnails, mediaThumbnailCacheOrder = order)
+}
+
+internal fun CameraUiState.withCanonicalMediaThumbnailCacheOrder(): CameraUiState =
+    withMediaThumbnailCache(mediaThumbnails)
