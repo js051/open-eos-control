@@ -3772,6 +3772,9 @@ class CameraViewModel(
                     val item = currentItem(request)
                     mediaDeletePreflight(request, current.supports(CameraFeature.MEDIA_DELETE), item?.id,
                         item?.let { mediaDeleteSource(it.id, current.transport ?: CameraTransport.CCAPI_NETWORK.takeIf { current.previewMode }, current.info?.bridgeEngine, current.info?.bridgeEndpoint) }, item?.protected, item?.deleteWritable)
+                        // The name shown in the frozen confirmation is part of the review.
+                        // A matching ID alone cannot authorize a differently named current row.
+                        ?: MediaDeleteReason.ITEM_CHANGED.takeIf { item?.name != request.name }
                 },
                 action = { request, evidence ->
                     val item = currentItem(request) ?: error("Selected media is no longer loaded.")

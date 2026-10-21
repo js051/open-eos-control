@@ -1045,6 +1045,7 @@
     <string name="media_delete_not_started">Not started</string>
     <string name="media_delete_skipped">Skipped</string>
     <string name="media_delete_unloaded">Exact item is not loaded; no deletion sent.</string>
+    <string name="media_delete_item_changed">The item name changed after review; no deletion sent. Review it again before deleting.</string>
     <string name="media_delete_unsupported">Current connection does not advertise deletion.</string>
     <string name="media_delete_unloaded_count">%1$d frozen items are no longer loaded and will be skipped without sending deletion.</string>
     <string name="media_delete_bridge_endpoint">Connected Bridge host: %1$s · engine %2$s</string>

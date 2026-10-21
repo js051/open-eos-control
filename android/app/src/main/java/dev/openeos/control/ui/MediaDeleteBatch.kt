@@ -12,7 +12,7 @@ private const val MAX_DELETE_HISTORY_BATCHES = 20
 private const val MAX_DELETE_HISTORY_ROWS = 2_000
 
 enum class MediaDeleteSource { CAMERA_CARD, ANDROID_PRIVATE, DESKTOP_HOST, UNKNOWN }
-enum class MediaDeleteReason { NONE, PROTECTED, NOT_WRITABLE, UNLOADED, UNSUPPORTED, SOURCE_UNKNOWN, OWNER_CHANGED, CANCELLED, UNCONFIRMED }
+enum class MediaDeleteReason { NONE, PROTECTED, NOT_WRITABLE, UNLOADED, UNSUPPORTED, SOURCE_UNKNOWN, OWNER_CHANGED, CANCELLED, UNCONFIRMED, ITEM_CHANGED }
 
 /** Reference identity, never data equality or a reusable device name. */
 data class MediaDeleteOwner(val connection: Any?, val generation: Long) {
@@ -73,6 +73,7 @@ internal suspend fun executeMediaDeleteBatch(
                 continue
             }
             val attempt = control.begin()
+            var dispatchVeto: MediaDeleteReason? = null
             rows[index] = rows[index].copy(inFlight = true)
             publish(true)
             try {
@@ -82,7 +83,8 @@ internal suspend fun executeMediaDeleteBatch(
                         context.ensureActive()
                         if (!isCurrent()) throw CancellationException("Deletion owner changed.")
                         // Re-check current protection/source at the transport boundary.
-                        check(preflight(request) == null) { "Deletion eligibility changed before dispatch." }
+                        dispatchVeto = preflight(request)
+                        check(dispatchVeto == null) { "Deletion eligibility changed before dispatch." }
                         attempt.beforeDispatch()
                     },
                     onConfirmed = attempt::confirm,
@@ -99,6 +101,7 @@ internal suspend fun executeMediaDeleteBatch(
                         outcome == MediaDeleteOutcome.CONFIRMED || outcome == MediaDeleteOutcome.REJECTED -> MediaDeleteReason.NONE
                         !isCurrent() -> MediaDeleteReason.OWNER_CHANGED
                         control.cancelled -> MediaDeleteReason.CANCELLED
+                        outcome == MediaDeleteOutcome.NOT_SENT && dispatchVeto != null -> requireNotNull(dispatchVeto)
                         else -> MediaDeleteReason.UNCONFIRMED
                     })
                 if (outcome == MediaDeleteOutcome.CONFIRMED) onConfirmed(request)
