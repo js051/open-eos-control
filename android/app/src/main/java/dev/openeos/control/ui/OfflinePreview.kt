@@ -197,6 +197,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
             folder = CameraMediaFolder("preview-folder", "preview-card/DCIM/100EOS"),
     ),
     mediaThumbnails = emptyMap(),
+    mediaThumbnailCacheOrder = emptyList(),
     mediaThumbnailLoadingIds = emptySet(),
     liveViewFrameUrl = null,
     liveViewBitmap = null,

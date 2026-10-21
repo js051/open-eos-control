@@ -2478,7 +2478,7 @@ class CameraViewModel(
             _uiState.update { current ->
                 if (item.id !in current.mediaThumbnails ||
                     current.mediaItems.none { it.hasSameThumbnailSource(item) }) return@update current
-                current.copy(mediaThumbnails = touchMediaCacheEntry(current.mediaThumbnails, item.id))
+                current.withMediaThumbnailCache(touchMediaCacheEntry(current.mediaThumbnails, item.id))
             }
             return
         }
@@ -2506,7 +2506,7 @@ class CameraViewModel(
                         .toList()
                         .takeLast(MAX_MEDIA_THUMBNAIL_CACHE_ITEMS - 1)
                         .associateTo(linkedMapOf()) { it.toPair() }
-                    current.copy(mediaThumbnails = retained + (item.id to bitmap))
+                    current.withMediaThumbnailCache(retained + (item.id to bitmap))
                 }
                 refreshCapabilityEvidence()
             } catch (exception: CancellationException) {
@@ -3671,7 +3671,8 @@ class CameraViewModel(
                                 cancelMediaThumbnailLoads()
                                 val batch = items.toMediaLibraryBatch(state.mediaLibraryScope)
                                 publish { it.copy(mediaItems = batch.items, mediaLibraryHasMore = batch.hasMore,
-                                    mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE, mediaThumbnails = emptyMap()) }
+                                    mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE, mediaThumbnails = emptyMap(),
+                                    mediaThumbnailCacheOrder = emptyList()) }
                                 refreshed = true
                             }
                         } catch (exception: CancellationException) {
@@ -4652,6 +4653,7 @@ class CameraViewModel(
         mediaSessionGeneration = mediaSessionGeneration + 1,
         mediaLibraryHasMore = false,
         mediaThumbnails = emptyMap(),
+        mediaThumbnailCacheOrder = emptyList(),
         mediaThumbnailLoadingIds = emptySet(),
         mediaPreviewItem = null,
         mediaPreviewBytes = null,
@@ -4755,7 +4757,7 @@ class CameraViewModel(
             mediaThumbnailLoadingIds = if (retainsThumbnail) mediaThumbnailLoadingIds else mediaThumbnailLoadingIds - item.id,
             mediaPreviewItem = mediaPreviewItem?.let { current -> if (current.id == item.id) item else current },
             captureReviewItem = captureReviewItem?.let { current -> if (current.id == item.id) item else current },
-        )
+        ).withCanonicalMediaThumbnailCacheOrder()
     }
 
     internal fun CameraUiState.withEventMediaItems(
@@ -4776,7 +4778,7 @@ class CameraViewModel(
             mediaPreviewBytes = mediaPreviewBytes.takeIf { previewStillExists },
             mediaPreviewLoading = mediaPreviewLoading && previewStillExists,
             mediaStreamSource = mediaStreamSource.takeIf { previewStillExists },
-        )
+        ).withCanonicalMediaThumbnailCacheOrder()
     }
 
     private fun applyMediaItems(items: List<CameraMediaItem>, hasMore: Boolean) = transitionMediaState { current ->
@@ -4791,7 +4793,9 @@ class CameraViewModel(
     private inline fun transitionMediaState(transform: (CameraUiState) -> CameraUiState) {
         while (true) {
             val current = _uiState.value
-            val updated = transform(current)
+            // Both deletion callers publish here. Keep ordering canonical before the CAS;
+            // retries remain pure and the existing stream owner closes only after publication.
+            val updated = transform(current).withCanonicalMediaThumbnailCacheOrder()
             if (_uiState.compareAndSet(current, updated)) {
                 if (current.mediaStreamSource !== updated.mediaStreamSource) current.mediaStreamSource?.close()
                 return
