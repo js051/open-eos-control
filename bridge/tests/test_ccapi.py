@@ -3854,3 +3854,128 @@ def _detailed_live_view(jpeg: bytes, info: object) -> bytes:
 
 def _detail_packet(data_type: int, payload: bytes) -> bytes:
     return b"\xff\x00" + bytes([data_type]) + len(payload).to_bytes(4, "big") + payload + b"\xff\xff"
+
+
+@pytest.mark.parametrize(
+    ("entry", "stamp", "isdst"),
+    [
+        pytest.param(entry, stamp, isdst, id=f"{entry}-{season}")
+        for entry in ("backend", "http")
+        for season, stamp, isdst in (
+            ("winter", "2026-01-15T12:00:00-05:00", 0),
+            ("summer", "2026-07-15T12:00:00-04:00", 1),
+            ("fallback-before", "2026-11-01T01:59:59-04:00", 1),
+            ("fallback-after", "2026-11-01T01:00:00-05:00", 0),
+        )
+    ],
+)
+def test_ccapi_compatibility_clock_dst_matches_host_instant(entry: str, stamp: str, isdst: int) -> None:
+    from datetime import datetime
+    from email.utils import format_datetime
+    from types import SimpleNamespace
+
+    target = datetime.fromisoformat(stamp)
+    # This deliberately models astimezone()'s fixed-offset result, not a zone with DST rules.
+    assert target.dst() is None
+    transport = FakeCcapiTransport()
+    engine = CcapiEngine(lambda _username, _password: transport, sleeper=lambda _: None)
+
+    def host_localtime(epoch: float) -> SimpleNamespace:
+        assert epoch == target.timestamp(), "COMPAT_CLOCK_EXACT_INSTANT"
+        return SimpleNamespace(tm_isdst=isdst)
+
+    with (
+        patch("open_eos_bridge.ccapi.datetime") as clock,
+        patch("open_eos_bridge.ccapi.time.localtime", side_effect=host_localtime),
+    ):
+        clock.now.return_value.astimezone.return_value = target
+        if entry == "backend":
+            session = engine.open_connection("http://192.168.1.2:8080")
+            try:
+                result = session.sync_camera_clock()
+                assert result.connected is True
+                assert CameraFeature.CAMERA_CLOCK_SYNC in session.capabilities().evidence.observed_features
+            finally:
+                session.close()
+        else:
+            application = create_app(
+                engine=GPhoto2Engine(runner=FakeRunner()), ccapi_engine=engine, token="test-token",
+            )
+            headers = {"Authorization": "Bearer test-token"}
+            with TestClient(application) as api:
+                created = api.post(
+                    "/v1/session", headers=headers,
+                    json={"engine": "ccapi", "ccapiUrl": "http://192.168.1.2:8080"},
+                )
+                assert created.status_code == 201
+                session_id = created.json()["id"]
+                result = api.post(f"/v1/session/{session_id}/clock/sync", headers=headers)
+                assert result.status_code == 200
+                assert result.json()["connected"] is True
+                capabilities = api.get(f"/v1/session/{session_id}/capabilities", headers=headers)
+                assert "CAMERA_CLOCK_SYNC" in capabilities.json()["evidence"]["observedFeatures"]
+                assert api.delete(f"/v1/session/{session_id}", headers=headers).status_code == 204
+
+    clock_requests = [request for request in transport.requests if request.path.endswith("/functions/datetime")]
+    assert [request.method for request in clock_requests] == ["PUT", "GET"]
+    payload = clock_requests[0].body
+    assert payload is not None and set(payload) == {"datetime", "dst"}
+    assert payload["datetime"] == format_datetime(target)
+    assert payload["dst"] is bool(isdst), "COMPAT_CLOCK_DST_MATCH_HOST"
+
+
+@pytest.mark.parametrize("case", ["rejected-put", "opposite-dst", "plus-ten", "plus-eleven"])
+def test_ccapi_compatibility_clock_preserves_ack_and_readback_policy(case: str) -> None:
+    from datetime import datetime, timedelta
+    from email.utils import format_datetime
+    from types import SimpleNamespace
+
+    target = datetime.fromisoformat("2026-01-15T12:00:00-05:00")
+    clock_path = "/ccapi/ver100/functions/datetime"
+
+    class ClockPolicyTransport(FakeCcapiTransport):
+        def request(self, method: str, url: str, **kwargs) -> CcapiResponse:
+            if _request_path(url) == clock_path and method == "PUT" and case == "rejected-put":
+                self.requests.append(RecordedRequest(method, clock_path, json.loads(kwargs["body"])))
+                return _json_response({"message": "synthetic rejection"}, status=503)
+            response = super().request(method, url, **kwargs)
+            if _request_path(url) == clock_path and method == "GET":
+                value = dict(self.camera_clock)
+                if case == "opposite-dst":
+                    value["dst"] = True
+                else:
+                    seconds = 10 if case == "plus-ten" else 11
+                    value["datetime"] = format_datetime(target + timedelta(seconds=seconds))
+                return _json_response(value)
+            return response
+
+    transport = ClockPolicyTransport()
+    session = CcapiEngine(lambda _username, _password: transport, sleeper=lambda _: None).open_connection(
+        "http://192.168.1.2:8080"
+    )
+
+    def host_localtime(epoch: float) -> SimpleNamespace:
+        assert epoch == target.timestamp()
+        return SimpleNamespace(tm_isdst=0)
+
+    try:
+        with (
+            patch("open_eos_bridge.ccapi.datetime") as clock,
+            patch("open_eos_bridge.ccapi.time.localtime", side_effect=host_localtime),
+        ):
+            clock.now.return_value.astimezone.return_value = target
+            if case == "plus-ten":
+                assert session.sync_camera_clock().connected is True
+            else:
+                with pytest.raises(BridgeError) as failed:
+                    session.sync_camera_clock()
+                expected = "CCAPI_HTTP_ERROR" if case == "rejected-put" else "CAMERA_CLOCK_VERIFY_FAILED"
+                assert failed.value.code == expected
+        observed = CameraFeature.CAMERA_CLOCK_SYNC in session.capabilities().evidence.observed_features
+        assert observed is (case == "plus-ten")
+        requests = [request for request in transport.requests if request.path == clock_path]
+        assert [request.method for request in requests] == (
+            ["PUT"] if case == "rejected-put" else ["PUT", "GET"]
+        )
+    finally:
+        session.close()

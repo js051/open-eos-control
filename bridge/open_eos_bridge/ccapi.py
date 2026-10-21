@@ -358,6 +358,12 @@ SETTING_LABELS = {
 _DEFAULT_RTP_FACTORY = object()
 
 
+def _host_daylight_saving_at(requested: datetime) -> bool:
+    # astimezone() carries a fixed offset, whose dst() is normally None.
+    # Query host DST for this exact instant, including transition boundaries.
+    return time.localtime(requested.timestamp()).tm_isdst > 0
+
+
 @dataclass(frozen=True)
 class CcapiOperation:
     method: str
@@ -2439,9 +2445,7 @@ class CcapiSession:
                     raise unsupported(CameraFeature.CAMERA_CLOCK_SYNC.value, self.engine_name)
                 read, write = operations
                 requested = datetime.now().astimezone().replace(microsecond=0)
-                # astimezone() carries a fixed offset, whose dst() is normally None.
-                # Query host DST for this exact instant, including transition boundaries.
-                daylight = time.localtime(requested.timestamp()).tm_isdst > 0
+                daylight = _host_daylight_saving_at(requested)
                 reference = {"earliestEpochSeconds": int(requested.timestamp()) - 10,
                              "latestEpochSeconds": int(requested.timestamp()) + 10,
                              "utcOffsetMinutes": int(requested.utcoffset().total_seconds() // 60),
@@ -2549,7 +2553,7 @@ class CcapiSession:
                 )
             read, write = operations
             requested = datetime.now().astimezone()
-            daylight = bool(requested.dst() and requested.dst().total_seconds())
+            daylight = _host_daylight_saving_at(requested)
             payload = {"datetime": format_datetime(requested), "dst": daylight}
             self._validate_camera_clock_response(self._request_json(write.method, write.path, payload))
             reported, reported_daylight = self._validate_camera_clock_response(
