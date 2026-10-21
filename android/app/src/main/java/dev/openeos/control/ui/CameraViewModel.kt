@@ -2398,8 +2398,7 @@ class CameraViewModel(
                 coroutineContext.ensureActive()
                 if (generation != mediaLibraryGeneration) return@launch
                 _uiState.update {
-                    it.copy(
-                        mediaItems = batch.items,
+                    it.withEventMediaItems(batch.items, preservePreview = true).copy(
                         mediaLibraryHasMore = batch.hasMore,
                         mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
                         capabilities = capabilities ?: it.capabilities,
@@ -2472,9 +2471,13 @@ class CameraViewModel(
     fun loadMediaThumbnail(item: CameraMediaItem) {
         if (!item.isVisualMedia) return
         val state = _uiState.value
+        // An opaque ID can be reused by a later listing or metadata readback. An old tile
+        // must neither touch the replacement's cache nor start a read for its predecessor.
+        if (state.mediaItems.none { it.hasSameThumbnailSource(item) }) return
         state.mediaThumbnails[item.id]?.let {
             _uiState.update { current ->
-                if (item.id !in current.mediaThumbnails) return@update current
+                if (item.id !in current.mediaThumbnails ||
+                    current.mediaItems.none { it.hasSameThumbnailSource(item) }) return@update current
                 current.copy(mediaThumbnails = touchMediaCacheEntry(current.mediaThumbnails, item.id))
             }
             return
@@ -2493,9 +2496,10 @@ class CameraViewModel(
                 val bitmap = mediaThumbnailSemaphore.withPermit { fetchMediaThumbnailBitmap(item) }
                 if (
                     generation != mediaThumbnailGeneration ||
-                    _uiState.value.mediaItems.none { current -> current.id == item.id }
+                    mediaThumbnailJobs[item.id] !== coroutineContext[Job]
                 ) return@launch
                 _uiState.update { current ->
+                    if (current.mediaItems.none { it.hasSameThumbnailSource(item) }) return@update current
                     val retained = current.mediaThumbnails.entries
                         .asSequence()
                         .filterNot { it.key == item.id }
@@ -2523,6 +2527,8 @@ class CameraViewModel(
     }
 
     fun cancelMediaThumbnail(item: CameraMediaItem) {
+        // A disposed old tile does not own a newer read under a reused ID.
+        if (_uiState.value.mediaItems.any { it.id == item.id && !it.hasSameThumbnailSource(item) }) return
         mediaThumbnailJobs.remove(item.id)?.cancel()
         _uiState.update { it.copy(mediaThumbnailLoadingIds = it.mediaThumbnailLoadingIds - item.id) }
     }
@@ -2654,6 +2660,11 @@ class CameraViewModel(
         if (state.previewMode || state.isBusy(CameraOperation.MEDIA) || !state.supports(CameraFeature.MEDIA_BROWSER)) return
         runCamera(CameraOperation.MEDIA) {
             val updated = repository.mediaInfo(item)
+            if (_uiState.value.mediaItems.any { it.id == updated.id && !it.hasSameThumbnailSource(updated) }) {
+                // Remove ownership before cancellation: a late old finalizer cannot clear a
+                // successor's loading state, even when the opaque ID is reused again.
+                mediaThumbnailJobs.remove(updated.id)?.cancel()
+            }
             _uiState.update { current -> current.withUpdatedMedia(updated) }
         }
     }
@@ -4731,22 +4742,36 @@ class CameraViewModel(
             captureReviewItem = captureReviewItem?.let(::merge))
     }
 
-    private fun CameraUiState.withUpdatedMedia(item: CameraMediaItem): CameraUiState = copy(
-        mediaItems = mediaItems.map { current -> if (current.id == item.id) item else current },
-        mediaPreviewItem = mediaPreviewItem?.let { current -> if (current.id == item.id) item else current },
-        captureReviewItem = captureReviewItem?.let { current -> if (current.id == item.id) item else current },
-    )
+    // This is an observed metadata signature, not byte/content identity. Rating,
+    // protection and other non-identity metadata updates do not invalidate a bitmap.
+    private fun CameraMediaItem.hasSameThumbnailSource(other: CameraMediaItem): Boolean =
+        id == other.id && name == other.name && isVisualMedia && other.isVisualMedia && isVideo == other.isVideo
+
+    private fun CameraUiState.withUpdatedMedia(item: CameraMediaItem): CameraUiState {
+        val retainsThumbnail = mediaItems.any { it.hasSameThumbnailSource(item) }
+        return copy(
+            mediaItems = mediaItems.map { current -> if (current.id == item.id) item else current },
+            mediaThumbnails = if (retainsThumbnail) mediaThumbnails else mediaThumbnails - item.id,
+            mediaThumbnailLoadingIds = if (retainsThumbnail) mediaThumbnailLoadingIds else mediaThumbnailLoadingIds - item.id,
+            mediaPreviewItem = mediaPreviewItem?.let { current -> if (current.id == item.id) item else current },
+            captureReviewItem = captureReviewItem?.let { current -> if (current.id == item.id) item else current },
+        )
+    }
 
     internal fun CameraUiState.withEventMediaItems(
         items: List<CameraMediaItem>,
         preservePreview: Boolean = false,
     ): CameraUiState {
         val itemIds = items.mapTo(hashSetOf(), CameraMediaItem::id)
+        val previousItems = mediaItems.associateBy(CameraMediaItem::id)
+        val retainedThumbnailIds = items.filter { item ->
+            previousItems[item.id]?.hasSameThumbnailSource(item) == true
+        }.mapTo(hashSetOf(), CameraMediaItem::id)
         val previewStillExists = preservePreview || mediaPreviewItem?.id in itemIds
         return copy(
             mediaItems = items,
-            mediaThumbnails = mediaThumbnails.filterKeys(itemIds::contains),
-            mediaThumbnailLoadingIds = mediaThumbnailLoadingIds.intersect(itemIds),
+            mediaThumbnails = mediaThumbnails.filterKeys(retainedThumbnailIds::contains),
+            mediaThumbnailLoadingIds = mediaThumbnailLoadingIds.intersect(retainedThumbnailIds),
             mediaPreviewItem = mediaPreviewItem.takeIf { previewStillExists },
             mediaPreviewBytes = mediaPreviewBytes.takeIf { previewStillExists },
             mediaPreviewLoading = mediaPreviewLoading && previewStillExists,
@@ -4967,7 +4992,7 @@ class CameraViewModel(
         repeat(MEDIA_THUMBNAIL_RETRY_DELAYS_MILLIS.size + 1) { attempt ->
             try {
                 val thumbnail = repository.mediaThumbnail(item)
-                require(thumbnail.item.id == item.id && thumbnail.item.name == item.name && thumbnail.item.isVisualMedia) {
+                require(thumbnail.item.hasSameThumbnailSource(item)) {
                     "Camera changed the media identity or type before thumbnail decoding."
                 }
                 return withContext(Dispatchers.Default) {
