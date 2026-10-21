@@ -121,6 +121,7 @@ private fun DeleteReceipt(receipt: MediaDeleteReceipt, state: CameraUiState, act
     MediaDeleteReason.PROTECTED -> R.string.media_delete_protected
     MediaDeleteReason.NOT_WRITABLE -> R.string.media_delete_not_writable
     MediaDeleteReason.UNLOADED -> R.string.media_delete_unloaded
+    MediaDeleteReason.ITEM_CHANGED -> R.string.media_delete_item_changed
     MediaDeleteReason.UNSUPPORTED -> R.string.media_delete_unsupported
     MediaDeleteReason.SOURCE_UNKNOWN -> R.string.media_delete_source_unknown
     MediaDeleteReason.OWNER_CHANGED -> R.string.media_delete_old_owner

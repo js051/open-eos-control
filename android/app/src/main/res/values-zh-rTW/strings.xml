@@ -795,6 +795,7 @@
     <string name="media_delete_not_started">未開始</string>
     <string name="media_delete_skipped">已略過</string>
     <string name="media_delete_unloaded">未載入此精確項目；未送出刪除。</string>
+    <string name="media_delete_item_changed">項目名稱在檢閱後已變更；未送出刪除。請重新檢閱後再確認刪除。</string>
     <string name="media_delete_unsupported">目前連線未提供刪除能力。</string>
     <string name="media_delete_unloaded_count">凍結清單中有 %1$d 項已未載入，將略過且不送出刪除。</string>
     <string name="media_delete_bridge_endpoint">已連線的 Bridge 主機：%1$s · 引擎 %2$s</string>
