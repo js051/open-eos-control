@@ -348,6 +348,9 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaFolderFilter = MediaFolderFilter.all
     private var session: CameraSession? {
         didSet {
+            // The remembered photo mode is an observation of this camera, not
+            // a user preference that may be applied to a replacement session.
+            lastPhotoShootingMode = nil
             retireShootingSetting()
             retireCaptureConfiguration()
             retireMaintenance()

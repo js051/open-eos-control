@@ -17,6 +17,18 @@
 
 模擬器、mock server、HTTP fixture、AVD 與 iPhone Simulator 都屬於可重現自動驗證，不能取代實體 EOS 相機／手機／USB 路徑的驗證紀錄。
 
+### Android 驗證入口與補充診斷
+
+- **正式 Android 單元驗證只有標準 Gradle 入口**：在 `android/` 執行 `./gradlew :app:testDebugUnitTest`；完整 app／APK 另走原本 `assembleDebug` 與 CI。手動 Kotlin 編譯、抽取方法或 scoped JUnit 全綠不能代替它。
+- `android/gradle/unit-test-runtime.properties` 只規範測試 Java 17、assertions 與 coroutine debug／stacktrace recovery，不改 production app、不複製完整 dependency catalog。Gradle 原 Test task 和兩個已遷移的補充入口讀同一份 profile。
+- 已遷移入口是 `scripts/validation/run-android-still-transport-host.py` 與 `scripts/validation/run_android_focus_ack_host.py`。兩者的 Java 選擇、receipt 校驗、compiler／test runtime classpath 和 flags 改由 `android_host_runtime.py` 管理；原 extracted fixture／失敗標記不變。它們仍是合成 transport 診斷，不是真 Android、OkHttp socket 或裝置驗收。
+- 補充執行需要明確已安裝的 `--java`、`--jars` 與既有 checksum receipt（必要時指定 `--tool-receipt`）；缺件、版本或 hash 不符就停止，不自動下載或改用其他 Java。compiler 自身的 coroutine 1.8 與 product runtime 的 1.9 保持分開。
+- Gradle 產生 `app/build/tmp/testDebugUnitTest/runtime-contract.json`，記錄實際 launcher、resolved artifact hashes 與測試 profile。原 JUnit XML/stdout 以 `OEC_GRADLE_RUNTIME_MANIFEST` 保留可取回的完整閉合 manifest，毋須新增 CI upload。標準 JUnit 的 `OEC_UNIT_RUNTIME` stdout 另核對實際載入的 Kotlin／coroutines／JUnit jar 身分，欄位不包含絕對路徑、使用者素材或憑證。
+- 補充入口的 `--gradle-manifest` 只能比較**真正執行過的 Gradle manifest**。沒有時明列 `GRADLE_COMPARISON_NOT_RUN`；selected jar hashes 相同也不是完整 AGP、Android resource 或 app build 等價。本機缺正式 Gradle／SDK 時保留正式驗證 NOT_RUN，不得自製一份 manifest 充數。
+- 其餘歷史 extracted runners 尚未遷移，不能聲稱全部入口已統一。保留它們與歷史 receipts，但新工作不得再複製 flags／classpath 配方；優先以正式 source-set tests 取代已重複的 active 診斷。
+
+本次有限重構與實際驗證狀態見 [runtime／preview owner 記錄](validation/android-runtime-and-preview-owner-2026-10-22.zh-TW.md)。
+
 ### 發布通道
 
 - 目前唯一啟用的發布通道是 **Development Preview**。GitHub 上既有版本與目前 workflow 都是 prerelease；版本號升為 patch 或 minor 仍然只是下一個 Preview，不代表穩定版。
@@ -103,6 +115,14 @@ This workflow gives machine-verifiable meanings to implemented, appropriately va
 | Preview released | `Release development preview / release-published` succeeded and GitHub prerelease assets exist | Physical-camera validation is complete or the product is stable |
 
 Simulator, mock-server, HTTP-fixture, AVD, and iPhone Simulator results are deterministic automated evidence. They never replace a recorded physical EOS camera, phone, or USB validation.
+
+### Android verification entrypoints
+
+The formal unit gate remains `./gradlew :app:testDebugUnitTest` from `android/`, followed by the original app/APK checks. Scoped manual compilation is supplemental, never a replacement. The small `android/gradle/unit-test-runtime.properties` profile controls Java 17, assertions and coroutine recovery only for tests, not the application.
+
+The existing still-transport and focus-ACK diagnostic scripts now share `scripts/validation/android_host_runtime.py`; their duplicate verification/classpath/Java launch configuration is removed, while their original extracted fixtures remain. They require existing receipt-pinned tools and do not install or download anything. Compiler and test-runtime dependencies remain separate.
+
+The ordinary Gradle Test task writes `app/build/tmp/testDebugUnitTest/runtime-contract.json`. The existing JUnit XML/stdout retains it as `OEC_GRADLE_RUNTIME_MANIFEST`, without a new upload route. The standard JUnit source-set contract verifies loaded Kotlin, coroutine and JUnit origins and emits closed-field `OEC_UNIT_RUNTIME` metadata without private paths. A supplemental run without an actual Gradle manifest reports `GRADLE_COMPARISON_NOT_RUN`; matching selected jar hashes still does not establish full app/AGP/resource equivalence. Other historical runners are not yet migrated and remain explicitly supplemental. Do not add another copied launch recipe or rewrite historical evidence.
 
 ### Release Channels
 

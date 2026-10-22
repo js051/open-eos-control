@@ -1,7 +1,10 @@
 package dev.openeos.control.ui
 
+import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraBackendFactory
+import dev.openeos.control.data.CameraCapabilities
+import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraControlBackend
 import dev.openeos.control.data.CameraHttpTransport
 import dev.openeos.control.data.CameraHttpTransportFactory
@@ -12,6 +15,7 @@ import dev.openeos.control.data.CameraMediaStreamSource
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraTransport
+import dev.openeos.control.data.MediaDeleteEvidence
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +55,8 @@ import org.junit.runners.Parameterized
 import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.intrinsics.suspendCoroutineUninterceptedOrReturn
 
 /** Real HTTP connections and preview cancellation; deferred backend reads isolate cleanup races. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -397,6 +403,171 @@ class CameraMediaPreviewOwnershipTest(private val transport: CameraTransport) {
         }
     }
 
+    @Test fun backgroundPreservesPendingHttpPreview() = runTest(main) {
+        withCamera {
+            val read = readGate()
+            replaceBackend { delegate -> object : CameraControlBackend by delegate {
+                override suspend fun mediaPreview(item: CameraMediaItem) = read.read(preview(item))
+            } }
+            model.openMediaPreview(image)
+            runCurrent()
+            assertTrue(read.entered.isCompleted)
+
+            model.setAppForeground(false)
+            runCurrent()
+
+            assertTrue("Background is not viewer dismissal", read.job.isActive)
+            assertFalse(read.cancelled.isCompleted)
+            assertEquals(image.id, model.uiState.value.mediaPreviewItem?.id)
+            assertTrue(model.uiState.value.mediaPreviewLoading)
+            assertTrue(model.uiState.value.isBusy(CameraOperation.MEDIA))
+            read.finish.complete(Unit)
+            read.job.join()
+            assertArrayEquals(peer.displayBytes, model.uiState.value.mediaPreviewBytes)
+            assertFalse(model.uiState.value.isBusy(CameraOperation.MEDIA))
+            assertNull(model.uiState.value.error)
+        }
+    }
+
+    @Test fun clearingViewModelWaitsForPreviewCleanupBeforeBackendRetirement() = runTest(main) {
+        withCamera {
+            val read = readGate(holdCleanup = true)
+            val retirementEntered = CompletableDeferred<Boolean>()
+            val retired = CompletableDeferred<Unit>()
+            replaceBackend { delegate -> object : CameraControlBackend by delegate {
+                override suspend fun mediaPreview(item: CameraMediaItem) = read.read(preview(item))
+                override suspend fun close() {
+                    retirementEntered.complete(read.job.isCompleted)
+                    try { delegate.close() } finally { retired.complete(Unit) }
+                }
+            } }
+            model.openMediaPreview(image)
+            runCurrent()
+            assertTrue(read.entered.isCompleted)
+            val scopeJob = model.viewModelScope.coroutineContext.job
+            val store = ViewModelStore().apply { put("synthetic-preview", model) }
+
+            store.clear()
+            runCurrent()
+
+            assertTrue(read.cancelled.isCompleted)
+            assertTrue(read.job.isCancelled)
+            assertFalse("Cancellation requested does not establish cleanup completion", read.job.isCompleted)
+            assertFalse(scopeJob.isCompleted)
+            assertFalse("Backend retirement must join the original display-read job", retirementEntered.isCompleted)
+            read.cleanup.complete(Unit)
+            read.job.join()
+            assertTrue("Actual onCleared retirement may start only after the read completes", retirementEntered.await())
+            retired.await()
+            scopeJob.join()
+            assertTrue(scopeJob.isCompleted)
+            assertNull(model.uiState.value.mediaStreamSource)
+            assertNull(model.uiState.value.error)
+        }
+    }
+
+    @Test fun removingPlayingItemClosesOnlyRetiredStream() = runTest(main) {
+        for (throughEvent in listOf(false, true)) withCamera {
+            val video = removalVideo("playing")
+            val unrelated = removalVideo("unrelated")
+            var listing = listOf(video, unrelated)
+            val closedStates = mutableListOf<CameraUiState>()
+            val stream = PreviewStreamProbe(video) { closedStates += model.uiState.value }
+            val capabilities = installRemovalItems(listing)
+            replaceBackend { delegate -> object : CameraControlBackend by delegate {
+                override suspend fun capabilities() = capabilities
+                override suspend fun listMedia(maximumItems: Int?, onProgress: (List<CameraMediaItem>) -> Unit) = listing
+                override suspend fun openMediaStream(item: CameraMediaItem) = stream
+                override suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence) {
+                    evidence.beforeDispatch()
+                    listing = listing.filterNot { it.id == item.id }
+                    evidence.onConfirmed()
+                }
+            } }
+            model.openMediaPreview(video)
+            awaitMediaIdle()
+            assertSame(stream, model.uiState.value.mediaStreamSource)
+
+            if (throughEvent) {
+                listing = listOf(video)
+                model.refreshEventMediaForPreviewControl()
+            } else {
+                model.deleteMedia(unrelated)
+                awaitMediaIdle()
+            }
+            assertEquals(listOf(video), model.uiState.value.mediaItems)
+            assertEquals("Removing another row must retain the playing source", 0, stream.closeCalls)
+            assertSame(stream, model.uiState.value.mediaStreamSource)
+
+            if (throughEvent) {
+                listing = emptyList()
+                model.refreshEventMediaForPreviewControl()
+            } else {
+                model.deleteMedia(video)
+                awaitMediaIdle()
+            }
+            assertTrue(model.uiState.value.mediaItems.isEmpty())
+            assertEquals(1, stream.closeCalls)
+            assertEquals(1, closedStates.size)
+            assertNull("Retirement follows the committed state, never a retrying reducer", closedStates.single().mediaStreamSource)
+            assertNull(closedStates.single().mediaPreviewItem)
+            assertNull(model.uiState.value.mediaStreamSource)
+            assertClosedWithoutError()
+            model.closeMediaPreview()
+            assertEquals("A later viewer close cannot retire the old source twice", 1, stream.closeCalls)
+        }
+    }
+
+    @Test fun retiredStreamObserverCannotCloseSuccessor() = runTest(main) {
+        withCamera {
+            val oldVideo = removalVideo("old")
+            val nextVideo = removalVideo("next")
+            var listing = listOf(oldVideo, nextVideo)
+            val oldStream = PreviewStreamProbe(oldVideo)
+            val nextStream = PreviewStreamProbe(nextVideo)
+            val capabilities = installRemovalItems(listing)
+            replaceBackend { delegate -> object : CameraControlBackend by delegate {
+                override suspend fun capabilities() = capabilities
+                override suspend fun listMedia(maximumItems: Int?, onProgress: (List<CameraMediaItem>) -> Unit) = listing
+                override suspend fun openMediaStream(item: CameraMediaItem) =
+                    if (item.id == oldVideo.id) oldStream else nextStream
+            } }
+            model.openMediaPreview(oldVideo)
+            awaitMediaIdle()
+            assertSame(oldStream, model.uiState.value.mediaStreamSource)
+            var replaceOnRemoval = true
+            val observer = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                model.uiState.collect { state ->
+                    if (replaceOnRemoval && state.mediaPreviewItem == null &&
+                        state.mediaItems.none { it.id == oldVideo.id }) {
+                        replaceOnRemoval = false
+                        model.openMediaPreview(nextVideo)
+                        // Drain the newly registered lazy operation before this observer returns
+                        // to the old CAS caller. No product dispatcher or launcher is replaced.
+                        runCurrent()
+                        assertSame("The successor must publish before old retirement resumes", nextStream, model.uiState.value.mediaStreamSource)
+                        assertEquals(0, oldStream.closeCalls)
+                    }
+                }
+            }
+            try {
+                listing = listOf(nextVideo)
+                model.refreshEventMediaForPreviewControl()
+                assertFalse(replaceOnRemoval)
+                assertEquals(1, oldStream.closeCalls)
+                assertEquals("Old retirement must close its captured source, not the current one", 0, nextStream.closeCalls)
+                assertSame(nextStream, model.uiState.value.mediaStreamSource)
+                assertEquals(nextVideo.id, model.uiState.value.mediaPreviewItem?.id)
+                assertNull(model.uiState.value.error)
+                model.closeMediaPreview()
+                assertEquals(1, oldStream.closeCalls)
+                assertEquals(1, nextStream.closeCalls)
+            } finally {
+                observer.cancel()
+            }
+        }
+    }
+
     private suspend fun TestScope.assertReentrantPreviewDismissal(whenMediaPending: Boolean) {
         withCamera {
             for (leaveMedia in listOf(false, true)) {
@@ -527,6 +698,27 @@ private class PreviewOwnershipFixture(val peer: PreviewOwnershipPeer, private va
     fun readGate(holdCleanup: Boolean = false, lateFailure: IOException? = null) =
         PreviewReadGate(holdCleanup, lateFailure).also(gates::add)
 
+    fun removalVideo(suffix: String) = image.copy(
+        id = if (transport == CameraTransport.DESKTOP_BRIDGE) "ccapi:synthetic_$suffix" else "/ccapi/ver100/contents/SYNTHETIC_$suffix.MP4",
+        name = "SYNTHETIC_$suffix.MP4", kind = "video", streamAvailable = true, deleteWritable = true,
+    )
+
+    fun installRemovalItems(items: List<CameraMediaItem>): CameraCapabilities {
+        // These are caller/ownership controls, not claims about a physical deletion endpoint.
+        val field = CameraViewModel::class.java.getDeclaredField("_uiState").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val state = field.get(model) as MutableStateFlow<CameraUiState>
+        val capabilities = requireNotNull(state.value.capabilities).let {
+            it.copy(matrix = it.matrix.copy(supported = it.matrix.supported + CameraFeature.MEDIA_DELETE))
+        }
+        val connection = requireNotNull(state.value.info).let {
+            if (transport == CameraTransport.DESKTOP_BRIDGE) it.copy(bridgeEngine = "ccapi", bridgeEndpoint = peer.baseUrl.removeSuffix("/")) else it
+        }
+        state.value = state.value.copy(info = connection, capabilities = capabilities, mediaItems = items,
+            mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE)
+        return capabilities
+    }
+
     fun replaceBackend(wrap: (CameraControlBackend) -> CameraControlBackend) {
         // Only the single read is substituted; real initialized backend/session teardown is delegated.
         val field = CameraRepository::class.java.getDeclaredField("backend").apply { isAccessible = true }
@@ -557,11 +749,23 @@ private class PreviewReadGate(private val holdCleanup: Boolean, private val late
     }
 }
 
-private class PreviewStreamProbe(override val item: CameraMediaItem) : CameraMediaStreamSource {
+private class PreviewStreamProbe(
+    override val item: CameraMediaItem,
+    private val onClose: () -> Unit = {},
+) : CameraMediaStreamSource {
     var closeCalls = 0
         private set
     override suspend fun open(position: Long): CameraMediaStreamHandle = error("Playback is outside this allocation test")
-    override fun close() { closeCalls += 1 }
+    override fun close() { closeCalls += 1; onClose() }
+}
+
+/** Invoke the existing event caller without adding a polling/transport fixture or a product seam. */
+private suspend fun CameraViewModel.refreshEventMediaForPreviewControl() {
+    val generation = CameraViewModel::class.java.getDeclaredField("eventPollingGeneration")
+        .apply { isAccessible = true }.getLong(this)
+    val refresh = CameraViewModel::class.java.getDeclaredMethod("refreshEventMedia",
+        java.lang.Long.TYPE, Continuation::class.java).apply { isAccessible = true }
+    suspendCoroutineUninterceptedOrReturn<Unit> { continuation -> refresh.invoke(this, generation, continuation) }
 }
 
 private fun CameraViewModel.overrideTransportForPolicyControl(transport: CameraTransport) {

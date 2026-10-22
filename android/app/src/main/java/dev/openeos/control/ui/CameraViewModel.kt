@@ -304,15 +304,18 @@ class CameraViewModel(
     private val mediaPickerRequests = CameraMediaPickerRequests()
     private var cameraStateRevision = 0L
     private val cameraOperationJobs = mutableMapOf<CameraOperation, Job>()
-    private class HttpMediaPreviewRead {
-        var job: Job? = null
-        var cancelled = false
-        fun cancel() {
-            cancelled = true
-            job?.cancel()
-        }
-    }
-    private var httpMediaPreviewRead: HttpMediaPreviewRead? = null
+    private val mediaPreviewOwner = CameraMediaPreviewOwner(
+        uiState = _uiState,
+        repository = repository,
+        sessionGeneration = { cameraSessionGeneration },
+        cancelMediaLibraryLoad = ::cancelMediaLibraryLoad,
+        launchMedia = { onRegistered, onError, block ->
+            launchCameraOperation(CameraOperation.MEDIA, cancelMediaReads = false,
+                onRegistered = onRegistered, onError = onError, block = block)
+        },
+        hasMediaOperation = { cameraOperationJobs[CameraOperation.MEDIA] != null },
+        advanceStateRevision = { cameraStateRevision += 1 },
+    )
     private class BridgeBulbUiOwner(val access: BridgeBulbAccess, val generation: Long, val connection: CameraInfo?) {
         var command = 0L
         var startJob: Job? = null
@@ -597,21 +600,19 @@ class CameraViewModel(
     }
 
     fun setUiMode(mode: UiMode) {
-        val previewToCancel = httpMediaPreviewRead.takeIf { mode != UiMode.MEDIA }
-        if (mode != UiMode.CONTROL) stopHeldAutofocus()
-        if (mode == UiMode.MEDIA) invalidateCameraFocusInfo()
-        if (mode != UiMode.MEDIA) _uiState.value.mediaStreamSource?.close()
-        _uiState.update {
-            it.copy(
-                uiMode = mode,
-                activeSettingPicker = null,
-                mediaPreviewItem = if (mode == UiMode.MEDIA) it.mediaPreviewItem else null,
-                mediaPreviewBytes = if (mode == UiMode.MEDIA) it.mediaPreviewBytes else null,
-                mediaPreviewLoading = mode == UiMode.MEDIA && it.mediaPreviewLoading,
-                mediaStreamSource = if (mode == UiMode.MEDIA) it.mediaStreamSource else null,
+        val updateMode: (CameraUiState) -> CameraUiState = {
+            it.copy(uiMode = mode, activeSettingPicker = null)
+        }
+        if (mode == UiMode.MEDIA) {
+            stopHeldAutofocus()
+            invalidateCameraFocusInfo()
+            _uiState.update(updateMode)
+        } else {
+            mediaPreviewOwner.close(
+                beforeClear = { if (mode != UiMode.CONTROL) stopHeldAutofocus() },
+                updateState = updateMode,
             )
         }
-        previewToCancel?.cancel()
         if (mode == UiMode.MEDIA && _uiState.value.mediaItems.isEmpty()) refreshMedia()
     }
 
@@ -2371,14 +2372,9 @@ class CameraViewModel(
         val connection = initialState.info
         val generation = ++mediaLibraryGeneration
         cancelMediaThumbnailLoads()
-        _uiState.value.mediaStreamSource?.close()
-        _uiState.update {
+        mediaPreviewOwner.clearForLibraryRefresh {
             it.copy(
                 mediaThumbnailLoadingIds = emptySet(),
-                mediaPreviewItem = null,
-                mediaPreviewBytes = null,
-                mediaPreviewLoading = false,
-                mediaStreamSource = null,
                 mediaLibraryLoading = true,
                 mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING,
             )
@@ -2533,127 +2529,9 @@ class CameraViewModel(
         _uiState.update { it.copy(mediaThumbnailLoadingIds = it.mediaThumbnailLoadingIds - item.id) }
     }
 
-    fun openMediaPreview(item: CameraMediaItem) {
-        if (!item.isVisualMedia) return
-        val state = _uiState.value
-        val isVideo = item.isVideo
-        if (state.previewMode) {
-            state.mediaStreamSource?.close()
-            _uiState.update {
-                it.copy(
-                    mediaPreviewItem = item,
-                    mediaPreviewBytes = null,
-                    mediaPreviewLoading = false,
-                    mediaStreamSource = null,
-                )
-            }
-            return
-        }
-        if (
-            state.isBusy(CameraOperation.MEDIA) ||
-            if (isVideo) !item.streamAvailable
-            else !state.supports(CameraFeature.MEDIA_PREVIEW) || !item.previewAvailable
-        ) return
-        if (state.transport == CameraTransport.DESKTOP_BRIDGE && state.mediaLibraryLoading) {
-            cancelMediaLibraryLoad()
-        }
-        val generation = cameraSessionGeneration
-        val connection = state.info
-        val cancellableImageRead = !isVideo && state.transport in setOf(
-            CameraTransport.CCAPI_NETWORK, CameraTransport.DESKTOP_BRIDGE,
-        )
-        // Own admission before StateFlow observers can dismiss the new viewer.
-        val read = if (cancellableImageRead) HttpMediaPreviewRead() else null
-        if (read != null) httpMediaPreviewRead = read
-        state.mediaStreamSource?.close()
-        _uiState.update {
-            it.copy(
-                mediaPreviewItem = item,
-                mediaPreviewBytes = null,
-                mediaPreviewLoading = true,
-                mediaStreamSource = null,
-            )
-        }
-        if (read != null && (read.cancelled || httpMediaPreviewRead !== read ||
-                generation != cameraSessionGeneration || _uiState.value.info !== connection)) {
-            if (httpMediaPreviewRead === read) httpMediaPreviewRead = null
-            return
-        }
-        launchCameraOperation(
-            operation = CameraOperation.MEDIA,
-            cancelMediaReads = false,
-            onRegistered = { job ->
-                if (read != null) {
-                    read.job = job
-                    job.invokeOnCompletion {
-                        if (httpMediaPreviewRead === read) {
-                            httpMediaPreviewRead = null
-                            // Cancellation before lazy dispatch can skip execute's finally.
-                            // The generic completion handler has already removed this job;
-                            // a successor must retain its own MEDIA pending state.
-                            if (generation == cameraSessionGeneration && _uiState.value.info === connection &&
-                                cameraOperationJobs[CameraOperation.MEDIA] == null &&
-                                _uiState.value.isBusy(CameraOperation.MEDIA)) {
-                                cameraStateRevision += 1
-                                _uiState.update { it.copy(pendingOperations = it.pendingOperations - CameraOperation.MEDIA) }
-                            }
-                        }
-                    }
-                    // MEDIA pending publication can also trigger dismissal before registration.
-                    if (read.cancelled || httpMediaPreviewRead !== read ||
-                        generation != cameraSessionGeneration || _uiState.value.info !== connection) job.cancel()
-                }
-            },
-            onError = {
-                _uiState.update { current ->
-                    if (generation == cameraSessionGeneration && current.info === connection &&
-                        current.mediaPreviewItem?.id == item.id) current.copy(mediaPreviewLoading = false) else current
-                }
-            },
-        ) {
-            val stream = if (isVideo) repository.openMediaStream(item) else null
-            val preview = if (isVideo) null else try {
-                repository.mediaPreview(item).also {
-                    require(it.item.id == item.id && it.item.name == item.name && it.item.isPhoto) {
-                        "Camera changed the media identity or type before preview decoding."
-                    }
-                    if (cancellableImageRead) coroutineContext.ensureActive()
-                }
-            } catch (exception: Exception) {
-                // A cancelled HTTP read may surface IOException while unwinding.
-                // Keep this suppression local to display reads, not safety commands.
-                if (cancellableImageRead) coroutineContext.ensureActive()
-                throw exception
-            }
-            _uiState.update { current ->
-                if (generation == cameraSessionGeneration && current.info === connection &&
-                    current.mediaPreviewItem?.id == item.id) {
-                    current.copy(
-                        mediaPreviewBytes = preview?.bytes,
-                        mediaPreviewLoading = false,
-                        mediaStreamSource = stream,
-                    )
-                } else {
-                    stream?.close()
-                    current
-                }
-            }
-        }
-    }
+    fun openMediaPreview(item: CameraMediaItem) = mediaPreviewOwner.open(item)
 
-    fun closeMediaPreview() {
-        val previewToCancel = httpMediaPreviewRead
-        _uiState.value.mediaStreamSource?.close()
-        _uiState.update {
-            it.copy(
-                mediaPreviewItem = null,
-                mediaPreviewBytes = null,
-                mediaPreviewLoading = false,
-                mediaStreamSource = null,
-            )
-        }
-        previewToCancel?.cancel()
-    }
+    fun closeMediaPreview() = mediaPreviewOwner.close()
 
     fun loadMediaInfo(item: CameraMediaItem) {
         val state = _uiState.value
@@ -4800,7 +4678,7 @@ class CameraViewModel(
             // retries remain pure and the existing stream owner closes only after publication.
             val updated = transform(current).withCanonicalMediaThumbnailCacheOrder()
             if (_uiState.compareAndSet(current, updated)) {
-                if (current.mediaStreamSource !== updated.mediaStreamSource) current.mediaStreamSource?.close()
+                mediaPreviewOwner.retireReplacedStream(current, updated)
                 return
             }
         }
@@ -5051,10 +4929,7 @@ class CameraViewModel(
         }
     }
 
-    private fun closeMediaStream() {
-        _uiState.value.mediaStreamSource?.close()
-        _uiState.update { it.copy(mediaStreamSource = null) }
-    }
+    private fun closeMediaStream() = mediaPreviewOwner.closeStream()
 
     private fun recordFrame(
         current: LiveViewDiagnostics,

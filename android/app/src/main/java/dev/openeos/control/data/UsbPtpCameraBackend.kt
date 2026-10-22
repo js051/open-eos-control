@@ -61,6 +61,8 @@ class UsbPtpCameraBackend(
     // Canon remote-release intents own their original OFF before any ON can reach the camera.
     // A missing response is not proof that the press did not take effect.
     private val canonShutter = ShutterReleaseSession()
+    // Dedicated AF also owns its original Cancel until the camera acknowledges it.
+    private val canonAutofocus = HeldAutofocusSession()
     private val recordingSequence = java.util.concurrent.atomic.AtomicLong()
     @Volatile private var recordingEventObservation: RecordingObservation? = null
     private var recordingStopOwned = false
@@ -117,6 +119,13 @@ class UsbPtpCameraBackend(
         } else {
             runCatching { retryShutterRelease() }.exceptionOrNull()
         }
+        // Repository retirement may already have tried Stop; close must still expose
+        // an unresolved saved owner rather than silently clearing local session state.
+        val autofocusReleaseFailure = runCatching { retryAutofocusStop() }.exceptionOrNull()
+        val releaseFailure = shutterReleaseFailure ?: autofocusReleaseFailure
+        if (shutterReleaseFailure != null && autofocusReleaseFailure != null) {
+            shutterReleaseFailure.addSuppressed(autofocusReleaseFailure)
+        }
         if (current != null) {
             runCatching { stopLiveView() }
             if (canonRemotePrepared) {
@@ -161,10 +170,10 @@ class UsbPtpCameraBackend(
         try {
             if (strictConnectionAttempt) current?.shutdownConnectionAttempt() else current?.shutdown()
         } catch (shutdownFailure: Throwable) {
-            if (shutterReleaseFailure == null) throw shutdownFailure
-            shutterReleaseFailure.addSuppressed(shutdownFailure)
+            if (releaseFailure == null) throw shutdownFailure
+            releaseFailure.addSuppressed(shutdownFailure)
         }
-        shutterReleaseFailure?.let { throw it }
+        releaseFailure?.let { throw it }
     }
 
     override suspend fun info(): CameraInfo {
@@ -722,27 +731,22 @@ class UsbPtpCameraBackend(
         ensureCanonRemoteMode()
         drainCanonEvents()
         val ptp = requireSession()
-        var primaryFailure: Throwable? = null
-        try {
+        canonAutofocus.hold(start = {
             ptp.executeOperation(CanonEosOperationCode.DO_AF)
+        }, stop = {
+            // Never look up mutable session here: recovery belongs to this exact intent.
+            ptp.executeOperation(CanonEosOperationCode.AF_CANCEL)
+        }, whileHeld = {
             delay(CANON_AUTOFOCUS_HOLD_MILLIS)
             drainCanonEvents()
-        } catch (exception: Throwable) {
-            primaryFailure = exception
-            throw exception
-        } finally {
-            try {
-                withContext(NonCancellable) {
-                    ptp.executeOperation(CanonEosOperationCode.AF_CANCEL)
-                }
-            } catch (releaseFailure: Throwable) {
-                primaryFailure?.addSuppressed(releaseFailure) ?: throw releaseFailure
-            }
-        }
+        })
         drainCanonEvents()
         observedFeatures.add(CameraFeature.AUTOFOCUS)
         return status()
     }
+
+    /** A failed AF Cancel can only retry the saved original Stop, never DoAF. */
+    override suspend fun retryAutofocusStop() = canonAutofocus.retryStop()
 
     override suspend fun driveFocus(
         direction: FocusDriveDirection,

@@ -1,10 +1,12 @@
 package dev.openeos.control.data
 
 import androidx.lifecycle.viewModelScope
+import dev.openeos.control.ui.AutofocusHoldState
 import dev.openeos.control.ui.CameraOperation
 import dev.openeos.control.ui.CameraUiState
 import dev.openeos.control.ui.CameraViewModel
 import dev.openeos.control.ui.CaptureReviewStatus
+import dev.openeos.control.ui.FocusFeedback
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -745,6 +747,183 @@ class UsbPtpCameraBackendTest {
         // Matching type and text are not evidence that the exact thrown original survived.
         failure.addSuppressed(java.io.IOException(original.message))
         assertReleaseFailureAssertionRejected { assertRemoteReleaseFailure(failure, original) }
+    }
+
+    @Test fun autofocusCancelFailureAssertionRejectsMissingOrWrongOuterOwner() {
+        val cancelFailure = PtpResponseException(
+            CanonEosOperationCode.AF_CANCEL, PtpResponseCode.GENERAL_ERROR,
+        )
+        listOf(null, cancelFailure, IllegalStateException(cancelFailure), ShutterReleaseException(cancelFailure))
+            .forEach { failure ->
+                assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(failure) }
+                assertReleaseFailureAssertionRejected { assertAutofocusClosedOriginalSessionFailure(failure) }
+            }
+        val closedSession = PtpProtocolException("PTP session is not open.")
+        listOf(closedSession, IllegalStateException(closedSession), ShutterReleaseException(closedSession)).forEach { failure ->
+            assertReleaseFailureAssertionRejected { assertAutofocusClosedOriginalSessionFailure(failure) }
+        }
+    }
+
+    @Test fun autofocusCancelFailureAssertionRejectsUnrelatedIntermediateWrapper() {
+        val cancelFailure = PtpResponseException(
+            CanonEosOperationCode.AF_CANCEL, PtpResponseCode.GENERAL_ERROR,
+        )
+        listOf(IllegalStateException(cancelFailure), ShutterReleaseException(cancelFailure)).forEach { unrelated ->
+            assertReleaseFailureAssertionRejected {
+                assertAutofocusCancelFailure(AutofocusReleaseException(unrelated))
+            }
+        }
+        val closedSession = PtpProtocolException("PTP session is not open.")
+        listOf(IllegalStateException(closedSession), ShutterReleaseException(closedSession)).forEach { unrelated ->
+            assertReleaseFailureAssertionRejected {
+                assertAutofocusClosedOriginalSessionFailure(AutofocusReleaseException(unrelated))
+            }
+        }
+    }
+
+    @Test fun autofocusCancelFailureAssertionRejectsNonPtpRoot() {
+        val failure = AutofocusReleaseException(java.io.IOException("Not a PTP autofocus Cancel response"))
+        // A valid response reachable only through suppressed evidence is not the primary cause.
+        failure.addSuppressed(PtpResponseException(CanonEosOperationCode.AF_CANCEL, PtpResponseCode.GENERAL_ERROR))
+        assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(failure) }
+        assertReleaseFailureAssertionRejected { assertAutofocusClosedOriginalSessionFailure(failure) }
+        val wrongRoot = AutofocusReleaseException(IllegalStateException("PTP session is not open."))
+        assertReleaseFailureAssertionRejected { assertAutofocusClosedOriginalSessionFailure(wrongRoot) }
+    }
+
+    @Test fun autofocusCancelFailureAssertionRejectsWrongOperation() {
+        listOf(CanonEosOperationCode.DO_AF, CanonEosOperationCode.REMOTE_RELEASE_OFF).forEach { operation ->
+            val failure = AutofocusReleaseException(PtpResponseException(operation, PtpResponseCode.GENERAL_ERROR))
+            assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(failure) }
+            assertReleaseFailureAssertionRejected { assertAutofocusClosedOriginalSessionFailure(failure) }
+        }
+    }
+
+    @Test fun autofocusCancelFailureAssertionRejectsWrongResponse() {
+        val failure = AutofocusReleaseException(PtpResponseException(
+            CanonEosOperationCode.AF_CANCEL, PtpResponseCode.OK,
+        ))
+        assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(failure) }
+        val wrongMessage = AutofocusReleaseException(PtpProtocolException("Synthetic different protocol failure"))
+        assertReleaseFailureAssertionRejected { assertAutofocusClosedOriginalSessionFailure(wrongMessage) }
+        val responseRoot = AutofocusReleaseException(PtpResponseException(CanonEosOperationCode.AF_CANCEL, PtpResponseCode.GENERAL_ERROR))
+        assertReleaseFailureAssertionRejected { assertAutofocusClosedOriginalSessionFailure(responseRoot) }
+    }
+
+    @Test fun autofocusCancelFailureAssertionRejectsMissingWrongOrExtraSuppressedOriginal() {
+        val original = java.io.IOException("Synthetic original autofocus response lost")
+        fun owner(vararg suppressed: Throwable) = AutofocusReleaseException(PtpResponseException(
+            CanonEosOperationCode.AF_CANCEL, PtpResponseCode.GENERAL_ERROR,
+        )).also { failure -> suppressed.forEach(failure::addSuppressed) }
+
+        assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(owner(), original) }
+        assertReleaseFailureAssertionRejected {
+            assertAutofocusCancelFailure(owner(java.io.IOException(original.message)), original)
+        }
+        // Finding the original below an unrelated suppressed wrapper must not satisfy identity.
+        assertReleaseFailureAssertionRejected {
+            assertAutofocusCancelFailure(owner(java.io.IOException("Unrelated suppressed wrapper", original)), original)
+        }
+        assertReleaseFailureAssertionRejected {
+            assertAutofocusCancelFailure(owner(original, java.io.IOException("Unrelated extra failure")), original)
+        }
+        assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(owner(original)) }
+        assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(owner(original, original), original) }
+        val unrelatedCopy = AutofocusReleaseException(owner(original)).also {
+            it.addSuppressed(java.io.IOException("Unrelated failure on recovery owner"))
+        }
+        assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(unrelatedCopy, original) }
+        val rootSuppressed = owner().also { it.cause!!.addSuppressed(original) }
+        assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(rootSuppressed, original) }
+
+        // A recovery owner may repeat the same original object, never create another original.
+        val copiedOwner = AutofocusReleaseException(owner(original)).also { it.addSuppressed(original) }
+        assertAutofocusCancelFailure(copiedOwner, original)
+        assertAutofocusCancelFailure(AutofocusReleaseException(owner()))
+
+        assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(owner(), expectCancellation = true) }
+        assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(owner(original), expectCancellation = true) }
+        val cancellation = kotlinx.coroutines.CancellationException("Synthetic autofocus cancellation")
+        val otherCancellation = kotlinx.coroutines.CancellationException("Synthetic autofocus cancellation")
+        val twoCancellations = AutofocusReleaseException(owner(cancellation)).also { it.addSuppressed(otherCancellation) }
+        assertReleaseFailureAssertionRejected { assertAutofocusCancelFailure(twoCancellations, expectCancellation = true) }
+        assertReleaseFailureAssertionRejected {
+            assertAutofocusCancelFailure(owner(cancellation, original), expectCancellation = true)
+        }
+        val copiedCancellation = AutofocusReleaseException(owner(cancellation)).also { it.addSuppressed(cancellation) }
+        assertAutofocusCancelFailure(copiedCancellation, expectCancellation = true)
+
+        val closedOwner = AutofocusReleaseException(PtpProtocolException("PTP session is not open."))
+        assertAutofocusClosedOriginalSessionFailure(AutofocusReleaseException(closedOwner))
+        closedOwner.addSuppressed(original)
+        assertReleaseFailureAssertionRejected { assertAutofocusClosedOriginalSessionFailure(closedOwner) }
+        val closedRootSuppressed = AutofocusReleaseException(PtpProtocolException("PTP session is not open.").also {
+            it.addSuppressed(original)
+        })
+        assertReleaseFailureAssertionRejected { assertAutofocusClosedOriginalSessionFailure(closedRootSuppressed) }
+    }
+
+    private fun assertAutofocusCancelFailure(
+        failure: Throwable?,
+        vararg expectedSuppressed: Throwable,
+        expectCancellation: Boolean = false,
+    ): List<Throwable> {
+        assertEquals("The outer failure must own autofocus release", AutofocusReleaseException::class.java, failure?.javaClass)
+        val primaryChain = boundedCauseChain(failure!!)
+        assertTrue("An autofocus release owner must retain its PTP cause", primaryChain.size >= 2)
+        val owners = primaryChain.dropLast(1)
+        // Only exact AF owner recovery copies may wrap the exact failed AF_CANCEL response.
+        // Do not search suppressed causes or accept an unrelated primary wrapper.
+        owners.forEach { owner ->
+            assertEquals("Only typed AF owners may wrap the primary PTP response", AutofocusReleaseException::class.java, owner.javaClass)
+        }
+        val root = primaryChain.last()
+        assertEquals("The primary root must be an exact PTP response failure", PtpResponseException::class.java, root.javaClass)
+        val cancelFailure = root as PtpResponseException
+        assertEquals(CanonEosOperationCode.AF_CANCEL, cancelFailure.operationCode)
+        assertEquals(PtpResponseCode.GENERAL_ERROR, cancelFailure.responseCode)
+        assertTrue("The PTP response root must not contain extra suppressed evidence", root.suppressed.isEmpty())
+
+        assertTrue("These AF cases expect at most one original suppressed failure", expectedSuppressed.size <= 1)
+        assertFalse("Cancellation and explicit-original contracts are mutually exclusive",
+            expectCancellation && expectedSuppressed.isNotEmpty())
+        val originals = mutableListOf<Throwable>()
+        owners.forEach { owner ->
+            // HeldAutofocusSession adds its caught Start/cancellation directly; close adds
+            // its caught shutdown directly. Each owner retains the original empty/single
+            // contract. Recovery copies may repeat only that identical original object.
+            assertTrue("Each AF owner must retain empty or single suppressed evidence", owner.suppressed.size <= 1)
+            owner.suppressed.forEach { original ->
+                if (originals.none { it === original }) originals += original
+            }
+        }
+        if (expectCancellation) {
+            assertEquals("The single original cancellation must survive", 1, originals.size)
+            assertTrue("The original suppressed failure must be cancellation",
+                originals.single() is kotlinx.coroutines.CancellationException)
+        } else {
+            assertEquals("Missing or unrelated original suppressed evidence is forbidden", expectedSuppressed.size, originals.size)
+            expectedSuppressed.forEachIndexed { index, original ->
+                assertSame("The exact original failure must survive directly as suppressed evidence", original, originals[index])
+            }
+        }
+        return primaryChain
+    }
+
+    private fun assertAutofocusClosedOriginalSessionFailure(failure: Throwable?): List<Throwable> {
+        assertEquals("The outer failure must retain the closed original AF owner", AutofocusReleaseException::class.java, failure?.javaClass)
+        val primaryChain = boundedCauseChain(failure!!)
+        assertTrue("The closed AF owner must retain its protocol cause", primaryChain.size >= 2)
+        primaryChain.dropLast(1).forEach { owner ->
+            assertEquals("Only typed AF owners may wrap the closed-session failure", AutofocusReleaseException::class.java, owner.javaClass)
+        }
+        val root = primaryChain.last()
+        assertEquals("The closed original session must fail with the exact protocol type", PtpProtocolException::class.java, root.javaClass)
+        assertEquals("PTP session is not open.", root.message)
+        primaryChain.forEach { node ->
+            assertTrue("A closed-owner retry must not hide extra suppressed evidence", node.suppressed.isEmpty())
+        }
+        return primaryChain
     }
 
     private fun assertRemoteReleaseFailure(
@@ -3902,6 +4081,362 @@ class UsbPtpCameraBackendTest {
         backend.close()
     }
 
+    @Test fun canonDedicatedAutofocusLostStartAndFailedCancelRetainsOriginalStop() = runTest {
+        val rejectedOperations = mutableSetOf(CanonEosOperationCode.AF_CANCEL)
+        val transport = CanonEosScriptedTransport(
+            loseNextAutofocusResponse = true,
+            rejectedAutofocusOperations = rejectedOperations,
+        )
+        var openedOwners = 0
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory {
+            openedOwners += 1
+            transport
+        })
+        backend.initialize()
+
+        val failure = runCatching { backend.autofocus() }.exceptionOrNull()
+
+        assertTrue("USB_AF_LOST_START_OWNER", failure is AutofocusReleaseException)
+        assertAutofocusCancelFailure(failure, transport.autofocusResponseFailure)
+        // This peer applied DO_AF before losing its response. No receive is not a rejection.
+        assertEquals(1, transport.appliedAutofocusStarts.size)
+        assertTrue(transport.acknowledgedAutofocusStarts.isEmpty())
+        assertTrue(transport.acknowledgedAutofocusCancels.isEmpty())
+        assertEquals(listOf(
+            CanonEosOperationCode.DO_AF to emptyList<Long>(),
+            CanonEosOperationCode.AF_CANCEL to emptyList<Long>(),
+        ), transport.dedicatedAutofocusCommands())
+        assertFalse(CameraFeature.AUTOFOCUS in backend.observedFeatures())
+        rejectedOperations.clear()
+        val retryStart = transport.sentContainers.size
+
+        backend.retryAutofocusStop()
+
+        assertEquals(listOf(CanonEosOperationCode.AF_CANCEL to emptyList<Long>()),
+            transport.sentContainers.drop(retryStart).map { it.code to it.parameters() })
+        assertEquals(1, transport.acknowledgedAutofocusCancels.size)
+        assertEquals(1, transport.appliedAutofocusStarts.size)
+        assertEquals(1, openedOwners)
+        assertFalse(CameraFeature.AUTOFOCUS in backend.observedFeatures())
+        val acknowledgedStopCount = transport.sentContainers.size
+        backend.retryAutofocusStop()
+        assertEquals(acknowledgedStopCount, transport.sentContainers.size)
+        backend.close()
+    }
+
+    @Test fun canonDedicatedAutofocusAcknowledgedStartWithFailedCancelBlocksNextStart() = runTest {
+        val rejectedOperations = mutableSetOf(CanonEosOperationCode.AF_CANCEL)
+        val transport = CanonEosScriptedTransport(rejectedAutofocusOperations = rejectedOperations)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+
+        val failure = runCatching { backend.autofocus() }.exceptionOrNull()
+
+        assertTrue("USB_AF_ACK_STOP_OWNER", failure is AutofocusReleaseException)
+        assertAutofocusCancelFailure(failure)
+        assertEquals(transport.appliedAutofocusStarts, transport.acknowledgedAutofocusStarts)
+        assertEquals(1, transport.acknowledgedAutofocusStarts.size)
+        val blockedCommands = transport.dedicatedAutofocusCommands()
+        val blockedStart = runCatching { backend.autofocus() }.exceptionOrNull()
+        assertTrue(blockedStart is IllegalStateException)
+        assertEquals(blockedCommands, transport.dedicatedAutofocusCommands())
+        assertFalse(CameraFeature.AUTOFOCUS in backend.observedFeatures())
+        val failedRetryStart = transport.sentContainers.size
+        assertTrue(runCatching { backend.retryAutofocusStop() }.exceptionOrNull() is AutofocusReleaseException)
+        assertEquals(listOf(CanonEosOperationCode.AF_CANCEL to emptyList<Long>()),
+            transport.sentContainers.drop(failedRetryStart).map { it.code to it.parameters() })
+        rejectedOperations.clear()
+        val retryStart = transport.sentContainers.size
+        backend.retryAutofocusStop()
+        assertEquals(listOf(CanonEosOperationCode.AF_CANCEL to emptyList<Long>()),
+            transport.sentContainers.drop(retryStart).map { it.code to it.parameters() })
+        assertFalse(CameraFeature.AUTOFOCUS in backend.observedFeatures())
+
+        backend.autofocus()
+
+        assertEquals(2, transport.appliedAutofocusStarts.size)
+        assertEquals(transport.appliedAutofocusStarts, transport.acknowledgedAutofocusStarts)
+        assertEquals(2, transport.acknowledgedAutofocusCancels.size)
+        assertTrue(CameraFeature.AUTOFOCUS in backend.observedFeatures())
+        assertTrue(transport.remoteShutterCommands().isEmpty())
+        backend.close()
+    }
+
+    @Test fun canonDedicatedAutofocusCancellationWithFailedCancelRetainsOriginalStop() = runTest {
+        val rejectedOperations = mutableSetOf(CanonEosOperationCode.AF_CANCEL)
+        val transport = CanonEosScriptedTransport(
+            rejectedAutofocusOperations = rejectedOperations,
+            gateNextAutofocusResponse = true,
+            requireActiveAutofocusCancelReceipt = true,
+        )
+        var openedOwners = 0
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory {
+            openedOwners += 1
+            transport
+        })
+        backend.initialize()
+        var failure: Throwable? = null
+        val autofocus = async(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { backend.autofocus() }.also { failure = it.exceptionOrNull() }
+        }
+        transport.autofocusResponseAwaited.await()
+        assertEquals(1, transport.appliedAutofocusStarts.size)
+        assertTrue(transport.acknowledgedAutofocusStarts.isEmpty())
+
+        autofocus.cancelAndJoin()
+
+        assertTrue(autofocus.isCancelled)
+        assertTrue(failure is AutofocusReleaseException)
+        assertAutofocusCancelFailure(failure, expectCancellation = true)
+        assertEquals(listOf(
+            CanonEosOperationCode.DO_AF to emptyList<Long>(),
+            CanonEosOperationCode.AF_CANCEL to emptyList<Long>(),
+        ), transport.dedicatedAutofocusCommands())
+        // The receipt checks ensureActive, so the failed Stop was actually read outside cancellation.
+        assertTrue(transport.acknowledgedAutofocusCancels.isEmpty())
+        rejectedOperations.clear()
+        val retryStart = transport.sentContainers.size
+        backend.retryAutofocusStop()
+        assertEquals(listOf(CanonEosOperationCode.AF_CANCEL to emptyList<Long>()),
+            transport.sentContainers.drop(retryStart).map { it.code to it.parameters() })
+        assertEquals(1, transport.appliedAutofocusStarts.size)
+        assertEquals(1, transport.acknowledgedAutofocusCancels.size)
+        assertEquals(1, openedOwners)
+        assertFalse(CameraFeature.AUTOFOCUS in backend.observedFeatures())
+        backend.close()
+    }
+
+    @Test fun canonDedicatedAutofocusCloseRetriesSavedCancelBeforeOriginalSessionShutdown() = runTest {
+        val rejectedOperations = mutableSetOf(CanonEosOperationCode.AF_CANCEL)
+        val transport = CanonEosScriptedTransport(rejectedAutofocusOperations = rejectedOperations)
+        var openedOwners = 0
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory {
+            openedOwners += 1
+            transport
+        })
+        backend.initialize()
+        assertTrue(runCatching { backend.autofocus() }.exceptionOrNull() is AutofocusReleaseException)
+        rejectedOperations.clear()
+        val closeStart = transport.sentContainers.size
+
+        backend.close()
+
+        val closeCommands = transport.sentContainers.drop(closeStart)
+        assertEquals(listOf(CanonEosOperationCode.AF_CANCEL to emptyList<Long>()),
+            closeCommands.filter { it.code == CanonEosOperationCode.AF_CANCEL }.map { it.code to it.parameters() })
+        assertTrue(closeCommands.none { it.code == CanonEosOperationCode.DO_AF })
+        assertEquals(CanonEosOperationCode.AF_CANCEL, closeCommands.first().code)
+        assertTrue(closeCommands.indexOfFirst { it.code == CanonEosOperationCode.AF_CANCEL } <
+            closeCommands.indexOfFirst { it.code == PtpOperationCode.CLOSE_SESSION })
+        assertEquals(1, transport.appliedAutofocusStarts.size)
+        assertEquals(1, transport.acknowledgedAutofocusCancels.size)
+        assertEquals(1, openedOwners)
+        assertTrue(transport.closed)
+        val closedCommandCount = transport.sentContainers.size
+        backend.retryAutofocusStop()
+        assertEquals(closedCommandCount, transport.sentContainers.size)
+    }
+
+    @Test fun canonDedicatedAutofocusFailedClosePreservesTypedStopAndNeverRebindsReplacement() = runTest {
+        val shutdownFailure = java.io.IOException("Synthetic autofocus owner shutdown failed")
+        val transportA = CanonEosScriptedTransport(
+            rejectedAutofocusOperations = mutableSetOf(CanonEosOperationCode.AF_CANCEL),
+            closeFailure = shutdownFailure,
+        )
+        val transportB = CanonEosScriptedTransport()
+        var openedOwners = 0
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory {
+            openedOwners += 1
+            when (openedOwners) {
+                1 -> transportA
+                2 -> transportB
+                else -> error("Unexpected synthetic autofocus owner")
+            }
+        })
+        backend.initialize()
+        assertTrue(runCatching { backend.autofocus() }.exceptionOrNull() is AutofocusReleaseException)
+        val closeStart = transportA.sentContainers.size
+
+        val closeFailure = runCatching { backend.close() }.exceptionOrNull()
+
+        assertTrue(closeFailure is AutofocusReleaseException)
+        val releaseFailure = closeFailure as AutofocusReleaseException
+        assertAutofocusCancelFailure(releaseFailure, shutdownFailure)
+        assertEquals(setOf(PreviousConnectionSafetyWarning.SHUTTER), previousConnectionSafetyWarnings(releaseFailure))
+        val closeCommands = transportA.sentContainers.drop(closeStart)
+        assertEquals(1, closeCommands.count { it.code == CanonEosOperationCode.AF_CANCEL })
+        assertTrue(closeCommands.none { it.code == CanonEosOperationCode.DO_AF })
+        assertTrue(closeCommands.indexOfFirst { it.code == CanonEosOperationCode.AF_CANCEL } <
+            closeCommands.indexOfFirst { it.code == PtpOperationCode.CLOSE_SESSION })
+        assertTrue(transportA.closed)
+        assertEquals(1, openedOwners)
+
+        // Deliberately exercise the backend below the repository's replacement guard: the
+        // captured, now-closed PtpSession must not redirect its saved Stop to a mutable B.
+        backend.initialize()
+        val originalClosedCount = transportA.sentContainers.size
+        val replacementCount = transportB.sentContainers.size
+        val retryFailure = runCatching { backend.retryAutofocusStop() }.exceptionOrNull()
+        assertTrue(retryFailure is AutofocusReleaseException)
+        assertAutofocusClosedOriginalSessionFailure(retryFailure)
+        assertEquals(originalClosedCount, transportA.sentContainers.size)
+        assertEquals(replacementCount, transportB.sentContainers.size)
+        assertTrue(transportB.dedicatedAutofocusCommands().isEmpty())
+        assertEquals(2, openedOwners)
+        assertTrue(runCatching { backend.close() }.exceptionOrNull() is AutofocusReleaseException)
+        assertTrue(transportB.dedicatedAutofocusCommands().isEmpty())
+        assertTrue(transportB.closed)
+    }
+
+    @Test fun canonDedicatedAutofocusFailedRetirementBlocksReplacementBackend() = runTest {
+        val transportA = CanonEosScriptedTransport(
+            loseNextAutofocusResponse = true,
+            rejectedAutofocusOperations = mutableSetOf(CanonEosOperationCode.AF_CANCEL),
+        )
+        val transportB = CanonEosScriptedTransport()
+        val openedDevices = mutableListOf<String?>()
+        val repository = CameraRepository(CameraBackendFactory(ptpTransportFactory = PtpTransportFactory { connection ->
+            openedDevices += connection.deviceName
+            when (connection.deviceName) {
+                "synthetic-usb-A" -> transportA
+                "synthetic-usb-B" -> transportB
+                else -> error("Unexpected synthetic autofocus owner")
+            }
+        }))
+        repository.connectUsb("synthetic-usb-A", CANON_USB_VENDOR_ID, 0x1234, startLiveView = false)
+        val autofocusFailure = runCatching { repository.autofocus() }.exceptionOrNull()
+        assertTrue(autofocusFailure != null)
+        val backendField = CameraRepository::class.java.getDeclaredField("backend").apply { isAccessible = true }
+        val originalBackend = backendField.get(repository)
+        val retirementStart = transportA.sentContainers.size
+
+        val replacementFailure = runCatching {
+            repository.connectUsb("synthetic-usb-B", CANON_USB_VENDOR_ID, 0x1235, startLiveView = false)
+        }.exceptionOrNull()
+
+        assertTrue("USB_AF_RETIREMENT_BLOCKS_REPLACEMENT", replacementFailure is ConnectionRetirementBlockedException)
+        assertTrue(autofocusFailure is AutofocusReleaseException)
+        assertTrue(repository.connectionRetirementRevision > 0L)
+        assertEquals(setOf(PreviousConnectionSafetyWarning.SHUTTER), repository.connectionRetirementSafetyWarnings)
+        assertSame(originalBackend, backendField.get(repository))
+        assertEquals(listOf("synthetic-usb-A"), openedDevices)
+        assertTrue(transportB.sentContainers.isEmpty())
+        assertTrue(transportA.closed)
+        val retirementCommands = transportA.sentContainers.drop(retirementStart)
+        // The repository's best-effort retry cannot hide close's still-failing original Stop.
+        assertEquals(listOf(
+            CanonEosOperationCode.AF_CANCEL to emptyList<Long>(),
+            CanonEosOperationCode.AF_CANCEL to emptyList<Long>(),
+        ), retirementCommands.filter { it.code == CanonEosOperationCode.AF_CANCEL }.map { it.code to it.parameters() })
+        assertTrue(retirementCommands.none { it.code == CanonEosOperationCode.DO_AF })
+        assertTrue(retirementCommands.indexOfLast { it.code == CanonEosOperationCode.AF_CANCEL } <
+            retirementCommands.indexOfFirst { it.code == PtpOperationCode.CLOSE_SESSION })
+        val retainedRevision = repository.connectionRetirementRevision
+        val retiredCommandCount = transportA.sentContainers.size
+        assertTrue(runCatching {
+            repository.connectUsb("synthetic-usb-B", CANON_USB_VENDOR_ID, 0x1235, startLiveView = false)
+        }.exceptionOrNull() is ConnectionRetirementBlockedException)
+        assertEquals(retainedRevision, repository.connectionRetirementRevision)
+        assertEquals(retiredCommandCount, transportA.sentContainers.size)
+        assertSame(originalBackend, backendField.get(repository))
+        assertEquals(listOf("synthetic-usb-A"), openedDevices)
+        assertTrue(transportB.sentContainers.isEmpty())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun canonDedicatedAutofocusViewModelFailedStopKeepsFocusBusyUntilRetry() = runTest {
+        val rejectedOperations = mutableSetOf(CanonEosOperationCode.AF_CANCEL)
+        val transport = CanonEosScriptedTransport(
+            advertiseMediaBrowser = true,
+            loseNextAutofocusResponse = true,
+            rejectedAutofocusOperations = rejectedOperations,
+        )
+        withUsbReleaseViewModel(transport) { viewModel, repository, openedDevices ->
+            val states = mutableListOf<CameraUiState>()
+            val observer = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                viewModel.uiState.collect { states += it }
+            }
+            try {
+                viewModel.autofocus()
+                testScheduler.runCurrent()
+
+                val failed = viewModel.uiState.value
+                assertEquals("USB_AF_VM_RELEASE_FAILED", AutofocusHoldState.RELEASE_FAILED, failed.autofocusHoldState)
+                assertTrue(failed.connected)
+                assertTrue(failed.isBusy(CameraOperation.FOCUS))
+                assertTrue(CameraOperation.FOCUS in failed.pendingOperations)
+                assertEquals(CameraOperation.FOCUS, failed.errorOperation)
+                // Stopped-preview reconciliation clears presentation, not saved Stop ownership.
+                assertTrue(states.any { it.focusFeedback == FocusFeedback.FAILURE })
+                assertNull(failed.focusFeedback)
+                assertEquals(1, transport.appliedAutofocusStarts.size)
+                assertTrue(transport.acknowledgedAutofocusStarts.isEmpty())
+                assertTrue(transport.acknowledgedAutofocusCancels.isEmpty())
+                assertFalse(CameraFeature.AUTOFOCUS in repository.observedFeatures())
+                val blockedCommands = transport.dedicatedAutofocusCommands()
+                viewModel.autofocus()
+                testScheduler.runCurrent()
+                assertEquals(blockedCommands, transport.dedicatedAutofocusCommands())
+                rejectedOperations.clear()
+                val retryStart = transport.dedicatedAutofocusCommands().size
+
+                viewModel.retryHeldAutofocusStop()
+                testScheduler.runCurrent()
+
+                assertEquals(listOf(CanonEosOperationCode.AF_CANCEL to emptyList<Long>()),
+                    transport.dedicatedAutofocusCommands().drop(retryStart))
+                val recovered = viewModel.uiState.value
+                assertEquals(AutofocusHoldState.IDLE, recovered.autofocusHoldState)
+                assertFalse(recovered.isBusy(CameraOperation.FOCUS))
+                assertFalse(CameraOperation.FOCUS in recovered.pendingOperations)
+                assertNull(recovered.error)
+                assertNull(recovered.errorOperation)
+                assertNull(recovered.focusFeedback)
+                assertEquals(1, transport.appliedAutofocusStarts.size)
+                assertEquals(1, transport.acknowledgedAutofocusCancels.size)
+                assertEquals(listOf("synthetic-usb-A"), openedDevices)
+                assertFalse(CameraFeature.AUTOFOCUS in repository.observedFeatures())
+                assertTrue(states.none { it.focusFeedback in setOf(FocusFeedback.ACCEPTED, FocusFeedback.SUCCESS) })
+                val acknowledgedCommands = transport.dedicatedAutofocusCommands()
+                viewModel.retryHeldAutofocusStop()
+                testScheduler.runCurrent()
+                assertEquals(acknowledgedCommands, transport.dedicatedAutofocusCommands())
+            } finally {
+                observer.cancel()
+            }
+        }
+    }
+
+    @Test fun canonDedicatedAutofocusLostStartWithAcknowledgedCancelDoesNotRetainStop() = runTest {
+        val transport = CanonEosScriptedTransport(loseNextAutofocusResponse = true)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+
+        val failure = runCatching { backend.autofocus() }.exceptionOrNull()
+
+        assertSame(transport.autofocusResponseFailure, failure)
+        assertFalse(failure is PtpResponseException)
+        assertTrue(failure?.suppressed?.isEmpty() == true)
+        assertEquals(1, transport.appliedAutofocusStarts.size)
+        assertTrue(transport.acknowledgedAutofocusStarts.isEmpty())
+        assertEquals(1, transport.acknowledgedAutofocusCancels.size)
+        assertFalse(CameraFeature.AUTOFOCUS in backend.observedFeatures())
+        val stoppedCommandCount = transport.sentContainers.size
+        backend.retryAutofocusStop()
+        assertEquals(stoppedCommandCount, transport.sentContainers.size)
+
+        backend.autofocus()
+
+        assertEquals(2, transport.appliedAutofocusStarts.size)
+        assertEquals(listOf(transport.appliedAutofocusStarts.last()), transport.acknowledgedAutofocusStarts)
+        assertEquals(2, transport.acknowledgedAutofocusCancels.size)
+        assertTrue(CameraFeature.AUTOFOCUS in backend.observedFeatures())
+        assertTrue(transport.remoteShutterCommands().isEmpty())
+        val autofocusCommands = transport.dedicatedAutofocusCommands()
+        backend.close()
+        assertEquals(autofocusCommands, transport.dedicatedAutofocusCommands())
+    }
+
     @Test
     fun canonTouchAutofocusMapsNormalizedPointToAdvertisedSensorGeometry() = runTest {
         val transport = CanonEosScriptedTransport(
@@ -4465,6 +5000,10 @@ class UsbPtpCameraBackendTest {
         private var gateNextHalfRemotePressResponse: Boolean = false,
         private val advertiseMediaBrowser: Boolean = false,
         private val closeFailure: Throwable? = null,
+        private var loseNextAutofocusResponse: Boolean = false,
+        private val rejectedAutofocusOperations: MutableSet<Int> = mutableSetOf(),
+        private var gateNextAutofocusResponse: Boolean = false,
+        private val requireActiveAutofocusCancelReceipt: Boolean = false,
     ) : PtpTransport {
         private val incoming = ArrayDeque<PtpContainer>()
         private val pendingScriptedEvents = ArrayDeque(scriptedEvents)
@@ -4487,6 +5026,16 @@ class UsbPtpCameraBackendTest {
         private var gateNextStorageIdsResponse = false
         fun gateNextStorageIdsRead() { gateNextStorageIdsResponse = true }
         private var pendingRemoteReleaseReceipt: Pair<Long, Long>? = null
+        // A synthetic applied AF command with a missing receive is not definitive rejection.
+        val autofocusResponseFailure = java.io.IOException("Synthetic autofocus response lost after application")
+        val appliedAutofocusStarts = mutableListOf<Long>()
+        val acknowledgedAutofocusStarts = mutableListOf<Long>()
+        val acknowledgedAutofocusCancels = mutableListOf<Long>()
+        val autofocusResponseAwaited = CompletableDeferred<Unit>()
+        private var pendingAutofocusReceiveFailure: java.io.IOException? = null
+        private var pendingAutofocusResponseGate: CompletableDeferred<Unit>? = null
+        private var pendingAutofocusStartReceipt: Long? = null
+        private var pendingAutofocusCancelReceipt: Long? = null
         private var initialPropertyEventsPending = true
         var suppressRecordingReads = false
         private var recordingReadGate: CompletableDeferred<Unit>? = null
@@ -4540,8 +5089,6 @@ class UsbPtpCameraBackendTest {
                 CanonEosOperationCode.SET_EVENT_MODE,
                 CanonEosOperationCode.DRIVE_LENS,
                 CanonEosOperationCode.ZOOM,
-                CanonEosOperationCode.DO_AF,
-                CanonEosOperationCode.AF_CANCEL,
                 CanonEosOperationCode.TOUCH_AF_POSITION,
                 CanonEosOperationCode.CLICK_WHITE_BALANCE,
                 CanonEosOperationCode.TRANSFER_COMPLETE,
@@ -4550,6 +5097,31 @@ class UsbPtpCameraBackendTest {
                     response(PtpResponseCode.GENERAL_ERROR, transaction)
                 } else {
                     ok(transaction)
+                }
+
+                CanonEosOperationCode.DO_AF -> {
+                    val rejected = container.code == rejectOperationCode || container.code in rejectedAutofocusOperations
+                    if (!rejected) appliedAutofocusStarts += transaction
+                    when {
+                        !rejected && loseNextAutofocusResponse -> {
+                            loseNextAutofocusResponse = false
+                            pendingAutofocusReceiveFailure = autofocusResponseFailure
+                        }
+                        !rejected && gateNextAutofocusResponse -> {
+                            gateNextAutofocusResponse = false
+                            pendingAutofocusResponseGate = CompletableDeferred()
+                        }
+                        else -> {
+                            incoming += if (rejected) response(PtpResponseCode.GENERAL_ERROR, transaction) else ok(transaction)
+                            pendingAutofocusStartReceipt = transaction
+                        }
+                    }
+                }
+
+                CanonEosOperationCode.AF_CANCEL -> {
+                    val rejected = container.code == rejectOperationCode || container.code in rejectedAutofocusOperations
+                    incoming += if (rejected) response(PtpResponseCode.GENERAL_ERROR, transaction) else ok(transaction)
+                    pendingAutofocusCancelReceipt = transaction
                 }
 
                 CanonEosOperationCode.MOVIE_SELECT_SWITCH_ON,
@@ -4796,6 +5368,16 @@ class UsbPtpCameraBackendTest {
         }
 
         override suspend fun receive(maxPayloadBytes: Int): PtpContainer {
+            pendingAutofocusReceiveFailure?.let { failure ->
+                pendingAutofocusReceiveFailure = null
+                throw failure
+            }
+            pendingAutofocusResponseGate?.let { gate ->
+                // Consume before suspension so cancellation cannot replay this gate on Cancel.
+                pendingAutofocusResponseGate = null
+                autofocusResponseAwaited.complete(Unit)
+                gate.await()
+            }
             pendingRemotePressReceiveFailure?.let { failure ->
                 pendingRemotePressReceiveFailure = null
                 throw failure
@@ -4817,6 +5399,19 @@ class UsbPtpCameraBackendTest {
                 gate.await()
             }
             val reply = incoming.removeFirstOrNull() ?: error("No Canon EOS scripted response is queued.")
+            pendingAutofocusStartReceipt?.let { transaction ->
+                if (reply.type == PtpContainerType.RESPONSE && reply.transactionId == transaction) {
+                    pendingAutofocusStartReceipt = null
+                    if (reply.code == PtpResponseCode.OK) acknowledgedAutofocusStarts += transaction
+                }
+            }
+            pendingAutofocusCancelReceipt?.let { transaction ->
+                if (reply.type == PtpContainerType.RESPONSE && reply.transactionId == transaction) {
+                    pendingAutofocusCancelReceipt = null
+                    if (requireActiveAutofocusCancelReceipt) kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    if (reply.code == PtpResponseCode.OK) acknowledgedAutofocusCancels += transaction
+                }
+            }
             pendingRemoteReleaseReceipt?.let { (transaction, stage) ->
                 if (reply.type == PtpContainerType.RESPONSE && reply.transactionId == transaction) {
                     pendingRemoteReleaseReceipt = null
@@ -4834,6 +5429,11 @@ class UsbPtpCameraBackendTest {
         fun remoteShutterCommands(): List<Pair<Int, List<Long>>> = sentContainers.filter {
             it.type == PtpContainerType.COMMAND &&
                 it.code in setOf(CanonEosOperationCode.REMOTE_RELEASE_ON, CanonEosOperationCode.REMOTE_RELEASE_OFF)
+        }.map { it.code to it.parameters() }
+
+        fun dedicatedAutofocusCommands(): List<Pair<Int, List<Long>>> = sentContainers.filter {
+            it.type == PtpContainerType.COMMAND &&
+                it.code in setOf(CanonEosOperationCode.DO_AF, CanonEosOperationCode.AF_CANCEL)
         }.map { it.code to it.parameters() }
 
         override fun close() {
