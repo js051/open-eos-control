@@ -1329,6 +1329,11 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 guard let value = current[field] as? String, let values = ability[field] as? [String] else { return nil }
                 normalized = ["value": value, "ability": values]
             }
+        } else if Self.cardSelectionSettingKeys.contains(key) {
+            // Scoped preflight/readback must retain discovery's card-token
+            // contract; generic string abilities cannot widen that authority.
+            guard let setting = Self.validatedCardSelectionSetting(object) else { return nil }
+            normalized = setting
         } else if key == Self.movieModeSettingKey {
             guard let value = object["status"] as? String ?? object["value"] as? String,
                   Self.movieModeValues.contains(value) else { return nil }

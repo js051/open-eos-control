@@ -58,6 +58,9 @@ class UsbPtpCameraBackend(
     private var advertisedStorageTargets: Map<String, Long> = emptyMap()
     private var bulbExposureActive = false
     private var bulbHostTransferPrepared = false
+    // Canon remote-release intents own their original OFF before any ON can reach the camera.
+    // A missing response is not proof that the press did not take effect.
+    private val canonShutter = ShutterReleaseSession()
     private val recordingSequence = java.util.concurrent.atomic.AtomicLong()
     @Volatile private var recordingEventObservation: RecordingObservation? = null
     private var recordingStopOwned = false
@@ -105,8 +108,16 @@ class UsbPtpCameraBackend(
             observedFeatures.clear()
         }
         val current = session
+        // Keep a failed release as the primary retirement error even though the USB
+        // resources below must still close. Never replace the saved stop with a new session.
+        val shutterReleaseFailure = if (bulbExposureActive && !canonShutter.releaseUnconfirmed) {
+            // Preserve normal acknowledged-Bulb host transfer, but never retry OFF twice.
+            // A read failure after confirmed release is not an unconfirmed shutter release.
+            runCatching { stopBulbExposure() }.exceptionOrNull()?.takeIf { canonShutter.hasPendingRelease }
+        } else {
+            runCatching { retryShutterRelease() }.exceptionOrNull()
+        }
         if (current != null) {
-            if (bulbExposureActive) runCatching { stopBulbExposure() }
             runCatching { stopLiveView() }
             if (canonRemotePrepared) {
                 runCatching {
@@ -147,7 +158,13 @@ class UsbPtpCameraBackend(
             // Cleanup may observe its own features; never clear a replacement session's set.
             if (mediaFolderContext == null) observedFeatures.clear()
         }
-        if (strictConnectionAttempt) current?.shutdownConnectionAttempt() else current?.shutdown()
+        try {
+            if (strictConnectionAttempt) current?.shutdownConnectionAttempt() else current?.shutdown()
+        } catch (shutdownFailure: Throwable) {
+            if (shutterReleaseFailure == null) throw shutdownFailure
+            shutterReleaseFailure.addSuppressed(shutdownFailure)
+        }
+        shutterReleaseFailure?.let { throw it }
     }
 
     override suspend fun info(): CameraInfo {
@@ -221,6 +238,7 @@ class UsbPtpCameraBackend(
             rawStorageJson = storageError?.let(::storageErrorJson) ?: storageSnapshot.toStorageJson(),
             rawTransportJson = ptpTransportJson(info),
             bulbExposureActive = bulbExposureActive,
+            shutterReleaseUnconfirmed = true.takeIf { canonShutter.releaseUnconfirmed },
             lens = lensName?.let { LensStatus(mounted = it.isNotBlank(), name = it) },
         )
     }
@@ -581,6 +599,7 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun captureStill(): CameraStatus {
+        requireCanonShutterReleased()
         val info = requireDeviceInfo()
         if (!CanonEosPtp.supportsRemoteRelease(info) && info.supports(PtpOperationCode.INITIATE_CAPTURE)) {
             requireSession().initiateCapture()
@@ -594,43 +613,68 @@ class UsbPtpCameraBackend(
         canonEventMutex.withLock {
             drainCanonEventsLocked()
             val hostTransferPrepared = prepareCanonCaptureDestination()
-            ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
-            try {
+            canonShutter.pressAndRelease(start = {
+                ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
                 ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(2L, 0L))
-                try {
-                    Unit
-                } finally {
-                    ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(2L))
-                }
-            } finally {
-                ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
-            }
+            }, stop = { releaseCanonShutter(ptp) })
             awaitCanonCapturedObjectLocked(hostTransferPrepared)
         }
         observedFeatures.add(CameraFeature.STILL_CAPTURE)
         return status()
     }
 
+    /** Explicit recovery only releases the session captured by the original intent. */
+    override suspend fun retryShutterRelease() {
+        canonShutter.retryRelease()
+        // Release ACK and later object/status reads are separate outcomes.
+        bulbExposureActive = false
+        bulbHostTransferPrepared = false
+    }
+
+    private fun requireCanonShutterReleased() {
+        if (canonShutter.hasPendingRelease) {
+            throw ShutterReleaseException(IllegalStateException("Release the previous USB shutter before another press."))
+        }
+    }
+
+    private suspend fun releaseCanonShutter(owner: PtpSession) {
+        var failure: Throwable? = null
+        for (stage in listOf(2L, 1L)) {
+            try {
+                owner.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(stage))
+            } catch (releaseFailure: Throwable) {
+                if (failure == null) failure = releaseFailure else failure.addSuppressed(releaseFailure)
+            }
+        }
+        failure?.let { throw it }
+    }
+
     override suspend fun halfPressShutter(): CameraStatus {
+        requireCanonShutterReleased()
         if (!CanonEosPtp.supportsRemoteRelease(requireDeviceInfo())) {
             unsupported<Unit>(CameraFeature.SHUTTER_HALF_PRESS)
         }
         ensureCanonRemoteMode()
-        drainCanonEvents()
         val ptp = requireSession()
-        ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
-        try {
-            drainCanonEvents()
-        } finally {
-            ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
+        // Match still/Bulb lock order: event owner first, then saved shutter release.
+        canonEventMutex.withLock {
+            drainCanonEventsLocked()
+            canonShutter.pressAndRelease(start = {
+                ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
+                drainCanonEventsLocked()
+            }, stop = {
+                ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
+            })
+            drainCanonEventsLocked()
         }
-        drainCanonEvents()
         observedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS)
         return status()
     }
 
     override suspend fun startBulbExposure(): CameraStatus {
+        if (canonShutter.releaseUnconfirmed) requireCanonShutterReleased()
         if (bulbExposureActive) return status()
+        requireCanonShutterReleased()
         if (!CanonEosPtp.supportsRemoteRelease(requireDeviceInfo())) {
             unsupported<Unit>(CameraFeature.BULB_EXPOSURE)
         }
@@ -640,19 +684,11 @@ class UsbPtpCameraBackend(
         val hostTransferPrepared = canonEventMutex.withLock {
             drainCanonEventsLocked()
             val prepared = prepareCanonCaptureDestination()
-            try {
+            // The saved release owns this exact PtpSession even if an ON response is lost.
+            canonShutter.start(start = {
                 ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
                 ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(2L, 0L))
-            } catch (exception: Throwable) {
-                withContext(NonCancellable) {
-                    listOf(2L, 1L).forEach { stage ->
-                        runCatching { ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(stage)) }
-                            .exceptionOrNull()
-                            ?.let(exception::addSuppressed)
-                    }
-                }
-                throw exception
-            }
+            }, stop = { releaseCanonShutter(ptp) })
             prepared
         }
         bulbHostTransferPrepared = hostTransferPrepared
@@ -661,33 +697,15 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun stopBulbExposure(): CameraStatus {
+        if (canonShutter.releaseUnconfirmed) {
+            // An unresolved Start/Stop is recovery, not an acknowledged capture result.
+            retryShutterRelease()
+            return status()
+        }
         if (!bulbExposureActive) return status()
-        val ptp = requireSession()
         canonEventMutex.withLock {
-            var primaryFailure: Throwable? = null
-            try {
-                withContext(NonCancellable) {
-                    ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(2L))
-                }
-            } catch (exception: Throwable) {
-                primaryFailure = exception
-            } finally {
-                try {
-                    withContext(NonCancellable) {
-                        ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
-                    }
-                } catch (releaseFailure: Throwable) {
-                    if (primaryFailure != null) {
-                        primaryFailure.addSuppressed(releaseFailure)
-                    } else {
-                        primaryFailure = releaseFailure
-                    }
-                }
-            }
-            primaryFailure?.let { throw it }
-            bulbExposureActive = false
             val hostTransferPrepared = bulbHostTransferPrepared
-            bulbHostTransferPrepared = false
+            retryShutterRelease()
             awaitCanonCapturedObjectLocked(hostTransferPrepared)
         }
         observedFeatures.add(CameraFeature.BULB_EXPOSURE)

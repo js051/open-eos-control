@@ -1102,7 +1102,7 @@ class CcapiClient(
 
     private suspend fun freshShootingSetting(request: ShootingSettingRequest, route: ShootingSettingRoute?): CameraSettingControl {
         val key = request.key
-        val body = if (isRealCamera) {
+        val rawBody = if (isRealCamera) {
             val frozen = requireNotNull(route)
             val response = getJson(frozen.readPath, strictMediaJsonLimit = 65_536, fresh = true, shootingRead = true)
             if (frozen.aggregateKey == null) response else requireNotNull(response.optJSONObject(frozen.aggregateKey))
@@ -1114,6 +1114,11 @@ class CcapiClient(
                 JSONObject().put("value", exposure.opt(field)).put("ability", capabilities.optJSONArray(field))
             } else requireNotNull(capabilities.optJSONObject(key))
         }
+        // Scoped preflight/readback must retain discovery's exact card-token
+        // contract rather than accepting a wider generic string ability.
+        val body = if (key in CARD_SELECTION_SETTING_KEYS) {
+            requireNotNull(rawBody.toValidatedCardSelectionSetting()) { "The camera returned an invalid card selection setting." }
+        } else rawBody
         val structured = key.splitStructuredSettingKey()
         val integer = key == ZOOM_SETTING_KEY || key in SOUND_RECORDING_LEVEL_SETTING_KEYS ||
             key in FOCUS_BRACKETING_INTEGER_SETTING_KEYS || structured?.first == WB_SHIFT_SETTING_KEY

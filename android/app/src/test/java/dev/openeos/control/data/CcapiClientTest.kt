@@ -8,13 +8,19 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
+import okhttp3.Call
 import okhttp3.Credentials
+import okhttp3.EventListener
+import okhttp3.Response
 import okhttp3.OkHttpClient
 import okio.Buffer
 import org.json.JSONObject
@@ -37,6 +43,9 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 class CcapiClientTest {
     private lateinit var server: MockWebServer
@@ -3975,13 +3984,241 @@ class CcapiClientTest {
 
         client.initialize()
         server.takeRequest()
-        val job = launch(Dispatchers.Default) { client.halfPressShutter() }
-        val press = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
-        job.cancelAndJoin()
-        val release = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        // A cancelled synchronous call may retain its IOException as the primary failure.
+        // Observe it on this test thread rather than letting a failed launch cancel runBlocking.
+        val outcome = CompletableDeferred<Throwable?>()
+        val job = launch(Dispatchers.Default) {
+            outcome.complete(runCatching { client.halfPressShutter() }.exceptionOrNull())
+        }
+        var testFailure: Throwable? = null
+        try {
+            val press = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            job.cancelAndJoin()
+            val release = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
 
-        assertEquals("half_press", JSONObject(press.body.readUtf8()).getString("action"))
-        assertEquals("release", JSONObject(release.body.readUtf8()).getString("action"))
+            assertEquals("half_press", JSONObject(press.body.readUtf8()).getString("action"))
+            assertEquals("release", JSONObject(release.body.readUtf8()).getString("action"))
+            assertEquals(3, server.requestCount)
+            assertTrue(job.isCancelled)
+            assertTrue(job.isCompleted)
+            assertFalse(job.isActive)
+            assertFalse(job.children.any())
+            assertHalfPressCancellationOutcome(outcome.await())
+        } catch (failure: Throwable) {
+            testFailure = failure
+            throw failure
+        } finally {
+            withContext(NonCancellable) {
+                job.cancelAndJoin()
+                preserveHalfPressCancellationFailures(outcome, testFailure)
+            }
+        }
+    }
+
+    @Test
+    fun cancellingHalfPressBeforeResponseHeadersJoinsMatchingRelease() = runBlocking {
+        assertHalfPressCancellationBoundary(completePressHttpResponse = false)
+    }
+
+    @Test
+    fun cancellingHalfPressAfterCompleteHttpResponseJoinsMatchingRelease() = runBlocking {
+        assertHalfPressCancellationBoundary(completePressHttpResponse = true)
+    }
+
+    private fun assertHalfPressCancellationOutcome(failure: Throwable?) {
+        // In particular, never turn an unconfirmed release into cancellation success.
+        if (failure is AutofocusReleaseException) throw failure
+        if (failure != null && failure !is CancellationException && failure !is IOException) throw failure
+        assertTrue("Expected cancellation or the cancelled synchronous call's IOException, got $failure",
+            failure is CancellationException || failure is IOException)
+    }
+
+    private suspend fun preserveHalfPressCancellationFailures(
+        outcome: CompletableDeferred<Throwable?>,
+        testFailure: Throwable?,
+        fixtureFailure: Throwable? = null,
+    ) {
+        val observed = if (outcome.isCompleted) outcome.await() else null
+        val unexpected = observed?.takeUnless { it is CancellationException || it is IOException }
+        val primary = testFailure ?: unexpected ?: fixtureFailure ?: return
+        if (unexpected != null && unexpected !== primary) primary.addSuppressed(unexpected)
+        if (fixtureFailure != null && fixtureFailure !== primary) primary.addSuppressed(fixtureFailure)
+        if (testFailure == null) throw primary
+    }
+
+    private suspend fun assertHalfPressCancellationBoundary(completePressHttpResponse: Boolean) = coroutineScope {
+        val controlPath = "/ccapi/ver110/shooting/control/shutterbutton/manual"
+        val pressReceived = CountDownLatch(1)
+        val pressResponseComplete = CountDownLatch(1)
+        val allowPressCallbackReturn = CountDownLatch(1)
+        val pressCallbackExited = CountDownLatch(if (completePressHttpResponse) 1 else 0)
+        val pressCallCancelled = CountDownLatch(1)
+        val releaseReceived = CountDownLatch(1)
+        val allowReleaseResponse = CountDownLatch(1)
+        val releaseDispatcherExited = CountDownLatch(1)
+        val releaseResponseComplete = CountDownLatch(1)
+        val controlCalls = AtomicInteger()
+        val pressResponseCode = AtomicInteger(-1)
+        val pressResponseBytes = AtomicLong(-1)
+        val releaseResponseCode = AtomicInteger(-1)
+        val releaseResponseBytes = AtomicLong(-1)
+        val fixtureFailure = AtomicReference<Throwable?>()
+
+        fun awaitFixtureGate(gate: CountDownLatch, label: String) {
+            try {
+                if (!gate.await(2, TimeUnit.SECONDS)) {
+                    fixtureFailure.compareAndSet(null, AssertionError("Timed out waiting for $label"))
+                }
+            } catch (failure: Throwable) {
+                fixtureFailure.compareAndSet(null, failure)
+                if (failure is InterruptedException) Thread.currentThread().interrupt()
+            }
+        }
+
+        val http = OkHttpClient.Builder().eventListenerFactory { call ->
+            if (call.request().url.encodedPath != controlPath) {
+                EventListener.NONE
+            } else {
+                val ordinal = controlCalls.incrementAndGet()
+                object : EventListener() {
+                    override fun canceled(call: Call) {
+                        if (ordinal == 1) pressCallCancelled.countDown()
+                    }
+
+                    override fun responseHeadersEnd(call: Call, response: Response) {
+                        if (ordinal == 1) pressResponseCode.set(response.code)
+                        if (ordinal == 2) releaseResponseCode.set(response.code)
+                    }
+
+                    override fun responseBodyEnd(call: Call, byteCount: Long) {
+                        if (ordinal == 1) {
+                            pressResponseBytes.set(byteCount)
+                            // For HTTP 204, headers plus the zero-byte body are the complete
+                            // HTTP response, not a physical-camera or business acknowledgement.
+                            pressResponseComplete.countDown()
+                            if (completePressHttpResponse) {
+                                try {
+                                    awaitFixtureGate(allowPressCallbackReturn, "press response callback return")
+                                } finally {
+                                    pressCallbackExited.countDown()
+                                }
+                            }
+                        } else if (ordinal == 2) {
+                            releaseResponseBytes.set(byteCount)
+                            releaseResponseComplete.countDown()
+                        }
+                    }
+                }
+            }
+        }.build()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse = try {
+                when {
+                    request.path == "/ccapi" -> jsonResponse(
+                        """{"ver110":[{"path":"/shooting/control/shutterbutton/manual","put":true}]}""",
+                    )
+                    request.path == controlPath -> when (JSONObject(request.body.clone().readUtf8()).getString("action")) {
+                        "half_press" -> {
+                            pressReceived.countDown()
+                            if (completePressHttpResponse) MockResponse().setResponseCode(204)
+                            else MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
+                        }
+                        "release" -> {
+                            releaseReceived.countDown()
+                            try {
+                                awaitFixtureGate(allowReleaseResponse, "matching release response")
+                                MockResponse().setResponseCode(204)
+                            } finally {
+                                releaseDispatcherExited.countDown()
+                            }
+                        }
+                        else -> throw AssertionError("Unexpected control action: $request")
+                    }
+                    else -> throw AssertionError("Unexpected request: $request")
+                }
+            } catch (failure: Throwable) {
+                // MockWebServer/EventListener failures must be rethrown on the test thread.
+                fixtureFailure.compareAndSet(null, failure)
+                MockResponse().setResponseCode(500)
+            }
+        }
+        client = CcapiClient(server.url("/").toString(), httpClient = http, treatAsSimulator = false)
+        val outcome = CompletableDeferred<Throwable?>()
+        val job = launch(Dispatchers.Default, start = CoroutineStart.LAZY) {
+            outcome.complete(runCatching { client.halfPressShutter() }.exceptionOrNull())
+        }
+        var testFailure: Throwable? = null
+        try {
+            client.initialize()
+            assertEquals("/ccapi", requireNotNull(server.takeRequest(2, TimeUnit.SECONDS)).path)
+            job.start()
+            val press = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertTrue("Press must reach the server", withContext(Dispatchers.IO) { pressReceived.await(2, TimeUnit.SECONDS) })
+            if (completePressHttpResponse) {
+                assertTrue("Complete press HTTP response must precede cancellation",
+                    withContext(Dispatchers.IO) { pressResponseComplete.await(2, TimeUnit.SECONDS) })
+                assertEquals(204, pressResponseCode.get())
+                assertEquals(0L, pressResponseBytes.get())
+                assertEquals(1L, pressCallbackExited.count)
+            } else {
+                assertEquals("Press response headers must remain pending", -1, pressResponseCode.get())
+                assertEquals(1L, pressResponseComplete.count)
+            }
+            job.cancel()
+            assertTrue("Cancellation must reach the synchronous press call",
+                withContext(Dispatchers.IO) { pressCallCancelled.await(2, TimeUnit.SECONDS) })
+            assertTrue(job.isCancelled)
+            if (completePressHttpResponse) {
+                assertFalse("The gated press callback must still own the producer", job.isCompleted)
+                assertFalse(outcome.isCompleted)
+            }
+            allowPressCallbackReturn.countDown()
+            val release = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertTrue("Cancellation must send the matching release",
+                withContext(Dispatchers.IO) { releaseReceived.await(2, TimeUnit.SECONDS) })
+            assertFalse("Cancellation must join the release while its response is pending", job.isCompleted)
+            assertFalse(outcome.isCompleted)
+            assertEquals(-1, releaseResponseCode.get())
+            assertEquals(1L, releaseResponseComplete.count)
+            allowReleaseResponse.countDown()
+            withTimeout(2_000) { job.join() }
+            fixtureFailure.get()?.let { throw it }
+            assertHalfPressCancellationOutcome(outcome.await())
+            assertTrue(job.isCancelled)
+            assertTrue(job.isCompleted)
+            assertFalse(job.isActive)
+            assertFalse(job.children.any())
+            assertEquals(0L, pressCallbackExited.count)
+            assertEquals(0L, releaseDispatcherExited.count)
+            assertEquals(0L, releaseResponseComplete.count)
+            assertEquals(204, releaseResponseCode.get())
+            assertEquals(0L, releaseResponseBytes.get())
+            assertEquals(2, controlCalls.get())
+            assertEquals("Discovery, one press and one release only", 3, server.requestCount)
+            assertEquals("PUT", press.method)
+            assertEquals(controlPath, press.path)
+            assertEquals(press.method, release.method)
+            assertEquals(press.path, release.path)
+            val pressBody = JSONObject(press.body.readUtf8())
+            val releaseBody = JSONObject(release.body.readUtf8())
+            assertEquals("half_press", pressBody.getString("action"))
+            assertTrue(pressBody.getBoolean("af"))
+            assertEquals("release", releaseBody.getString("action"))
+            assertFalse(releaseBody.getBoolean("af"))
+        } catch (failure: Throwable) {
+            testFailure = failure
+            throw failure
+        } finally {
+            // Open every gate even when an assertion fails, then join the original owner.
+            allowPressCallbackReturn.countDown()
+            allowReleaseResponse.countDown()
+            http.dispatcher.cancelAll()
+            withContext(NonCancellable) {
+                job.cancelAndJoin()
+                http.connectionPool.evictAll()
+                preserveHalfPressCancellationFailures(outcome, testFailure, fixtureFailure.get())
+            }
+        }
     }
 
     @Test
