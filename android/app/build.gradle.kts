@@ -1,3 +1,6 @@
+import groovy.json.JsonOutput
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,6 +16,38 @@ val developmentSigningEnvironment = mapOf(
 val developmentSigningEnabled = developmentSigningEnvironment.values.all { !it.isNullOrBlank() }
 if (!developmentSigningEnabled && developmentSigningEnvironment.values.any { !it.isNullOrBlank() }) {
     throw GradleException("Android development signing requires all OEC_ANDROID_SIGNING_* values.")
+}
+
+// One shared *test* runtime contract. This does not configure the Android application.
+val unitRuntimeProfileFile = rootProject.file("gradle/unit-test-runtime.properties")
+val unitRuntimeEntries = unitRuntimeProfileFile.readLines().map(String::trim)
+    .filter { it.isNotEmpty() && !it.startsWith("#") }
+    .map { line ->
+        val fields = line.split("=", limit = 2)
+        check(fields.size == 2 && fields[0].isNotBlank()) { "Invalid unit-runtime property." }
+        fields[0].trim() to fields[1].trim()
+    }
+val unitRuntimeProfile = unitRuntimeEntries.toMap()
+check(unitRuntimeEntries.size == unitRuntimeProfile.size) { "Duplicate unit-runtime property." }
+check(unitRuntimeProfile.keys == setOf(
+    "schema", "java.major", "assertions", "kotlinx.coroutines.debug", "kotlinx.coroutines.stacktrace.recovery",
+)) { "Missing or unknown unit-runtime property." }
+check(unitRuntimeProfile["schema"] == "1" && unitRuntimeProfile["java.major"] == "17" &&
+    unitRuntimeProfile["assertions"] == "enabled" && unitRuntimeProfile["kotlinx.coroutines.debug"] == "on" &&
+    unitRuntimeProfile["kotlinx.coroutines.stacktrace.recovery"] == "true") {
+    "Unsupported unit-runtime semantics; do not silently weaken the contract."
+}
+fun unitRuntimeSha256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
 }
 
 // Explicit flat fixture manifests preserve existing loader names and exclude documentation by construction.
@@ -50,6 +85,7 @@ val unitContractDirectory = layout.buildDirectory.dir("generated/contract-fixtur
 val androidContractDirectory = layout.buildDirectory.dir("generated/contract-fixtures/androidTest")
 val prepareUnitContractFixtures = tasks.register<Sync>("prepareUnitContractFixtures") {
     from(unitContractFixtures.map { file(it) })
+    from(unitRuntimeProfileFile)
     into(unitContractDirectory)
     duplicatesStrategy = DuplicatesStrategy.FAIL
     doFirst { checkContractFixtures(unitContractFixtures) }
@@ -172,6 +208,42 @@ dependencies {
 // failure carried by kotlinx-coroutines-test's UncaughtExceptionsBeforeTest. Preserve the
 // Throwable's complete hierarchy for failed tests only; no test or gate is changed.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    inputs.file(unitRuntimeProfileFile)
+    enableAssertions = unitRuntimeProfile.getValue("assertions") == "enabled"
+    systemProperty("kotlinx.coroutines.debug", unitRuntimeProfile.getValue("kotlinx.coroutines.debug"))
+    systemProperty("kotlinx.coroutines.stacktrace.recovery", unitRuntimeProfile.getValue("kotlinx.coroutines.stacktrace.recovery"))
+    // Existing CI runs this standard task. A supplemental JVM cannot label itself Gradle acceptance.
+    val unitVariant = Regex("test(.+)UnitTest").matchEntire(name)?.groupValues?.get(1)
+    if (unitVariant != null) {
+        val variant = unitVariant.replaceFirstChar { it.lowercaseChar() }
+        val manifest = layout.buildDirectory.file("tmp/$name/runtime-contract.json")
+        systemProperty("oec.gradle.runtimeManifest", manifest.get().asFile.absolutePath)
+        doFirst {
+            val launcher = javaLauncher.get().metadata
+            check(launcher.languageVersion.asInt() == unitRuntimeProfile.getValue("java.major").toInt()) {
+                "Formal unit tests require Java 17; this task does not install a JDK."
+            }
+            val artifacts = configurations.getByName("${variant}UnitTestRuntimeClasspath")
+                .resolvedConfiguration.resolvedArtifacts.sortedBy { it.moduleVersion.id.toString() + ":" + it.name }
+                .map { artifact -> mapOf(
+                    "coordinate" to artifact.moduleVersion.id.toString(),
+                    "file" to artifact.file.name,
+                    "sha256" to unitRuntimeSha256(artifact.file),
+                ) }
+            val receipt = mapOf(
+                "schema" to 1, "entrypoint" to ":app:$name",
+                "profile_sha256" to unitRuntimeSha256(unitRuntimeProfileFile),
+                "java_major" to launcher.languageVersion.asInt(), "java_runtime" to launcher.javaRuntimeVersion,
+                "java_vendor" to launcher.vendor, "assertions_enabled" to enableAssertions,
+                "system_properties" to mapOf(
+                    "kotlinx.coroutines.debug" to systemProperties["kotlinx.coroutines.debug"].toString(),
+                    "kotlinx.coroutines.stacktrace.recovery" to systemProperties["kotlinx.coroutines.stacktrace.recovery"].toString(),
+                ),
+                "runtime_artifacts" to artifacts,
+            )
+            manifest.get().asFile.apply { parentFile.mkdirs(); writeText(JsonOutput.toJson(receipt) + "\n") }
+        }
+    }
     addTestListener(object : org.gradle.api.tasks.testing.TestListener {
         override fun beforeSuite(suite: org.gradle.api.tasks.testing.TestDescriptor) = Unit
         override fun afterSuite(suite: org.gradle.api.tasks.testing.TestDescriptor, result: org.gradle.api.tasks.testing.TestResult) = Unit

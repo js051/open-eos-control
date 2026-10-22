@@ -678,6 +678,307 @@ final class ControlResponseOwnershipTests: XCTestCase {
         XCTAssertEqual(after, 21)
     }
 
+    // Source-predicted regressions against 9f86613, not executed RED results.
+    // Each exercises the actual AppState caller and real DesktopBridgeClient.
+    func testCaptureModeMemoryCannotCrossToDifferentCameraSession() async throws {
+        let first = ControlOwnerPeer(owner: "mode-A", modeSetting: photoModeSetting("Manual"))
+        let replacement = ControlOwnerPeer(owner: "mode-B", modeSetting: photoModeSetting("Movie"))
+        let state = makeState([first, replacement], bridge: true)
+        defer { state.requestDisconnect(); Task { await first.releaseAll(); await replacement.releaseAll() } }
+        try await connectModeOwner(state, expectedValue: "Manual")
+        let switched = await state.setCaptureMode(.video)
+        XCTAssertTrue(switched)
+        XCTAssertEqual(state.capabilities?.setting("shootingmode")?.value, "Movie")
+        let firstRequests = await first.modeRequests()
+        XCTAssertEqual(firstRequests, [modeRequest(owner: "mode-A", value: "Movie")])
+
+        await state.disconnect()
+        try await connectModeOwner(state, expectedValue: "Movie")
+        XCTAssertEqual(state.info?.serial, "SYNTHETIC-mode-B")
+        XCTAssertEqual(state.captureMode, .video)
+        let selected = await state.setCaptureMode(.photo)
+        XCTAssertTrue(selected, "A local Photo selection does not assert a camera write or ACK")
+        let replacementRequests = await replacement.modeRequests()
+        XCTAssertEqual(replacementRequests, [],
+                       "MODE-MEMORY-R1: B must not receive A's remembered Manual value")
+        XCTAssertEqual(state.captureMode, .photo)
+        XCTAssertEqual(state.capabilities?.setting("shootingmode")?.value, "Movie")
+        XCTAssertNil(state.shootingSettingRecord)
+        XCTAssertTrue(state.busyOperations.isEmpty)
+        await assertOriginalClose(first, bridge: true, maintenance: false)
+    }
+
+    func testCaptureModeMemoryCannotSurviveSameCameraFreshSessionReconnect() async throws {
+        let first = ControlOwnerPeer(owner: "same-camera-first", cameraIdentity: "same-camera",
+                                     modeSetting: photoModeSetting("Manual"))
+        let reconnect = ControlOwnerPeer(owner: "same-camera-fresh", cameraIdentity: "same-camera",
+                                         modeSetting: photoModeSetting("Movie"))
+        let state = makeState([first, reconnect], bridge: true)
+        defer { state.requestDisconnect(); Task { await first.releaseAll(); await reconnect.releaseAll() } }
+        try await connectModeOwner(state, expectedValue: "Manual")
+        let serial = try XCTUnwrap(state.info?.serial)
+        let model = try XCTUnwrap(state.info?.model)
+        let choices = try XCTUnwrap(state.capabilities?.setting("shootingmode")?.values)
+        let firstOwner = state.mediaLibrarySessionID
+        let switched = await state.setCaptureMode(.video)
+        XCTAssertTrue(switched)
+        await state.disconnect()
+
+        try await connectModeOwner(state, expectedValue: "Movie")
+        XCTAssertEqual(state.info?.serial, serial, "Same physical identity, newly opened client/session")
+        XCTAssertEqual(state.info?.model, model)
+        XCTAssertEqual(state.capabilities?.setting("shootingmode")?.values, choices)
+        XCTAssertNotEqual(state.mediaLibrarySessionID, firstOwner)
+        let selected = await state.setCaptureMode(.photo)
+        XCTAssertTrue(selected)
+        let reconnectRequests = await reconnect.modeRequests()
+        XCTAssertEqual(reconnectRequests, [],
+                       "MODE-MEMORY-R2: Reconnecting the same camera must not reuse the retired session's Manual value")
+        XCTAssertEqual(state.captureMode, .photo)
+        XCTAssertEqual(state.capabilities?.setting("shootingmode")?.value, "Movie")
+        XCTAssertNil(state.shootingSettingRecord)
+        let firstOpens = await first.count(.open), freshOpens = await reconnect.count(.open)
+        XCTAssertEqual(firstOpens, 1)
+        XCTAssertEqual(freshOpens, 1)
+        await assertOriginalClose(first, bridge: true, maintenance: false)
+    }
+
+    func testCaptureModeMemoryCannotCrossCancelledOpeningIntoFreshOwner() async throws {
+        let first = ControlOwnerPeer(owner: "mode-before-cancel", modeSetting: photoModeSetting("Manual"))
+        let cancelled = ControlOwnerPeer(owner: "mode-cancelled-open", modeSetting: photoModeSetting("Movie"))
+        let fresh = ControlOwnerPeer(owner: "mode-after-cancel", modeSetting: photoModeSetting("Movie"))
+        let state = makeState([first, cancelled, fresh], bridge: true)
+        defer {
+            state.requestDisconnect()
+            Task { await first.releaseAll(); await cancelled.releaseAll(); await fresh.releaseAll() }
+        }
+        try await connectModeOwner(state, expectedValue: "Manual")
+        let switched = await state.setCaptureMode(.video)
+        XCTAssertTrue(switched)
+        await state.disconnect()
+
+        await cancelled.enqueue(.open, gate: "mode-cancelled-open")
+        let opening = Task { await state.connect() }
+        defer { opening.cancel() }
+        try await waitForGate("mode-cancelled-open", peer: cancelled)
+        XCTAssertTrue(state.canCancelConnection)
+        state.cancelConnection()
+        XCTAssertFalse(state.connected)
+        XCTAssertTrue(state.connectionWasCancelled)
+        await cancelled.release("mode-cancelled-open")
+        await opening.value
+        // Await the owned retirement rather than guessing that a yielded task
+        // has finished. Its late allocated ID still owes its own DELETE.
+        for cleanup in Array(state.connectionCleanupTasks.values) { await cleanup.value }
+        XCTAssertTrue(state.pendingConnectionCleanup.isEmpty)
+        XCTAssertTrue(state.previousConnectionCleanupWarnings.isEmpty)
+        let cancelledReads = await cancelled.count(.info)
+        let cancelledRequests = await cancelled.modeRequests()
+        XCTAssertEqual(cancelledReads, 0)
+        XCTAssertEqual(cancelledRequests, [])
+        await assertOriginalClose(cancelled, bridge: true, maintenance: false)
+
+        try await connectModeOwner(state, expectedValue: "Movie")
+        XCTAssertEqual(state.info?.serial, "SYNTHETIC-mode-after-cancel")
+        let freshOwner = state.mediaLibrarySessionID
+        let freshSnapshot = state.snapshot
+        let selected = await state.setCaptureMode(.photo)
+        XCTAssertTrue(selected)
+        let freshRequests = await fresh.modeRequests()
+        XCTAssertEqual(freshRequests, [],
+                       "MODE-MEMORY-R3: Cancelled B opening must not carry A's Manual memory into C")
+        XCTAssertEqual(state.capabilities?.setting("shootingmode")?.value, "Movie")
+        XCTAssertEqual(state.captureMode, .photo)
+        XCTAssertEqual(state.mediaLibrarySessionID, freshOwner)
+        XCTAssertEqual(state.snapshot, freshSnapshot)
+        XCTAssertTrue(state.connected)
+        XCTAssertNil(state.shootingSettingRecord)
+        await assertOriginalClose(first, bridge: true, maintenance: false)
+    }
+
+    func testDelayedCaptureModeCompletionCannotRestoreRetiredMemoryIntoReplacement() async throws {
+        let first = ControlOwnerPeer(owner: "mode-late-A", modeSetting: photoModeSetting("Manual"))
+        let replacement = ControlOwnerPeer(owner: "mode-late-B", modeSetting: photoModeSetting("Movie"))
+        let state = makeState([first, replacement], bridge: true)
+        defer { state.requestDisconnect(); Task { await first.releaseAll(); await replacement.releaseAll() } }
+        try await connectModeOwner(state, expectedValue: "Manual")
+        await first.enqueue(.modeSetting, gate: "late-mode-response")
+        let old = Task { await state.setCaptureMode(.video) }
+        defer { old.cancel() }
+        try await waitForGate("late-mode-response", peer: first)
+        let originalID = try XCTUnwrap(state.shootingSettingRecord?.id)
+        await state.disconnect()
+        try await connectModeOwner(state, expectedValue: "Movie")
+        state.reportCubeLutRenderFailure()
+        let saved = PreservedControl(state)
+        let replacementOwner = state.mediaLibrarySessionID
+
+        await first.release("late-mode-response")
+        let oldConsumed = await old.value
+        XCTAssertFalse(oldConsumed)
+        assertPreserved(saved, state: state)
+        XCTAssertEqual(state.mediaLibrarySessionID, replacementOwner)
+        XCTAssertNil(state.shootingSettingRecord)
+        XCTAssertTrue(state.busyOperations.isEmpty)
+        let retired = try XCTUnwrap(state.shootingSettingHistory.first { $0.id == originalID })
+        XCTAssertTrue(retired.retired)
+        XCTAssertTrue(retired.cancelled)
+        XCTAssertFalse(retired.running)
+        XCTAssertEqual(retired.outcome.writeEvidence, .responded,
+                       "A's complete late envelope remains evidence only on A's record")
+        XCTAssertEqual(retired.outcome.readbackEvidence, .matched)
+        XCTAssertEqual(retired.outcome.observedSetting?.value, "Movie")
+
+        let selected = await state.setCaptureMode(.photo)
+        XCTAssertTrue(selected)
+        let replacementRequests = await replacement.modeRequests()
+        XCTAssertEqual(replacementRequests, [],
+                       "MODE-MEMORY-R4: A's delayed mode completion must not restore Manual as B's Photo target")
+        assertPreserved(saved, state: state)
+        XCTAssertEqual(state.captureMode, .photo)
+        XCTAssertNil(state.shootingSettingRecord)
+        let firstRequests = await first.modeRequests()
+        XCTAssertEqual(firstRequests, [modeRequest(owner: "mode-late-A", value: "Movie")])
+        await assertOriginalClose(first, bridge: true, maintenance: false)
+    }
+
+    func testSameCaptureModeOwnerRestoresItsExactPhotoValueInRequestOrder() async throws {
+        let peer = ControlOwnerPeer(owner: "mode-roundtrip", modeSetting: photoModeSetting("Manual"))
+        let state = makeState([peer], bridge: true)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectModeOwner(state, expectedValue: "Manual")
+        let owner = state.mediaLibrarySessionID
+        XCTAssertEqual(state.captureMode, .photo)
+        let video = await state.setCaptureMode(.video)
+        XCTAssertTrue(video)
+        XCTAssertEqual(state.captureMode, .video)
+        XCTAssertEqual(state.capabilities?.setting("shootingmode")?.value, "Movie")
+        state.newShootingSettingDraft() // Explicit New request, as in the setting panel.
+        let photo = await state.setCaptureMode(.photo)
+        XCTAssertTrue(photo)
+        XCTAssertEqual(state.captureMode, .photo)
+        XCTAssertEqual(state.capabilities?.setting("shootingmode")?.value, "Manual")
+        XCTAssertEqual(state.mediaLibrarySessionID, owner)
+        let requests = await peer.modeRequests()
+        XCTAssertEqual(requests, [modeRequest(owner: "mode-roundtrip", value: "Movie"),
+                                  modeRequest(owner: "mode-roundtrip", value: "Manual")])
+        XCTAssertEqual(state.shootingSettingHistory.map(\.outcome.requestedValue), ["Movie", "Manual"])
+        XCTAssertTrue(state.shootingSettingHistory.allSatisfy {
+            !$0.retired && !$0.running && $0.outcome.writeEvidence == .responded && $0.outcome.readbackEvidence == .matched
+        })
+        XCTAssertTrue(state.busyOperations.isEmpty)
+        let isoWrites = await peer.count(.setting)
+        XCTAssertEqual(isoWrites, 0)
+    }
+
+    func testFreshMovieOwnerWithoutPhotoHistoryDoesNotPostAnArbitraryPhotoMode() async throws {
+        let peer = ControlOwnerPeer(owner: "mode-fresh", modeSetting: photoModeSetting("Movie"))
+        let state = makeState([peer], bridge: true)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectModeOwner(state, expectedValue: "Movie")
+        XCTAssertEqual(state.captureMode, .video)
+        let snapshot = state.snapshot
+        let selected = await state.setCaptureMode(.photo)
+        XCTAssertTrue(selected)
+        XCTAssertEqual(state.captureMode, .photo, "Only the local UI selection changes")
+        XCTAssertEqual(state.snapshot, snapshot, "No camera observation or ACK is invented")
+        XCTAssertEqual(state.capabilities?.setting("shootingmode")?.value, "Movie")
+        let requests = await peer.modeRequests()
+        XCTAssertEqual(requests, [])
+        XCTAssertTrue(state.shootingSettingHistory.isEmpty)
+        XCTAssertNil(state.shootingSettingRecord)
+        XCTAssertTrue(state.busyOperations.isEmpty)
+    }
+
+    func testMovieModeBranchUsesOnlyOnOffDespitePreviousPhotoModeOwner() async throws {
+        let first = ControlOwnerPeer(owner: "mode-before-toggle", modeSetting: photoModeSetting("Manual"))
+        let toggle = ControlOwnerPeer(owner: "mode-toggle", modeSetting:
+            CameraSetting(key: "moviemode", label: "Movie Mode", value: "off", values: ["off", "on"]))
+        let state = makeState([first, toggle], bridge: true)
+        defer { state.requestDisconnect(); Task { await first.releaseAll(); await toggle.releaseAll() } }
+        try await connectModeOwner(state, expectedValue: "Manual")
+        let firstVideo = await state.setCaptureMode(.video)
+        XCTAssertTrue(firstVideo)
+        await state.disconnect()
+        try await connectModeOwner(state, expectedValue: "off", key: "moviemode")
+        XCTAssertEqual(state.captureMode, .photo)
+        let video = await state.setCaptureMode(.video)
+        XCTAssertTrue(video)
+        XCTAssertEqual(state.capabilities?.setting("moviemode")?.value, "on")
+        XCTAssertEqual(state.captureMode, .video)
+        state.newShootingSettingDraft()
+        let photo = await state.setCaptureMode(.photo)
+        XCTAssertTrue(photo)
+        XCTAssertEqual(state.capabilities?.setting("moviemode")?.value, "off")
+        XCTAssertEqual(state.captureMode, .photo)
+        let requests = await toggle.modeRequests()
+        XCTAssertEqual(requests, [modeRequest(owner: "mode-toggle", key: "moviemode", value: "on"),
+                                  modeRequest(owner: "mode-toggle", key: "moviemode", value: "off")])
+        XCTAssertTrue(state.busyOperations.isEmpty)
+        await assertOriginalClose(first, bridge: true, maintenance: false)
+    }
+
+    func testCaptureModeUnknownACKStaysUnknownAndReadOnlyRecoveryNeverReplays() async throws {
+        let peer = ControlOwnerPeer(owner: "mode-unknown", modeSetting: photoModeSetting("Manual"))
+        let state = makeState([peer], bridge: true)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectModeOwner(state, expectedValue: "Manual")
+        // The peer applies Movie, then loses the response after dispatch. There
+        // is no definitive rejection and no fabricated "unknown" ACK envelope.
+        await peer.enqueue(.modeSetting, error: .networkConnectionLost)
+        let revision = UUID()
+        let consumed = await state.setCaptureMode(.video, draftRevision: revision)
+        XCTAssertFalse(consumed)
+        let original = try XCTUnwrap(state.shootingSettingRecord)
+        XCTAssertEqual(original.outcome.requestedValue, "Movie")
+        XCTAssertEqual(original.outcome.writeEvidence, .unknown)
+        XCTAssertEqual(original.outcome.readbackEvidence, .unavailable)
+        XCTAssertNil(original.outcome.observedSetting)
+        XCTAssertEqual(state.capabilities?.setting("shootingmode")?.value, "Manual")
+        let duplicate = await state.setCaptureMode(.video, draftRevision: revision)
+        XCTAssertFalse(duplicate, "An unknown write does not authorize another Apply")
+
+        await state.recoverShootingSetting(original.id)
+        await state.recoverShootingSetting(original.id)
+        let recovered = try XCTUnwrap(state.shootingSettingRecord)
+        XCTAssertEqual(recovered.id, original.id)
+        XCTAssertEqual(recovered.draftRevision, revision)
+        XCTAssertEqual(recovered.outcome.writeEvidence, .unknown,
+                       "A matching fresh observation cannot invent the missing ACK")
+        XCTAssertEqual(recovered.statusKey, "shooting_setting_unknown")
+        XCTAssertEqual(recovered.outcome.readbackEvidence, .matched)
+        XCTAssertEqual(recovered.outcome.observedSetting?.value, "Movie")
+        XCTAssertEqual(state.capabilities?.setting("shootingmode")?.value, "Movie")
+        XCTAssertEqual(state.captureMode, .video)
+        let implicitRetry = await state.setCaptureMode(.photo)
+        XCTAssertFalse(implicitRetry, "An explicit New request is still required")
+        let requests = await peer.modeRequests()
+        XCTAssertEqual(requests, [modeRequest(owner: "mode-unknown", value: "Movie"),
+                                  modeRequest(owner: "mode-unknown"), modeRequest(owner: "mode-unknown")])
+        XCTAssertEqual(state.shootingSettingHistory.count, 1)
+        XCTAssertTrue(state.busyOperations.isEmpty)
+        let isoWrites = await peer.count(.setting)
+        XCTAssertEqual(isoWrites, 0)
+    }
+
+    private func photoModeSetting(_ value: String) -> CameraSetting {
+        CameraSetting(key: "shootingmode", label: "Shooting Mode", value: value, values: ["Manual", "Movie"])
+    }
+
+    private func modeRequest(owner: String, key: String = "shootingmode", value: String? = nil) -> ControlOwnerModeRequest {
+        ControlOwnerModeRequest(method: value == nil ? "GET" : "POST",
+            path: "/v1/session/\(owner)/settings/\(key)" + (value == nil ? "" : "/outcome"), key: key, value: value)
+    }
+
+    private func connectModeOwner(_ state: CameraAppState, expectedValue: String, key: String = "shootingmode") async throws {
+        await state.connect()
+        XCTAssertTrue(state.connected)
+        _ = try XCTUnwrap(state.snapshot)
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.capabilities?.setting(key)?.value, expectedValue)
+        XCTAssertTrue(state.busyOperations.isEmpty)
+    }
+
     private func assertRetired(_ action: ControlOwnerAction, bridge: Bool, fails: Bool,
                                readback: ControlOwnerWire? = nil) async throws {
         let oldPeer = ControlOwnerPeer(owner: "A", recording: action == .recordingStop)
@@ -1036,6 +1337,14 @@ private enum ControlOwnerWire: Hashable, Sendable {
     case health, open, close, maintenanceClose, info, status, capabilities, events, stopEvents, media, liveViewStart, liveViewStop, frame
     case clock, clockRead, directory, naming, directoryReadback, namingReadback, sleep, clean, autofocus, halfPress, shutterRelease
     case recordingStart, recordingStop, tap, whiteBalance, drive, magnification, setting
+    case modeSetting, modeReadback
+}
+
+private struct ControlOwnerModeRequest: Equatable, Sendable {
+    let method: String
+    let path: String
+    let key: String
+    let value: String?
 }
 
 /// All identities and responses are synthetic. Gates model a transport which
@@ -1046,8 +1355,12 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         let error: URLError.Code?
     }
     private let owner: String
+    private let cameraIdentity: String
     private let events: Bool
     private var mode: String
+    // Opt-in Bridge mode evidence only. Nil preserves all original ISO fixtures.
+    private var modeSetting: CameraSetting?
+    private var modeRequestLog: [ControlOwnerModeRequest] = []
     private var recording: Bool
     private var iso = "100"
     private var whiteBalance = "auto"
@@ -1062,17 +1375,21 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
     private var requests: [ControlOwnerWire] = []
     private var drained = false
 
-    init(owner: String, events: Bool = false, recording: Bool = false) {
+    init(owner: String, events: Bool = false, recording: Bool = false,
+         cameraIdentity: String? = nil, modeSetting: CameraSetting? = nil) {
         self.owner = owner
+        self.cameraIdentity = cameraIdentity ?? owner
         self.events = events
         self.recording = recording
-        mode = "\(owner) initial"
+        self.modeSetting = modeSetting
+        mode = modeSetting?.value ?? "\(owner) initial"
     }
 
     func enqueue(_ wire: ControlOwnerWire, gate: String? = nil, error: URLError.Code? = nil) {
         plans[wire, default: []].append(Plan(gate: gate, error: error))
     }
     func count(_ wire: ControlOwnerWire) -> Int { requests.filter { $0 == wire }.count }
+    func modeRequests() -> [ControlOwnerModeRequest] { modeRequestLog }
     func waiting(_ gate: String) -> Bool { gates[gate] != nil }
     func setMode(_ value: String) { mode = value }
     func release(_ gate: String) { gates.removeValue(forKey: gate)?.resume() }
@@ -1090,6 +1407,11 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         let simulator = path.hasPrefix("/ccapi/")
         let wire = try route(path: path, method: method, simulator: simulator)
         requests.append(wire)
+        if wire == .modeSetting || wire == .modeReadback, let modeSetting {
+            let payload = (request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any]
+            modeRequestLog.append(ControlOwnerModeRequest(method: method, path: path, key: modeSetting.key,
+                                                         value: payload?["value"] as? String))
+        }
         let plan = plans[wire]?.isEmpty == false ? plans[wire]!.removeFirst() : Plan(gate: nil, error: nil)
         let responseFrame = frameData
         var object: [String: Any] = [:]
@@ -1102,7 +1424,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             if path.contains("/maintenance/") {
                 object = ["version": 1, "engine": "ccapi", "operation": "sensor-cleaning", "observationEvidence": "reachable", "clockObservation": NSNull()]
             } else {
-                object = ["connected": true, "model": "Synthetic control \(owner)", "serial": "SYNTHETIC-\(owner)", "api": "fixture"]
+                object = ["connected": true, "model": "Synthetic control \(cameraIdentity)", "serial": "SYNTHETIC-\(cameraIdentity)", "api": "fixture"]
             }
         case .status:
             object = path.hasSuffix("/recording/observation") ? recordingObservationJSON() : statusJSON()
@@ -1161,6 +1483,21 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             object = simulator ? statusJSON() : ["version": 1, "engine": "ccapi", "key": "iso",
                 "requestedValue": "800", "writeEvidence": "response-received", "readbackEvidence": "matched",
                 "setting": shootingSettingJSON()]
+        case .modeSetting:
+            guard var setting = modeSetting,
+                  let data = request.httpBody,
+                  let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  Set(payload.keys) == Set(["value"]), let value = payload["value"] as? String,
+                  setting.accepts(value) else { throw URLError(.badServerResponse) }
+            setting.value = value
+            modeSetting = setting
+            mode = value
+            object = ["version": 1, "engine": "ccapi", "key": setting.key, "requestedValue": value,
+                      "writeEvidence": "response-received", "readbackEvidence": "matched",
+                      "setting": modeSettingJSON(setting)]
+        case .modeReadback:
+            guard let modeSetting else { throw URLError(.unsupportedURL) }
+            object = ["version": 1, "engine": "ccapi", "setting": modeSettingJSON(modeSetting)]
         case .whiteBalance:
             whiteBalance = "click"
             object = statusJSON()
@@ -1220,6 +1557,13 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         let prefix = simulator ? "/ccapi" : "/v1/session/\(owner)"
         guard path == prefix || path.hasPrefix(prefix + "/") else { throw URLError(.unsupportedURL) }
         let suffix = String(path.dropFirst(prefix.count))
+        if !simulator, let modeSetting {
+            let settingPath = "/settings/\(modeSetting.key)"
+            if method == "GET", suffix == settingPath { return .modeReadback }
+            // Capture the legacy write too, so accidental fallback/replay cannot
+            // disappear from exact method/path/key/value assertions.
+            if method == "POST", suffix == settingPath || suffix == settingPath + "/outcome" { return .modeSetting }
+        }
         switch (method, suffix) {
         case ("DELETE", ""): return .close
         case ("DELETE", "/maintenance/control/session") where !simulator: return .maintenanceClose
@@ -1257,6 +1601,11 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
 
     private func shootingSettingJSON() -> [String: Any] {
         ["key": "iso", "label": "ISO", "value": iso, "values": ["100", "800"], "inputKind": "choice"]
+    }
+
+    private func modeSettingJSON(_ setting: CameraSetting) -> [String: Any] {
+        ["key": setting.key, "label": setting.label, "value": setting.value,
+         "values": setting.values, "inputKind": setting.inputKind.rawValue]
     }
 
     private func recordingObservationJSON() -> [String: Any] {
@@ -1297,8 +1646,10 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             .sensorCleaning, .liveView, .liveViewMagnification, .autofocus, .shutterHalfPress, .videoRecording,
             .tapFocus, .clickWhiteBalance, .focusDrive, .exposureControl]
         if events { supported.append(.eventPolling) }
+        var settings: [[String: Any]] = [["key": "iso", "value": iso, "values": ["100", "800"]],
+                                         ["key": "directoryselection", "value": directory, "values": directoryOptions()]]
+        if let modeSetting { settings.append(modeSettingJSON(modeSetting)) }
         return ["supported": supported.map(\.rawValue), "fileNaming": namingJSON(), "liveView": liveView,
-                "settings": [["key": "iso", "value": iso, "values": ["100", "800"]],
-                             ["key": "directoryselection", "value": directory, "values": directoryOptions()]]]
+                "settings": settings]
     }
 }
