@@ -1,16 +1,33 @@
 package dev.openeos.control.data
 
+import androidx.lifecycle.viewModelScope
+import dev.openeos.control.ui.CameraOperation
+import dev.openeos.control.ui.CameraUiState
+import dev.openeos.control.ui.CameraViewModel
+import dev.openeos.control.ui.CaptureReviewStatus
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,6 +37,988 @@ import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 
 class UsbPtpCameraBackendTest {
+    // Synthetic peer/application assumptions below exercise ownership, not physical-camera release.
+
+    @Test fun canonBulbLostHalfPressAndFailedCleanupRetainsOriginalRelease() = runTest {
+        val rejectedStages = mutableSetOf(2L)
+        val transport = CanonEosScriptedTransport(
+            loseNextRemotePressResponseStage = 1L,
+            rejectedRemoteReleaseStages = rejectedStages,
+        )
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+
+        val failure = runCatching { backend.startBulbExposure() }.exceptionOrNull()
+
+        assertTrue(failure is ShutterReleaseException)
+        assertTrue(failure?.suppressed?.any { it === transport.remotePressResponseFailure } == true)
+        assertEquals(listOf(1L), transport.appliedRemotePressStages)
+        assertEquals(listOf(
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(2L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+        ), transport.remoteShutterCommands())
+        assertEquals(listOf(1L), transport.acknowledgedRemoteReleaseStages)
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        assertFalse(backend.status().bulbExposureActive == true)
+        assertNoNewUsbPress(backend, transport)
+        assertNoUsbCaptureObserved(backend)
+        rejectedStages.clear()
+        val retryStart = transport.sentContainers.size
+        backend.retryShutterRelease()
+        assertEquals(usbBulbOffOnly(), transport.sentContainers.drop(retryStart).map { it.code to it.parameters() })
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        backend.close()
+    }
+
+    @Test fun canonBulbLostFullPressAndFailedCleanupRetainsOriginalRelease() = runTest {
+        val rejectedStages = mutableSetOf(2L)
+        val transport = CanonEosScriptedTransport(
+            loseNextRemotePressResponseStage = 2L,
+            rejectedRemoteReleaseStages = rejectedStages,
+        )
+        var openedOwners = 0
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory {
+            openedOwners += 1
+            transport
+        })
+        backend.initialize()
+
+        val failure = runCatching { backend.startBulbExposure() }.exceptionOrNull()
+
+        assertTrue("USB_BULB_LOST_FULL_OWNER", failure is ShutterReleaseException)
+        assertTrue(failure?.cause is PtpResponseException)
+        assertTrue(failure?.suppressed?.any { it === transport.remotePressResponseFailure } == true)
+        assertEquals(listOf(1L, 2L), transport.appliedRemotePressStages)
+        assertEquals(listOf(
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(2L, 0L),
+        ) + usbBulbOffOnly(), transport.remoteShutterCommands())
+        assertEquals(listOf(1L), transport.acknowledgedRemoteReleaseStages)
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        assertFalse(backend.status().bulbExposureActive == true)
+        assertNoNewUsbPress(backend, transport)
+        assertNoUsbCaptureObserved(backend)
+        rejectedStages.clear()
+        val retryStart = transport.sentContainers.size
+        backend.retryShutterRelease()
+        assertEquals(usbBulbOffOnly(), transport.sentContainers.drop(retryStart).map { it.code to it.parameters() })
+        assertEquals(1, openedOwners)
+        assertEquals(listOf(1L, 2L), transport.appliedRemotePressStages)
+        backend.close()
+    }
+
+    @Test fun canonBulbLostStartWithFailedHalfReleasePreservesBothFailures() = runTest {
+        val rejectedStages = mutableSetOf(1L)
+        val transport = CanonEosScriptedTransport(
+            loseNextRemotePressResponseStage = 2L,
+            rejectedRemoteReleaseStages = rejectedStages,
+        )
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+
+        val failure = runCatching { backend.startBulbExposure() }.exceptionOrNull()
+
+        assertTrue("USB_BULB_LOST_START_HALF_OFF_OWNER", failure is ShutterReleaseException)
+        val releaseFailure = failure?.cause as? PtpResponseException
+        assertEquals(CanonEosOperationCode.REMOTE_RELEASE_OFF, releaseFailure?.operationCode)
+        assertEquals(PtpResponseCode.GENERAL_ERROR, releaseFailure?.responseCode)
+        assertTrue(failure?.suppressed?.any { it === transport.remotePressResponseFailure } == true)
+        assertEquals(listOf(2L), transport.acknowledgedRemoteReleaseStages)
+        assertEquals(usbBulbOffOnly(), transport.remoteShutterCommands().filter {
+            it.first == CanonEosOperationCode.REMOTE_RELEASE_OFF
+        })
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        assertNoNewUsbPress(backend, transport)
+        assertNoUsbCaptureObserved(backend)
+        rejectedStages.clear()
+        val retryStart = transport.sentContainers.size
+        backend.retryShutterRelease()
+        assertEquals(usbBulbOffOnly(), transport.sentContainers.drop(retryStart).map { it.code to it.parameters() })
+        assertEquals(listOf(2L, 2L, 1L), transport.acknowledgedRemoteReleaseStages)
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        backend.close()
+    }
+
+    @Test fun canonBulbCancellationWithFailedCleanupRetainsNonCancellableStop() = runTest {
+        val rejectedStages = mutableSetOf(2L)
+        val transport = CanonEosScriptedTransport(
+            rejectedRemoteReleaseStages = rejectedStages,
+            gateNextFullRemotePressResponse = true,
+            requireActiveRemoteReleaseReceipt = true,
+        )
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+        var failure: Throwable? = null
+        val start = async(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { backend.startBulbExposure() }.also { failure = it.exceptionOrNull() }
+        }
+        transport.fullRemotePressResponseAwaited.await()
+        assertEquals(listOf(1L, 2L), transport.appliedRemotePressStages)
+        assertTrue(transport.acknowledgedRemoteReleaseStages.isEmpty())
+
+        start.cancelAndJoin()
+
+        assertTrue(start.isCancelled)
+        assertTrue(failure is ShutterReleaseException)
+        assertTrue(failure?.suppressed?.any { it is kotlinx.coroutines.CancellationException } == true)
+        assertTrue(failure?.cause is PtpResponseException)
+        assertEquals(usbBulbOffOnly(), transport.remoteShutterCommands().filter {
+            it.first == CanonEosOperationCode.REMOTE_RELEASE_OFF
+        })
+        // The receipt calls ensureActive: OFF1 cannot ACK in the cancelled Start context.
+        assertEquals(listOf(1L), transport.acknowledgedRemoteReleaseStages)
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        assertNoNewUsbPress(backend, transport)
+        assertNoUsbCaptureObserved(backend)
+        rejectedStages.clear()
+        val retryStart = transport.sentContainers.size
+        backend.retryShutterRelease()
+        assertEquals(usbBulbOffOnly(), transport.sentContainers.drop(retryStart).map { it.code to it.parameters() })
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        backend.close()
+    }
+
+    @Test fun canonAcknowledgedBulbOwnsReleaseUntilBothOffAcks() = runTest {
+        val rejectedStages = mutableSetOf<Long>()
+        val transport = CanonEosScriptedTransport(rejectedRemoteReleaseStages = rejectedStages)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+
+        assertTrue(backend.startBulbExposure().bulbExposureActive == true)
+        assertTrue(transport.acknowledgedRemoteReleaseStages.isEmpty())
+        assertEquals(listOf(1L, 2L), transport.appliedRemotePressStages)
+        val heldCommands = transport.remoteShutterCommands()
+        assertTrue(backend.startBulbExposure().bulbExposureActive == true)
+        assertTrue(runCatching { backend.captureStill() }.exceptionOrNull() is ShutterReleaseException)
+        assertTrue(runCatching { backend.halfPressShutter() }.exceptionOrNull() is ShutterReleaseException)
+        assertEquals(heldCommands, transport.remoteShutterCommands())
+        rejectedStages += 2L
+
+        val failure = runCatching { backend.stopBulbExposure() }.exceptionOrNull()
+
+        assertTrue(failure is ShutterReleaseException)
+        assertEquals(usbBulbOffOnly(), transport.remoteShutterCommands().drop(heldCommands.size))
+        assertEquals(listOf(1L), transport.acknowledgedRemoteReleaseStages)
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        assertNoNewUsbPress(backend, transport)
+        assertNoUsbCaptureObserved(backend)
+        rejectedStages.clear()
+        val recoveryStart = transport.remoteShutterCommands().size
+        val recoveryCommandsStart = transport.sentContainers.size
+        val recovered = backend.stopBulbExposure()
+        assertEquals(usbBulbOffOnly(), transport.remoteShutterCommands().drop(recoveryStart))
+        assertTrue(transport.sentContainers.drop(recoveryCommandsStart).none {
+            it.code in setOf(PtpOperationCode.GET_OBJECT_HANDLES, PtpOperationCode.GET_OBJECT_INFO,
+                PtpOperationCode.GET_OBJECT, PtpOperationCode.GET_PARTIAL_OBJECT, CanonEosOperationCode.TRANSFER_COMPLETE)
+        })
+        assertFalse(recovered.bulbExposureActive == true)
+        assertFalse(recovered.shutterReleaseUnconfirmed == true)
+        assertNoUsbCaptureObserved(backend)
+        val afterRelease = transport.remoteShutterCommands()
+        backend.retryShutterRelease()
+        assertEquals(afterRelease, transport.remoteShutterCommands())
+        backend.close()
+
+        // A separately acknowledged host-target owner retains its prepared destination
+        // through OFF, and only that normal Stop may read and acknowledge the new object.
+        val captured = HostCaptureObject(0x66, PtpObjectFormat.EXIF_JPEG, "SYNTHETIC_BULB.JPG", OBJECT_BYTES)
+        val hostTransport = CanonEosScriptedTransport(
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            advertiseCardCaptureDestination = false,
+            hostCaptureObjects = listOf(captured),
+            availableShots = 0,
+        )
+        val store = MemoryHostCaptureStore()
+        val hostBackend = UsbPtpCameraBackend(
+            CameraConnection.AndroidUsbPtp("synthetic-usb-host-A"),
+            PtpTransportFactory { hostTransport },
+            hostCaptureStore = store,
+        )
+        hostBackend.initialize()
+        assertTrue(hostBackend.startBulbExposure().bulbExposureActive == true)
+        assertTrue(hostTransport.hasOperation(CanonEosOperationCode.PC_HDD_CAPACITY))
+        assertTrue(hostTransport.sentContainers.indexOfFirst { it.code == CanonEosOperationCode.PC_HDD_CAPACITY } <
+            hostTransport.sentContainers.indexOfFirst { it.code == CanonEosOperationCode.REMOTE_RELEASE_ON })
+        assertFalse(hostTransport.hasOperation(PtpOperationCode.GET_PARTIAL_OBJECT))
+        assertTrue(hostTransport.acknowledgedRemoteReleaseStages.isEmpty())
+        val normalStopStart = hostTransport.sentContainers.size
+        // The existing host-transfer quiet period uses wall time. Real delay here keeps
+        // this added case bounded without a virtual-time spin or changing product clocks.
+        val stopped = withContext(Dispatchers.Default) { hostBackend.stopBulbExposure() }
+        val stopCommands = hostTransport.sentContainers.drop(normalStopStart)
+        assertEquals(usbBulbOffOnly(), stopCommands.take(2).map { it.code to it.parameters() })
+        assertEquals(usbBulbOffOnly(), stopCommands.filter { it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF }
+            .map { it.code to it.parameters() })
+        val objectEvent = stopCommands.indexOfFirst { it.code == CanonEosOperationCode.GET_EVENT }
+        val objectRead = stopCommands.indexOfFirst { it.code == PtpOperationCode.GET_PARTIAL_OBJECT }
+        val objectComplete = stopCommands.indexOfFirst { it.code == CanonEosOperationCode.TRANSFER_COMPLETE }
+        assertTrue(objectEvent > 1)
+        assertTrue(objectRead > objectEvent)
+        assertTrue(objectComplete > objectRead)
+        assertEquals(listOf(captured.handle, 0L, captured.bytes.size.toLong()), stopCommands[objectRead].parameters())
+        assertEquals(listOf(captured.handle), stopCommands[objectComplete].parameters())
+        assertEquals(listOf(2L, 1L), hostTransport.acknowledgedRemoteReleaseStages)
+        assertArrayEquals(captured.bytes, store.bytes(store.list().single()))
+        assertFalse(stopped.bulbExposureActive == true)
+        assertFalse(stopped.shutterReleaseUnconfirmed == true)
+        assertTrue(CameraFeature.BULB_EXPOSURE in hostBackend.observedFeatures())
+        val normalReleasedCommands = hostTransport.remoteShutterCommands()
+        hostBackend.close()
+        assertEquals(normalReleasedCommands, hostTransport.remoteShutterCommands())
+    }
+
+    @Test fun canonBulbExplicitRetryIsOffOnlyWithoutCaptureSuccess() = runTest {
+        val rejectedStages = mutableSetOf(2L)
+        val store = MemoryHostCaptureStore()
+        val transport = CanonEosScriptedTransport(
+            loseNextRemotePressResponseStage = 2L,
+            rejectedRemoteReleaseStages = rejectedStages,
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            advertiseCardCaptureDestination = false,
+            hostCaptureObjects = listOf(HostCaptureObject(0x67, PtpObjectFormat.EXIF_JPEG, "SYNTHETIC_UNKNOWN.JPG", OBJECT_BYTES)),
+            availableShots = 0,
+        )
+        var openedOwners = 0
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory {
+            openedOwners += 1
+            transport
+        }, hostCaptureStore = store)
+        backend.initialize()
+        assertTrue(runCatching { backend.startBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
+        assertTrue(transport.hasOperation(CanonEosOperationCode.PC_HDD_CAPACITY))
+        assertTrue(transport.sentContainers.indexOfFirst { it.code == CanonEosOperationCode.PC_HDD_CAPACITY } <
+            transport.sentContainers.indexOfFirst { it.code == CanonEosOperationCode.REMOTE_RELEASE_ON })
+        rejectedStages.clear(); rejectedStages += 1L
+        val failedRetryStart = transport.sentContainers.size
+
+        assertTrue(runCatching { backend.retryShutterRelease() }.exceptionOrNull() is ShutterReleaseException)
+
+        assertEquals(usbBulbOffOnly(), transport.sentContainers.drop(failedRetryStart).map { it.code to it.parameters() })
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        rejectedStages.clear()
+        val successfulRetryStart = transport.sentContainers.size
+        backend.retryShutterRelease()
+        assertEquals(usbBulbOffOnly(), transport.sentContainers.drop(successfulRetryStart).map { it.code to it.parameters() })
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        assertFalse(backend.status().bulbExposureActive == true)
+        assertNoUsbCaptureObserved(backend)
+
+        // A later status read is separately cancellable; it cannot resurrect an ACKed OFF.
+        transport.gateNextStorageIdsRead()
+        var readFailure: Throwable? = null
+        val read = async(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { backend.status() }.also { readFailure = it.exceptionOrNull() }
+        }
+        transport.storageIdsResponseAwaited.await()
+        read.cancelAndJoin()
+        assertTrue(readFailure is kotlinx.coroutines.CancellationException)
+        val afterReadFailure = transport.sentContainers.size
+        backend.retryShutterRelease()
+        assertEquals(afterReadFailure, transport.sentContainers.size)
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        assertNoUsbCaptureObserved(backend)
+        assertEquals(1, openedOwners)
+        assertEquals(listOf(1L, 2L), transport.appliedRemotePressStages)
+        assertTrue(store.list().isEmpty())
+        assertFalse(transport.hasOperation(PtpOperationCode.GET_PARTIAL_OBJECT))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.TRANSFER_COMPLETE))
+        val beforeClose = transport.remoteShutterCommands()
+        backend.close()
+        assertEquals(beforeClose, transport.remoteShutterCommands())
+    }
+
+    @Test fun canonBulbFailedCloseBlocksReplacementAtRepositoryBoundary() = runTest {
+        val transportA = CanonEosScriptedTransport(
+            loseNextRemotePressResponseStage = 2L,
+            rejectedRemoteReleaseStages = mutableSetOf(2L),
+        )
+        val transportB = CanonEosScriptedTransport()
+        val openedDevices = mutableListOf<String?>()
+        val repository = CameraRepository(CameraBackendFactory(ptpTransportFactory = PtpTransportFactory { connection ->
+            openedDevices += connection.deviceName
+            when (connection.deviceName) {
+                "synthetic-usb-A" -> transportA
+                "synthetic-usb-B" -> transportB
+                else -> error("Unexpected synthetic USB owner")
+            }
+        }))
+        repository.connectUsb("synthetic-usb-A", CANON_USB_VENDOR_ID, 0x1234, startLiveView = false)
+        assertTrue(runCatching { repository.startBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
+        assertTrue(repository.refreshStatus().shutterReleaseUnconfirmed == true)
+        // Read-only identity witness, not a mock or constructor-count claim. The production
+        // revision guard precedes backendFactory.create; B transport acquisition must stay zero.
+        val backendField = CameraRepository::class.java.getDeclaredField("backend").apply { isAccessible = true }
+        val originalBackend = backendField.get(repository)
+        val replacementStart = transportA.sentContainers.size
+
+        val failure = runCatching {
+            repository.connectUsb("synthetic-usb-B", CANON_USB_VENDOR_ID, 0x1235, startLiveView = false)
+        }.exceptionOrNull()
+
+        assertTrue(failure is ConnectionRetirementBlockedException)
+        assertTrue(repository.connectionRetirementRevision > 0L)
+        assertEquals(setOf(PreviousConnectionSafetyWarning.SHUTTER), repository.connectionRetirementSafetyWarnings)
+        assertSame(originalBackend, backendField.get(repository))
+        assertEquals(listOf("synthetic-usb-A"), openedDevices)
+        assertTrue(transportB.sentContainers.isEmpty())
+        assertTrue(transportA.closed)
+        val closeCommands = transportA.sentContainers.drop(replacementStart)
+        assertEquals(usbBulbOffOnly(), closeCommands.filter { it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF }
+            .map { it.code to it.parameters() })
+        assertTrue(closeCommands.none { it.code == CanonEosOperationCode.REMOTE_RELEASE_ON })
+        assertTrue(closeCommands.indexOfLast { it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF } <
+            closeCommands.indexOfFirst { it.code == PtpOperationCode.CLOSE_SESSION })
+        val retainedRevision = repository.connectionRetirementRevision
+        val retiredCommandCount = transportA.sentContainers.size
+        assertTrue(runCatching {
+            repository.connectUsb("synthetic-usb-B", CANON_USB_VENDOR_ID, 0x1235, startLiveView = false)
+        }.exceptionOrNull() is ConnectionRetirementBlockedException)
+        assertEquals(retainedRevision, repository.connectionRetirementRevision)
+        assertSame(originalBackend, backendField.get(repository))
+        assertEquals(retiredCommandCount, transportA.sentContainers.size)
+        assertEquals(listOf("synthetic-usb-A"), openedDevices)
+        assertTrue(transportB.sentContainers.isEmpty())
+
+        // Both OFF receipts precede this rejected object read inside normal active close.
+        // The read failure is not an outstanding release and must not poison retirement.
+        val captured = HostCaptureObject(0x68, PtpObjectFormat.EXIF_JPEG, "SYNTHETIC_CLOSE.JPG", OBJECT_BYTES)
+        val readFailureTransport = CanonEosScriptedTransport(
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            advertiseCardCaptureDestination = false,
+            hostCaptureObjects = listOf(captured),
+            rejectPartialAtOffset = 0L,
+        )
+        val failedReadStore = MemoryHostCaptureStore()
+        val readFailureBackend = UsbPtpCameraBackend(
+            CameraConnection.AndroidUsbPtp("synthetic-usb-close-read"),
+            PtpTransportFactory { readFailureTransport },
+            hostCaptureStore = failedReadStore,
+        )
+        readFailureBackend.initialize()
+        assertTrue(readFailureBackend.startBulbExposure().bulbExposureActive == true)
+        val readCloseStart = readFailureTransport.sentContainers.size
+        val readCloseFailure = runCatching { readFailureBackend.close() }.exceptionOrNull()
+        assertNull(readCloseFailure)
+        assertTrue(readFailureTransport.closed)
+        assertEquals(listOf(2L, 1L), readFailureTransport.acknowledgedRemoteReleaseStages)
+        val readCloseCommands = readFailureTransport.sentContainers.drop(readCloseStart)
+        assertEquals(usbBulbOffOnly(), readCloseCommands.take(2).map { it.code to it.parameters() })
+        assertEquals(usbBulbOffOnly(), readCloseCommands.filter { it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF }
+            .map { it.code to it.parameters() })
+        val failedReadIndex = readCloseCommands.indexOfFirst { it.code == PtpOperationCode.GET_PARTIAL_OBJECT }
+        assertTrue(failedReadIndex > 1)
+        assertEquals(listOf(captured.handle, 0L, captured.bytes.size.toLong()), readCloseCommands[failedReadIndex].parameters())
+        assertTrue(failedReadIndex < readCloseCommands.indexOfFirst { it.code == PtpOperationCode.CLOSE_SESSION })
+        assertTrue(failedReadStore.list().isEmpty())
+        assertFalse(readFailureTransport.hasOperation(CanonEosOperationCode.TRANSFER_COMPLETE))
+        val releasedReadFailureCommands = readFailureTransport.sentContainers.size
+        readFailureBackend.retryShutterRelease()
+        assertEquals(releasedReadFailureCommands, readFailureTransport.sentContainers.size)
+
+        // By contrast, a genuine OFF rejection remains primary even when shutdown fails.
+        val shutdownFailure = java.io.IOException("Synthetic original transport shutdown failed")
+        val rejectedCloseStages = mutableSetOf<Long>()
+        val failedCloseTransport = CanonEosScriptedTransport(
+            rejectedRemoteReleaseStages = rejectedCloseStages,
+            closeFailure = shutdownFailure,
+        )
+        val failedCloseBackend = UsbPtpCameraBackend(
+            CameraConnection.AndroidUsbPtp("synthetic-usb-close-off"),
+            PtpTransportFactory { failedCloseTransport },
+        )
+        failedCloseBackend.initialize()
+        assertTrue(failedCloseBackend.startBulbExposure().bulbExposureActive == true)
+        rejectedCloseStages += 2L
+        val failedCloseStart = failedCloseTransport.sentContainers.size
+        val failedClose = runCatching { failedCloseBackend.close() }.exceptionOrNull()
+        assertTrue(failedClose is ShutterReleaseException)
+        val closeWarning = failedClose as ShutterReleaseException
+        assertTrue(closeWarning.cause is PtpResponseException)
+        assertEquals(CanonEosOperationCode.REMOTE_RELEASE_OFF, (closeWarning.cause as PtpResponseException).operationCode)
+        assertTrue(closeWarning.suppressed.any { it === shutdownFailure })
+        assertEquals(setOf(PreviousConnectionSafetyWarning.SHUTTER), previousConnectionSafetyWarnings(closeWarning))
+        val failedCloseCommands = failedCloseTransport.sentContainers.drop(failedCloseStart)
+        assertEquals(usbBulbOffOnly(), failedCloseCommands.filter { it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF }
+            .map { it.code to it.parameters() })
+        assertTrue(failedCloseCommands.none { it.code == CanonEosOperationCode.REMOTE_RELEASE_ON })
+        assertEquals(listOf(1L), failedCloseTransport.acknowledgedRemoteReleaseStages)
+        assertTrue(failedCloseTransport.closed)
+        assertTrue(failedCloseCommands.indexOfLast { it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF } <
+            failedCloseCommands.indexOfFirst { it.code == PtpOperationCode.CLOSE_SESSION })
+    }
+
+    @Test fun canonHalfPressLostResponseStillAttemptsOriginalOff() = runTest {
+        val transport = CanonEosScriptedTransport(loseNextRemotePressResponseStage = 1L)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+
+        val failure = runCatching { backend.halfPressShutter() }.exceptionOrNull()
+
+        assertSame(transport.remotePressResponseFailure, failure)
+        assertFalse(failure is PtpResponseException)
+        assertEquals("USB_HALF_LOST_ON_REQUIRES_OFF", listOf(
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+        ), transport.remoteShutterCommands())
+        assertEquals(listOf(1L), transport.appliedRemotePressStages)
+        assertEquals(listOf(1L), transport.acknowledgedRemoteReleaseStages)
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        assertFalse(CameraFeature.SHUTTER_HALF_PRESS in backend.observedFeatures())
+        assertNoUsbCaptureObserved(backend)
+        val afterRelease = transport.sentContainers.size
+        backend.retryShutterRelease()
+        assertEquals(afterRelease, transport.sentContainers.size)
+        backend.close()
+    }
+
+    @Test fun canonHalfPressFailedOffRetainsOriginalRelease() = runTest {
+        val rejectedStages = mutableSetOf(1L)
+        val transport = CanonEosScriptedTransport(rejectedRemoteReleaseStages = rejectedStages)
+        var openedOwners = 0
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory {
+            openedOwners += 1
+            transport
+        })
+        backend.initialize()
+
+        val failure = runCatching { backend.halfPressShutter() }.exceptionOrNull()
+
+        assertTrue(failure is ShutterReleaseException)
+        assertTrue(failure?.cause is PtpResponseException)
+        assertEquals(listOf(
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+        ), transport.remoteShutterCommands())
+        assertTrue(transport.acknowledgedRemoteReleaseStages.isEmpty())
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        assertNoNewUsbPress(backend, transport)
+        assertFalse(CameraFeature.SHUTTER_HALF_PRESS in backend.observedFeatures())
+        rejectedStages.clear()
+        val retryStart = transport.sentContainers.size
+        backend.retryShutterRelease()
+        assertEquals(listOf(CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L)),
+            transport.sentContainers.drop(retryStart).map { it.code to it.parameters() })
+        assertEquals(listOf(1L), transport.acknowledgedRemoteReleaseStages)
+        assertEquals(1, openedOwners)
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        assertNoUsbCaptureObserved(backend)
+        backend.close()
+
+        // A complete ON rejection is different from a missing response, but still owns OFF.
+        val rejectedPress = CanonEosScriptedTransport(rejectHalfRemotePress = true)
+        val rejectedBackend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-rejected"), PtpTransportFactory { rejectedPress })
+        rejectedBackend.initialize()
+        val rejectedFailure = runCatching { rejectedBackend.halfPressShutter() }.exceptionOrNull()
+        assertTrue(rejectedFailure is PtpResponseException)
+        assertEquals(CanonEosOperationCode.REMOTE_RELEASE_ON, (rejectedFailure as PtpResponseException).operationCode)
+        assertTrue(rejectedPress.appliedRemotePressStages.isEmpty())
+        assertEquals(listOf(1L), rejectedPress.acknowledgedRemoteReleaseStages)
+        assertFalse(rejectedBackend.status().shutterReleaseUnconfirmed == true)
+        assertFalse(CameraFeature.SHUTTER_HALF_PRESS in rejectedBackend.observedFeatures())
+        rejectedBackend.close()
+    }
+
+    @Test fun canonHalfPressCancellationUsesNonCancellableOriginalOff() = runTest {
+        for (rejectOff in listOf(false, true)) {
+            val rejectedStages = if (rejectOff) mutableSetOf(1L) else mutableSetOf()
+            val transport = CanonEosScriptedTransport(
+                rejectedRemoteReleaseStages = rejectedStages,
+                gateNextHalfRemotePressResponse = true,
+                requireActiveRemoteReleaseReceipt = true,
+            )
+            val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+            backend.initialize()
+            var failure: Throwable? = null
+            val press = async(start = CoroutineStart.UNDISPATCHED) {
+                runCatching { backend.halfPressShutter() }.also { failure = it.exceptionOrNull() }
+            }
+            transport.halfRemotePressResponseAwaited.await()
+            assertEquals(listOf(1L), transport.appliedRemotePressStages)
+
+            press.cancelAndJoin()
+
+            assertTrue(press.isCancelled)
+            assertEquals(listOf(
+                CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
+                CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+            ), transport.remoteShutterCommands())
+            if (rejectOff) {
+                assertTrue(failure is ShutterReleaseException)
+                assertTrue(failure?.suppressed?.any { it is kotlinx.coroutines.CancellationException } == true)
+                assertTrue(transport.acknowledgedRemoteReleaseStages.isEmpty())
+                assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+                assertNoNewUsbPress(backend, transport)
+                rejectedStages.clear()
+                val retryStart = transport.sentContainers.size
+                backend.retryShutterRelease()
+                assertEquals(listOf(CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L)),
+                    transport.sentContainers.drop(retryStart).map { it.code to it.parameters() })
+            } else {
+                assertTrue(failure is kotlinx.coroutines.CancellationException)
+                assertFalse(failure is ShutterReleaseException)
+                assertEquals(listOf(1L), transport.acknowledgedRemoteReleaseStages)
+            }
+            assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+            assertFalse(CameraFeature.SHUTTER_HALF_PRESS in backend.observedFeatures())
+            assertNoUsbCaptureObserved(backend)
+            backend.close()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun canonUsbBulbUnknownStartKeepsVmStopAndSuppressesSuccess() = runTest {
+        val rejectedStages = mutableSetOf(2L)
+        val transport = CanonEosScriptedTransport(
+            loseNextRemotePressResponseStage = 2L,
+            rejectedRemoteReleaseStages = rejectedStages,
+            advertiseMediaBrowser = true,
+            scriptedEvents = listOf(eosPropertyValue(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, 0x0004) + eosBlock(0, byteArrayOf())),
+        )
+        withUsbReleaseViewModel(transport) { viewModel, repository, openedDevices ->
+            assertTrue(viewModel.uiState.value.bulbMode)
+            val mediaReads = transport.mediaListingCount()
+            assertTrue(mediaReads > 0)
+            val states = mutableListOf<CameraUiState>()
+            val observer = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                viewModel.uiState.collect { states += it }
+            }
+
+            viewModel.toggleBulbExposure()
+            testScheduler.runCurrent()
+
+            val unknown = viewModel.uiState.value
+            assertTrue("USB_VM_BULB_UNKNOWN_STOP_ONLY", unknown.shutterReleaseUnconfirmed)
+            assertTrue(unknown.status?.shutterReleaseUnconfirmed == true)
+            assertNull(unknown.status?.bulbExposureActive)
+            assertTrue(unknown.isBusy(CameraOperation.CAPTURE))
+            assertFalse(unknown.isBusy(CameraOperation.SHUTTER_RELEASE))
+            assertFalse(unknown.isBusy(CameraOperation.STATUS))
+            assertEquals(CameraOperation.CAPTURE, unknown.errorOperation)
+            assertTrue(unknown.pendingOperations.isEmpty())
+            val blockedCommands = transport.remoteShutterCommands()
+            viewModel.toggleBulbExposure()
+            viewModel.captureStill()
+            viewModel.halfPressShutter()
+            testScheduler.runCurrent()
+            assertEquals(blockedCommands, transport.remoteShutterCommands())
+            val failedRetryStart = transport.remoteShutterCommands().size
+            viewModel.retryShutterRelease()
+            testScheduler.runCurrent()
+            assertEquals(usbBulbOffOnly(), transport.remoteShutterCommands().drop(failedRetryStart))
+            assertTrue(viewModel.uiState.value.shutterReleaseUnconfirmed)
+            rejectedStages.clear()
+            val retryStart = transport.remoteShutterCommands().size
+
+            viewModel.retryShutterRelease()
+            testScheduler.runCurrent()
+
+            assertEquals(usbBulbOffOnly(), transport.remoteShutterCommands().drop(retryStart))
+            assertFalse(viewModel.uiState.value.shutterReleaseUnconfirmed)
+            assertFalse(viewModel.uiState.value.status?.shutterReleaseUnconfirmed == true)
+            assertFalse(viewModel.uiState.value.bulbExposureActive)
+            val acknowledgedCommands = transport.remoteShutterCommands()
+            viewModel.retryShutterRelease()
+            testScheduler.advanceTimeBy(3_000L)
+            testScheduler.runCurrent()
+            assertEquals(acknowledgedCommands, transport.remoteShutterCommands())
+            assertEquals(listOf(1L, 2L), transport.appliedRemotePressStages)
+            assertEquals(listOf("synthetic-usb-A"), openedDevices)
+            // At the fixed command instant the poller is delayed; retry's immediate
+            // status GET_EVENT consumes its capture event before virtual time advances.
+            // A later independent contents event may legitimately refresh the gallery.
+            assertEquals(mediaReads, transport.mediaListingCount())
+            assertFalse(CameraFeature.STILL_CAPTURE in repository.observedFeatures())
+            assertFalse(CameraFeature.BULB_EXPOSURE in repository.observedFeatures())
+            assertFalse(CameraFeature.SHUTTER_HALF_PRESS in repository.observedFeatures())
+            assertTrue(states.none { it.captureFeedback != null || it.captureReviewLoading || it.captureReviewItem != null })
+            assertTrue(states.all { it.captureReviewStatus == CaptureReviewStatus.IDLE })
+            assertTrue(states.none { it.status?.bulbExposureActive == true })
+            assertTrue(viewModel.uiState.value.mediaItems.isEmpty())
+            observer.cancel()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun canonUsbHalfPressUnknownReleaseKeepsVmStopAndBlocksNewPress() = runTest {
+        val rejectedStages = mutableSetOf(1L)
+        val transport = CanonEosScriptedTransport(
+            loseNextRemotePressResponseStage = 1L,
+            rejectedRemoteReleaseStages = rejectedStages,
+            advertiseMediaBrowser = true,
+        )
+        withUsbReleaseViewModel(transport) { viewModel, repository, openedDevices ->
+            val mediaReads = transport.mediaListingCount()
+            assertTrue(mediaReads > 0)
+            val states = mutableListOf<CameraUiState>()
+            val observer = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                viewModel.uiState.collect { states += it }
+            }
+
+            viewModel.halfPressShutter()
+            testScheduler.runCurrent()
+
+            val unknown = viewModel.uiState.value
+            assertTrue(unknown.shutterReleaseUnconfirmed)
+            assertTrue(unknown.status?.shutterReleaseUnconfirmed == true)
+            assertNull(unknown.status?.bulbExposureActive)
+            assertEquals(CameraOperation.FOCUS, unknown.errorOperation)
+            assertTrue(unknown.isBusy(CameraOperation.FOCUS))
+            assertTrue(unknown.isBusy(CameraOperation.CAPTURE))
+            assertFalse(unknown.isBusy(CameraOperation.SHUTTER_RELEASE))
+            assertTrue(unknown.pendingOperations.isEmpty())
+            assertEquals(listOf(
+                CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
+                CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+            ), transport.remoteShutterCommands())
+            val blockedCommands = transport.remoteShutterCommands()
+            viewModel.halfPressShutter()
+            viewModel.captureStill()
+            viewModel.toggleBulbExposure()
+            testScheduler.runCurrent()
+            assertEquals(blockedCommands, transport.remoteShutterCommands())
+            rejectedStages.clear()
+            val retryStart = transport.remoteShutterCommands().size
+
+            viewModel.retryShutterRelease()
+            testScheduler.runCurrent()
+
+            assertEquals(listOf(CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L)),
+                transport.remoteShutterCommands().drop(retryStart))
+            assertFalse(viewModel.uiState.value.shutterReleaseUnconfirmed)
+            assertFalse(viewModel.uiState.value.status?.shutterReleaseUnconfirmed == true)
+            assertFalse(viewModel.uiState.value.bulbExposureActive)
+            val acknowledgedCommands = transport.remoteShutterCommands()
+            viewModel.retryShutterRelease()
+            testScheduler.advanceTimeBy(3_000L)
+            testScheduler.runCurrent()
+            assertEquals(acknowledgedCommands, transport.remoteShutterCommands())
+            assertEquals(listOf(1L), transport.appliedRemotePressStages)
+            assertEquals(listOf(1L), transport.acknowledgedRemoteReleaseStages)
+            assertEquals(listOf("synthetic-usb-A"), openedDevices)
+            assertEquals(mediaReads, transport.mediaListingCount())
+            assertFalse(CameraFeature.STILL_CAPTURE in repository.observedFeatures())
+            assertFalse(CameraFeature.BULB_EXPOSURE in repository.observedFeatures())
+            assertFalse(CameraFeature.SHUTTER_HALF_PRESS in repository.observedFeatures())
+            assertTrue(states.none { it.captureFeedback != null || it.captureReviewLoading || it.captureReviewItem != null })
+            assertTrue(states.all { it.captureReviewStatus == CaptureReviewStatus.IDLE })
+            observer.cancel()
+        }
+    }
+
+    private fun usbBulbOffOnly(): List<Pair<Int, List<Long>>> = listOf(
+        CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(2L),
+        CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+    )
+
+    private fun assertNoUsbCaptureObserved(backend: UsbPtpCameraBackend) {
+        assertFalse(CameraFeature.STILL_CAPTURE in backend.observedFeatures())
+        assertFalse(CameraFeature.BULB_EXPOSURE in backend.observedFeatures())
+    }
+
+    private suspend fun assertNoNewUsbPress(backend: UsbPtpCameraBackend, transport: CanonEosScriptedTransport) {
+        val commands = transport.remoteShutterCommands()
+        assertTrue(runCatching { backend.captureStill() }.exceptionOrNull() is ShutterReleaseException)
+        assertTrue(runCatching { backend.halfPressShutter() }.exceptionOrNull() is ShutterReleaseException)
+        assertTrue(runCatching { backend.startBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
+        assertEquals(commands, transport.remoteShutterCommands())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private suspend fun TestScope.withUsbReleaseViewModel(
+        transport: CanonEosScriptedTransport,
+        block: suspend (CameraViewModel, CameraRepository, List<String?>) -> Unit,
+    ) {
+        // Plain JUnit, like the existing VM recovery suite. No product method is stubbed.
+        // Disabling live frames avoids Android bitmap/native-clock paths in this witness.
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        var viewModel: CameraViewModel? = null
+        try {
+            val openedDevices = mutableListOf<String?>()
+            val repository = CameraRepository(CameraBackendFactory(ptpTransportFactory = PtpTransportFactory { connection ->
+                openedDevices += connection.deviceName
+                check(connection.deviceName == "synthetic-usb-A")
+                transport
+            }))
+            val owner = CameraViewModel(repository)
+            viewModel = owner
+            owner.setLiveViewAutoRefresh(false)
+            testScheduler.runCurrent()
+            owner.connectUsb("synthetic-usb-A", CANON_USB_VENDOR_ID, 0x1234)
+            testScheduler.runCurrent()
+            // Let only the original bounded empty-gallery review finish; never run an
+            // unbounded advanceUntilIdle against the real background event poller.
+            testScheduler.advanceTimeBy(3_000L)
+            testScheduler.runCurrent()
+            assertTrue(owner.uiState.value.connected)
+            assertTrue(owner.uiState.value.pendingOperations.isEmpty())
+            assertTrue(owner.uiState.value.supports(CameraFeature.MEDIA_BROWSER))
+            assertFalse(owner.uiState.value.captureReviewLoading)
+            assertNull(owner.uiState.value.captureReviewItem)
+            assertNull(owner.uiState.value.captureFeedback)
+            assertEquals(CaptureReviewStatus.IDLE, owner.uiState.value.captureReviewStatus)
+            assertFalse(repository.isLiveViewRunning())
+            block(owner, repository, openedDevices)
+        } finally {
+            try {
+                viewModel?.let { owner ->
+                    owner.disconnect()
+                    testScheduler.runCurrent()
+                    val scopeJob = requireNotNull(owner.viewModelScope.coroutineContext[Job])
+                    owner.viewModelScope.cancel()
+                    testScheduler.runCurrent()
+                    assertTrue("USB release ViewModel scope did not finish teardown", scopeJob.isCompleted)
+                }
+            } finally {
+                Dispatchers.resetMain()
+            }
+        }
+    }
+
+    @Test fun canonStillLostHalfPressResponseReleasesBothStagesWithoutFullPress() = runTest {
+        val transport = CanonEosScriptedTransport(loseNextRemotePressResponseStage = 1L)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+
+        assertTrue(failure === transport.remotePressResponseFailure)
+        assertEquals(listOf(1L), transport.appliedRemotePressStages)
+        assertEquals(listOf(
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(2L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+        ), transport.remoteShutterCommands())
+        assertEquals(listOf(2L, 1L), transport.acknowledgedRemoteReleaseStages)
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        assertFalse(CameraFeature.STILL_CAPTURE in backend.observedFeatures())
+        backend.close()
+    }
+
+    @Test fun canonStillLostFullPressResponseReleasesBothStagesWithoutPressReplay() = runTest {
+        val transport = CanonEosScriptedTransport(loseNextRemotePressResponseStage = 2L)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+
+        assertTrue(failure === transport.remotePressResponseFailure)
+        assertEquals(listOf(1L, 2L), transport.appliedRemotePressStages)
+        assertEquals("USB_STILL_LOST_FULL_RELEASE", listOf(
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(2L, 0L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(2L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+        ), transport.remoteShutterCommands())
+        assertEquals(listOf(2L, 1L), transport.acknowledgedRemoteReleaseStages)
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        assertFalse(CameraFeature.STILL_CAPTURE in backend.observedFeatures())
+        backend.close()
+    }
+
+    @Test fun canonStillCancellationAwaitingFullPressResponseReleasesNonCancellably() = runTest {
+        val transport = CanonEosScriptedTransport(
+            gateNextFullRemotePressResponse = true,
+            requireActiveRemoteReleaseReceipt = true,
+        )
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+        var failure: Throwable? = null
+        val capture = async(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { backend.captureStill() }.also { failure = it.exceptionOrNull() }
+        }
+        transport.fullRemotePressResponseAwaited.await()
+        assertEquals(listOf(1L, 2L), transport.appliedRemotePressStages)
+
+        capture.cancelAndJoin()
+
+        assertTrue(capture.isCancelled)
+        assertTrue(failure is kotlinx.coroutines.CancellationException)
+        assertFalse(failure is ShutterReleaseException)
+        assertEquals(listOf(
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(2L, 0L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(2L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+        ), transport.remoteShutterCommands())
+        assertEquals(listOf(2L, 1L), transport.acknowledgedRemoteReleaseStages)
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        assertFalse(CameraFeature.STILL_CAPTURE in backend.observedFeatures())
+        backend.close()
+    }
+
+    @Test fun canonStillOff2FailureRetainsUnknownOwnerAndBlocksNewPresses() = runTest {
+        val rejectedStages = mutableSetOf(2L)
+        val transport = CanonEosScriptedTransport(rejectedRemoteReleaseStages = rejectedStages)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+
+        assertTrue("USB_STILL_RELEASE_OWNER", failure is ShutterReleaseException)
+        assertTrue(failure?.cause is PtpResponseException)
+        assertEquals(listOf(
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
+            CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(2L, 0L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(2L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+        ), transport.remoteShutterCommands())
+        assertEquals(listOf(1L), transport.acknowledgedRemoteReleaseStages)
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        val commandsBeforeRejectedPresses = transport.remoteShutterCommands()
+        assertTrue(runCatching { backend.captureStill() }.isFailure)
+        assertTrue(runCatching { backend.halfPressShutter() }.isFailure)
+        assertTrue(runCatching { backend.startBulbExposure() }.isFailure)
+        assertEquals(commandsBeforeRejectedPresses, transport.remoteShutterCommands())
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        assertFalse(CameraFeature.STILL_CAPTURE in backend.observedFeatures())
+        rejectedStages.clear()
+        backend.close()
+    }
+
+    @Test fun canonStillOff1FailurePreservesOwnerAndOriginalLostPressError() = runTest {
+        val rejectedStages = mutableSetOf(1L)
+        val transport = CanonEosScriptedTransport(
+            loseNextRemotePressResponseStage = 2L,
+            rejectedRemoteReleaseStages = rejectedStages,
+        )
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+
+        assertTrue(failure is ShutterReleaseException)
+        val releaseFailure = failure?.cause as? PtpResponseException
+        assertEquals(CanonEosOperationCode.REMOTE_RELEASE_OFF, releaseFailure?.operationCode)
+        assertEquals(PtpResponseCode.GENERAL_ERROR, releaseFailure?.responseCode)
+        assertTrue(failure?.suppressed?.any { it === transport.remotePressResponseFailure } == true)
+        assertEquals(listOf(2L), transport.acknowledgedRemoteReleaseStages)
+        assertEquals(listOf(listOf(2L), listOf(1L)), transport.remoteShutterCommands()
+            .filter { it.first == CanonEosOperationCode.REMOTE_RELEASE_OFF }.map { it.second })
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        assertFalse(CameraFeature.STILL_CAPTURE in backend.observedFeatures())
+        rejectedStages.clear()
+        backend.retryShutterRelease()
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        backend.close()
+    }
+
+    @Test fun canonStillExplicitRetryUsesSavedOwnerOffOnlyUntilBothAcks() = runTest {
+        val rejectedStages = mutableSetOf(2L)
+        val transport = CanonEosScriptedTransport(
+            loseNextRemotePressResponseStage = 2L,
+            rejectedRemoteReleaseStages = rejectedStages,
+        )
+        var openedOwners = 0
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory {
+            openedOwners += 1
+            transport
+        })
+        backend.initialize()
+        assertTrue(runCatching { backend.captureStill() }.exceptionOrNull() is ShutterReleaseException)
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        val releaseOnly = listOf(
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(2L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+        )
+        rejectedStages.clear(); rejectedStages += 1L
+        val failedRetryStart = transport.sentContainers.size
+
+        assertTrue(runCatching { backend.retryShutterRelease() }.exceptionOrNull() is ShutterReleaseException)
+
+        assertEquals(releaseOnly, transport.sentContainers.drop(failedRetryStart)
+            .map { it.code to it.parameters() })
+        assertTrue(backend.status().shutterReleaseUnconfirmed == true)
+        rejectedStages.clear()
+        val successfulRetryStart = transport.sentContainers.size
+        val acknowledgementsBeforeRetry = transport.acknowledgedRemoteReleaseStages.size
+
+        backend.retryShutterRelease()
+
+        assertEquals(releaseOnly, transport.sentContainers.drop(successfulRetryStart)
+            .map { it.code to it.parameters() })
+        assertEquals(listOf(2L, 1L), transport.acknowledgedRemoteReleaseStages.drop(acknowledgementsBeforeRetry))
+        assertEquals(1, openedOwners)
+        assertEquals(listOf(1L, 2L), transport.appliedRemotePressStages)
+        assertFalse(backend.status().shutterReleaseUnconfirmed == true)
+        assertFalse(CameraFeature.STILL_CAPTURE in backend.observedFeatures())
+        val afterAcknowledgedRelease = transport.sentContainers.size
+        backend.retryShutterRelease()
+        assertEquals(afterAcknowledgedRelease, transport.sentContainers.size)
+        backend.close()
+    }
+
+    @Test fun canonStillCloseRetriesSavedReleaseAndClosesTransportOnTypedFailure() = runTest {
+        val transport = CanonEosScriptedTransport(
+            loseNextRemotePressResponseStage = 2L,
+            rejectedRemoteReleaseStages = mutableSetOf(1L),
+        )
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-A"), PtpTransportFactory { transport })
+        backend.initialize()
+        assertTrue(runCatching { backend.captureStill() }.exceptionOrNull() is ShutterReleaseException)
+        val closeStart = transport.sentContainers.size
+
+        val closeFailure = runCatching { backend.close() }.exceptionOrNull()
+
+        assertTrue(closeFailure is ShutterReleaseException)
+        assertTrue(closeFailure?.cause is PtpResponseException)
+        val closeCommands = transport.sentContainers.drop(closeStart)
+        assertEquals(listOf(
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(2L),
+            CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+        ), closeCommands.filter { it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF }
+            .map { it.code to it.parameters() })
+        assertTrue(closeCommands.none { it.code == CanonEosOperationCode.REMOTE_RELEASE_ON })
+        assertTrue(closeCommands.indexOfLast { it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF } <
+            closeCommands.indexOfFirst { it.code == PtpOperationCode.CLOSE_SESSION })
+        assertTrue(transport.closed)
+    }
+
+    @Test fun canonStillRepositoryRetirementBlocksReplacementAfterBothCleanupFailures() = runTest {
+        val transportA = CanonEosScriptedTransport(
+            loseNextRemotePressResponseStage = 2L,
+            rejectedRemoteReleaseStages = mutableSetOf(2L),
+        )
+        val transportB = CanonEosScriptedTransport()
+        val openedDevices = mutableListOf<String?>()
+        val repository = CameraRepository(CameraBackendFactory(ptpTransportFactory = PtpTransportFactory { connection ->
+            openedDevices += connection.deviceName
+            when (connection.deviceName) {
+                "synthetic-usb-A" -> transportA
+                "synthetic-usb-B" -> transportB
+                else -> error("Unexpected synthetic USB owner")
+            }
+        }))
+        repository.connectUsb("synthetic-usb-A", CANON_USB_VENDOR_ID, 0x1234, startLiveView = false)
+        assertTrue(runCatching { repository.captureStill() }.exceptionOrNull() is ShutterReleaseException)
+        assertTrue(repository.refreshStatus().shutterReleaseUnconfirmed == true)
+        assertEquals(0L, repository.connectionRetirementRevision)
+        val replacementStart = transportA.sentContainers.size
+
+        val replacementFailure = runCatching {
+            repository.connectUsb("synthetic-usb-B", CANON_USB_VENDOR_ID, 0x1235, startLiveView = false)
+        }.exceptionOrNull()
+
+        assertTrue(replacementFailure is ConnectionRetirementBlockedException)
+        assertTrue(repository.connectionRetirementRevision > 0L)
+        assertEquals(setOf(PreviousConnectionSafetyWarning.SHUTTER), repository.connectionRetirementSafetyWarnings)
+        assertEquals(listOf("synthetic-usb-A"), openedDevices)
+        assertTrue(transportB.sentContainers.isEmpty())
+        assertTrue(transportA.closed)
+        assertEquals(listOf(listOf(2L), listOf(1L)), transportA.sentContainers.drop(replacementStart)
+            .filter { it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF }.map { it.parameters() })
+        val retainedRevision = repository.connectionRetirementRevision
+        val retiredCommandCount = transportA.sentContainers.size
+        assertTrue(runCatching {
+            repository.connectUsb("synthetic-usb-B", CANON_USB_VENDOR_ID, 0x1235, startLiveView = false)
+        }.exceptionOrNull() is ConnectionRetirementBlockedException)
+        assertEquals(retainedRevision, repository.connectionRetirementRevision)
+        assertEquals(setOf(PreviousConnectionSafetyWarning.SHUTTER), repository.connectionRetirementSafetyWarnings)
+        assertEquals(retiredCommandCount, transportA.sentContainers.size)
+        assertEquals(listOf("synthetic-usb-A"), openedDevices)
+        assertTrue(transportB.sentContainers.isEmpty())
+    }
+
     @Test fun cancelledTransportAcquisitionClosesHandleBeforeAnyPtpCommand() = runTest {
         val transport = ScriptedTransport(advertiseCapture = false)
         val entered = CompletableDeferred<Unit>()
@@ -3370,6 +4369,13 @@ class UsbPtpCameraBackendTest {
         private val advertisedClockProperty: Int? = CanonEosPropertyCode.UTC_TIME,
         private val clockReadbackOffsetSeconds: Int = 0,
         scriptedEvents: List<ByteArray> = emptyList(),
+        private var loseNextRemotePressResponseStage: Long? = null,
+        private val rejectedRemoteReleaseStages: MutableSet<Long> = mutableSetOf(),
+        private var gateNextFullRemotePressResponse: Boolean = false,
+        private val requireActiveRemoteReleaseReceipt: Boolean = false,
+        private var gateNextHalfRemotePressResponse: Boolean = false,
+        private val advertiseMediaBrowser: Boolean = false,
+        private val closeFailure: Throwable? = null,
     ) : PtpTransport {
         private val incoming = ArrayDeque<PtpContainer>()
         private val pendingScriptedEvents = ArrayDeque(scriptedEvents)
@@ -3378,6 +4384,20 @@ class UsbPtpCameraBackendTest {
         private var pendingPropertyWrite = false
         private var captureEventPending = false
         private var fullPressActive = false
+        // A possible applied press followed by lost receive evidence is not a PTP rejection.
+        val remotePressResponseFailure = java.io.IOException("Synthetic remote-press response lost after application")
+        val appliedRemotePressStages = mutableListOf<Long>()
+        val acknowledgedRemoteReleaseStages = mutableListOf<Long>()
+        val fullRemotePressResponseAwaited = CompletableDeferred<Unit>()
+        val halfRemotePressResponseAwaited = CompletableDeferred<Unit>()
+        val storageIdsResponseAwaited = CompletableDeferred<Unit>()
+        private var pendingRemotePressReceiveFailure: java.io.IOException? = null
+        private var pendingFullRemotePressResponseGate: CompletableDeferred<Unit>? = null
+        private var pendingHalfRemotePressResponseGate: CompletableDeferred<Unit>? = null
+        private var pendingStorageIdsResponseGate: CompletableDeferred<Unit>? = null
+        private var gateNextStorageIdsResponse = false
+        fun gateNextStorageIdsRead() { gateNextStorageIdsResponse = true }
+        private var pendingRemoteReleaseReceipt: Pair<Long, Long>? = null
         private var initialPropertyEventsPending = true
         var suppressRecordingReads = false
         private var recordingReadGate: CompletableDeferred<Unit>? = null
@@ -3419,6 +4439,7 @@ class UsbPtpCameraBackendTest {
                             advertisePropertyWrites,
                             advertiseTextMetadata || advertiseLensName,
                             advertiseRecordingRead,
+                            advertiseMediaBrowser,
                         ),
                     )
                     incoming += ok(transaction)
@@ -3463,21 +4484,40 @@ class UsbPtpCameraBackendTest {
                 }
 
                 CanonEosOperationCode.REMOTE_RELEASE_ON -> {
+                    val stage = container.parameters().firstOrNull()
                     val fullPress = container.parameters().firstOrNull() == 2L
                     val rejected =
                         (rejectHalfRemotePress && container.parameters().firstOrNull() == 1L) ||
                             (rejectFullRemotePress && container.parameters().firstOrNull() == 2L)
-                    incoming += if (rejected) {
+                    val reply = if (rejected) {
                         response(PtpResponseCode.GENERAL_ERROR, transaction)
                     } else {
+                        stage?.let(appliedRemotePressStages::add)
                         if (fullPress) fullPressActive = true
                         ok(transaction)
+                    }
+                    when {
+                        !rejected && stage != null && stage == loseNextRemotePressResponseStage -> {
+                            loseNextRemotePressResponseStage = null
+                            pendingRemotePressReceiveFailure = remotePressResponseFailure
+                        }
+                        !rejected && fullPress && gateNextFullRemotePressResponse -> {
+                            gateNextFullRemotePressResponse = false
+                            pendingFullRemotePressResponseGate = CompletableDeferred()
+                        }
+                        !rejected && stage == 1L && gateNextHalfRemotePressResponse -> {
+                            gateNextHalfRemotePressResponse = false
+                            pendingHalfRemotePressResponseGate = CompletableDeferred()
+                        }
+                        else -> incoming += reply
                     }
                 }
 
                 CanonEosOperationCode.REMOTE_RELEASE_OFF -> {
+                    val stage = container.parameters().firstOrNull()
                     val fullRelease = container.parameters().firstOrNull() == 2L
-                    val rejected = container.code == rejectOperationCode
+                    val rejected = container.code == rejectOperationCode ||
+                        stage?.let(rejectedRemoteReleaseStages::contains) == true
                     if (!rejected && fullRelease && fullPressActive) {
                         captureEventPending = true
                         fullPressActive = false
@@ -3487,6 +4527,7 @@ class UsbPtpCameraBackendTest {
                     } else {
                         ok(transaction)
                     }
+                    pendingRemoteReleaseReceipt = stage?.let { transaction to it }
                     if (fullRelease && delayAfterFullReleaseMillis > 0L) delay(delayAfterFullReleaseMillis)
                 }
 
@@ -3620,10 +4661,21 @@ class UsbPtpCameraBackendTest {
                 }
 
                 PtpOperationCode.GET_STORAGE_IDS -> {
-                    incoming += data(container.code, transaction, Writer().apply {
-                        u32(storageDevices.size)
-                        storageDevices.forEach { u32(it.id) }
-                    }.bytes())
+                    if (gateNextStorageIdsResponse) {
+                        gateNextStorageIdsResponse = false
+                        pendingStorageIdsResponseGate = CompletableDeferred()
+                    } else {
+                        incoming += data(container.code, transaction, Writer().apply {
+                            u32(storageDevices.size)
+                            storageDevices.forEach { u32(it.id) }
+                        }.bytes())
+                        incoming += ok(transaction)
+                    }
+                }
+
+                PtpOperationCode.GET_OBJECT_HANDLES -> {
+                    check(advertiseMediaBrowser) { "Unadvertised synthetic media listing" }
+                    incoming += data(container.code, transaction, Writer().apply { u32(0) }.bytes())
                     incoming += ok(transaction)
                 }
 
@@ -3654,11 +4706,50 @@ class UsbPtpCameraBackendTest {
             }
         }
 
-        override suspend fun receive(maxPayloadBytes: Int): PtpContainer =
-            incoming.removeFirstOrNull() ?: error("No Canon EOS scripted response is queued.")
+        override suspend fun receive(maxPayloadBytes: Int): PtpContainer {
+            pendingRemotePressReceiveFailure?.let { failure ->
+                pendingRemotePressReceiveFailure = null
+                throw failure
+            }
+            pendingFullRemotePressResponseGate?.let { gate ->
+                // Consume the one-shot gate before suspension: cancellation cannot replay it on OFF.
+                pendingFullRemotePressResponseGate = null
+                fullRemotePressResponseAwaited.complete(Unit)
+                gate.await()
+            }
+            pendingHalfRemotePressResponseGate?.let { gate ->
+                pendingHalfRemotePressResponseGate = null
+                halfRemotePressResponseAwaited.complete(Unit)
+                gate.await()
+            }
+            pendingStorageIdsResponseGate?.let { gate ->
+                pendingStorageIdsResponseGate = null
+                storageIdsResponseAwaited.complete(Unit)
+                gate.await()
+            }
+            val reply = incoming.removeFirstOrNull() ?: error("No Canon EOS scripted response is queued.")
+            pendingRemoteReleaseReceipt?.let { (transaction, stage) ->
+                if (reply.type == PtpContainerType.RESPONSE && reply.transactionId == transaction) {
+                    pendingRemoteReleaseReceipt = null
+                    if (requireActiveRemoteReleaseReceipt) kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    if (reply.code == PtpResponseCode.OK) acknowledgedRemoteReleaseStages += stage
+                }
+            }
+            return reply
+        }
+
+        fun mediaListingCount(): Int = sentContainers.count {
+            it.type == PtpContainerType.COMMAND && it.code == PtpOperationCode.GET_OBJECT_HANDLES
+        }
+
+        fun remoteShutterCommands(): List<Pair<Int, List<Long>>> = sentContainers.filter {
+            it.type == PtpContainerType.COMMAND &&
+                it.code in setOf(CanonEosOperationCode.REMOTE_RELEASE_ON, CanonEosOperationCode.REMOTE_RELEASE_OFF)
+        }.map { it.code to it.parameters() }
 
         override fun close() {
             closed = true
+            closeFailure?.let { throw it }
         }
 
         fun hasCanonPropertyWrite(propertyCode: Int): Boolean = sentContainers.any { container ->
@@ -4081,6 +5172,7 @@ class UsbPtpCameraBackendTest {
             advertisePropertyWrites: Boolean = true,
             advertiseTextMetadata: Boolean = false,
             advertiseRecordingRead: Boolean = false,
+            advertiseMediaBrowser: Boolean = false,
         ): ByteArray = Writer().apply {
             u16(100)
             u32(CanonEosPtp.VENDOR_EXTENSION_ID)
@@ -4102,6 +5194,10 @@ class UsbPtpCameraBackendTest {
                             CanonEosOperationCode.DRIVE_LENS,
                         )
                     )
+                    if (advertiseMediaBrowser) {
+                        add(PtpOperationCode.GET_OBJECT_HANDLES)
+                        add(PtpOperationCode.GET_OBJECT_INFO)
+                    }
                     if (advertisePropertyWrites) add(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX)
                     if (advertiseTextMetadata || advertiseRecordingRead) add(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)
                     if (advertiseEventPolling) add(CanonEosOperationCode.GET_EVENT)

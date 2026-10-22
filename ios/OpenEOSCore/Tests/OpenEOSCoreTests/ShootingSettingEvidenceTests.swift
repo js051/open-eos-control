@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import XCTest
 @testable import OpenEOSCore
 
@@ -209,4 +212,225 @@ final class ShootingSettingEvidenceTests: XCTestCase {
     private static func shift(ba: Int, mg: Int) -> String {
         "{\"wbshift\":{\"value\":{\"ba\":\(ba),\"mg\":\(mg)},\"ability\":{\"ba\":{\"min\":-9,\"max\":9,\"step\":1},\"mg\":{\"min\":-9,\"max\":9,\"step\":1}}}}"
     }
+
+    func testCardFreshUnknownAbilityBlocksBothKeysBeforeAnyPut() async throws {
+        for card in Self.cardSelectionCases {
+            try await assertCardPrewriteRejection(card,
+                fresh: #"{"value":"card1","ability":["card1","card2","card3"]}"#,
+                marker: "CARD-FRESH-UNKNOWN-NOT-SENT")
+        }
+    }
+
+    func testCardFreshSingleChoiceBlocksBothKeysBeforeAnyPut() async throws {
+        for card in Self.cardSelectionCases {
+            try await assertCardPrewriteRejection(card,
+                fresh: #"{"value":"card2","ability":["card2"]}"#,
+                marker: "CARD-FRESH-SINGLE-NOT-SENT")
+        }
+    }
+
+    func testCardAcknowledgedInvalidReadbackStaysUnavailableForBothKeys() async throws {
+        for card in Self.cardSelectionCases {
+            let (client, peer, capabilities) = try await cardSelectionClient(card)
+            await enqueueCardWrite(peer, card: card, readback: Self.cardUnknownReadback)
+            let attempt = CameraShootingSettingAttempt(key: card.key, requestedValue: "card2")
+            let failure = await cardApplyError(client, card: card, requested: "card2", attempt: attempt)
+            let outcome = attempt.snapshot
+            XCTAssertEqual(outcome.writeEvidence, .responded)
+            XCTAssertEqual(outcome.readbackEvidence, .unavailable, "CARD-ACK-INVALID-UNAVAILABLE:\(card.key)")
+            XCTAssertNil(outcome.observedSetting)
+            XCTAssertEqual(failure as? CCAPIError, .invalidResponse("Camera returned an invalid current setting value or ability."))
+            // Exercise the production publication helper, not a substitute UI policy.
+            let published = outcome.observedSetting.map { capabilities.applyingShootingSetting($0) } ?? capabilities
+            XCTAssertEqual(published.setting(card.key)?.values, ["none", "card1", "card2"])
+            XCTAssertFalse(published.setting(card.key)?.accepts("card3") ?? true, "CARD-ACK-NO-CARD3-PUBLICATION:\(card.key)")
+            await assertCardRequests(peer, card: card, actions: ["GET", "PUT", "GET"])
+            try await assertCardWriteBody(peer, value: "card2")
+            let remaining = await peer.remainingResponses()
+            XCTAssertEqual(remaining, 0)
+        }
+    }
+
+    func testCardLostAckInvalidManualReadStaysUnknownForBothKeys() async throws {
+        for card in Self.cardSelectionCases {
+            let (client, peer, capabilities) = try await cardSelectionClient(card, loseAcknowledgement: true)
+            await enqueueCardWrite(peer, card: card)
+            let attempt = CameraShootingSettingAttempt(key: card.key, requestedValue: "card2")
+            let failure = await cardApplyError(client, card: card, requested: "card2", attempt: attempt)
+            assertCardLostAck(failure, attempt: attempt)
+            await assertCardRequests(peer, card: card, actions: ["GET", "PUT"])
+            await peer.enqueueJSON(path: card.path, body: Self.cardUnknownReadback)
+            let readFailure = await cardRefreshError(client, attempt: attempt)
+            let outcome = attempt.snapshot
+            XCTAssertEqual(outcome.writeEvidence, .unknown)
+            XCTAssertEqual(outcome.readbackEvidence, .unavailable, "CARD-UNKNOWN-INVALID-UNAVAILABLE:\(card.key)")
+            XCTAssertNil(outcome.observedSetting)
+            XCTAssertEqual(readFailure as? CCAPIError, .invalidResponse("Camera returned an invalid current setting value or ability."))
+            let published = outcome.observedSetting.map { capabilities.applyingShootingSetting($0) } ?? capabilities
+            XCTAssertFalse(published.setting(card.key)?.accepts("card3") ?? true)
+            await assertCardRequests(peer, card: card, actions: ["GET", "PUT", "GET"])
+            try await assertCardWriteBody(peer, value: "card2")
+            let remaining = await peer.remainingResponses()
+            XCTAssertEqual(remaining, 0)
+        }
+    }
+
+    func testCardStillValidRawValueUsesExactlyOnePut() async throws {
+        let card = Self.cardSelectionCases[0]
+        let (client, peer, _) = try await cardSelectionClient(card)
+        await enqueueCardWrite(peer, card: card, readback: Self.cardBody("card2"))
+        let attempt = CameraShootingSettingAttempt(key: card.key, requestedValue: "card2")
+        try await client.applyShootingSetting(key: card.key, value: "card2", attempt: attempt)
+        XCTAssertEqual(attempt.snapshot.writeEvidence, .responded)
+        XCTAssertEqual(attempt.snapshot.readbackEvidence, .matched)
+        XCTAssertEqual(attempt.snapshot.observedSetting?.value, "card2")
+        await assertCardRequests(peer, card: card, actions: ["GET", "PUT", "GET"])
+        try await assertCardWriteBody(peer, value: "card2")
+        let remaining = await peer.remainingResponses()
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testCardMovieNoneRawValueUsesExactlyOnePut() async throws {
+        let card = Self.cardSelectionCases[1]
+        let (client, peer, _) = try await cardSelectionClient(card)
+        await enqueueCardWrite(peer, card: card, readback: Self.cardBody("none"))
+        let attempt = CameraShootingSettingAttempt(key: card.key, requestedValue: "none")
+        try await client.applyShootingSetting(key: card.key, value: "none", attempt: attempt)
+        XCTAssertEqual(attempt.snapshot.writeEvidence, .responded)
+        XCTAssertEqual(attempt.snapshot.readbackEvidence, .matched)
+        XCTAssertEqual(attempt.snapshot.observedSetting?.value, "none")
+        await assertCardRequests(peer, card: card, actions: ["GET", "PUT", "GET"])
+        try await assertCardWriteBody(peer, value: "none")
+        let remaining = await peer.remainingResponses()
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testCardLostAckValidManualReadNeverProvesResponseOrReplays() async throws {
+        for card in Self.cardSelectionCases {
+            let (client, peer, _) = try await cardSelectionClient(card, loseAcknowledgement: true)
+            await enqueueCardWrite(peer, card: card)
+            let attempt = CameraShootingSettingAttempt(key: card.key, requestedValue: "card2")
+            let failure = await cardApplyError(client, card: card, requested: "card2", attempt: attempt)
+            assertCardLostAck(failure, attempt: attempt)
+            await assertCardRequests(peer, card: card, actions: ["GET", "PUT"])
+            await peer.enqueueJSON(path: card.path, body: Self.cardBody("card2"))
+            try await client.refreshShootingSetting(attempt)
+            XCTAssertEqual(attempt.snapshot.writeEvidence, .unknown)
+            XCTAssertEqual(attempt.snapshot.readbackEvidence, .matched)
+            XCTAssertEqual(attempt.snapshot.observedSetting?.value, "card2")
+            await assertCardRequests(peer, card: card, actions: ["GET", "PUT", "GET"])
+            try await assertCardWriteBody(peer, value: "card2")
+            let remaining = await peer.remainingResponses()
+            XCTAssertEqual(remaining, 0)
+        }
+    }
+
+    func testCardMalformedRawTypesDuplicatesAndMissingCurrentBlockBothKeys() async throws {
+        let malformed = [
+            #"{"value":2,"ability":["card1","card2"]}"#,
+            #"{"value":"card1","ability":["card1",2,"card2"]}"#,
+            #"{"value":"card1","ability":["card1","card2","card2"]}"#,
+            #"{"value":"none","ability":["card1","card2"]}"#,
+            #"{"ability":["card1","card2"]}"#,
+        ]
+        for card in Self.cardSelectionCases {
+            for fresh in malformed {
+                try await assertCardPrewriteRejection(card, fresh: fresh, marker: "CARD-MALFORMED-NOT-SENT")
+            }
+        }
+    }
+
+    private struct CardSelectionCase {
+        let key: String
+        let suffix: String
+        var path: String { "/ccapi/ver100" + suffix }
+        var setup: [String] { ["GET /ccapi", "GET " + ShootingSettingEvidenceTests.aggregate, "GET " + path] }
+    }
+    private static let cardSelectionCases = [
+        CardSelectionCase(key: "cardselectionstillimage", suffix: "/functions/cardselection/stillimage"),
+        CardSelectionCase(key: "cardselectionmovie", suffix: "/functions/cardselection/movie"),
+    ]
+    private static let cardUnknownReadback = #"{"value":"card2","ability":["card1","card2","card3"]}"#
+    private static func cardBody(_ value: String) -> String {
+        "{\"value\":\"\(value)\",\"ability\":[\"none\",\"card1\",\"card2\"]}"
+    }
+    private func cardSelectionClient(_ card: CardSelectionCase, loseAcknowledgement: Bool = false) async throws
+        -> (CCAPIClient, MockCameraHTTPTransport, CameraCapabilities) {
+        let peer = MockCameraHTTPTransport()
+        await peer.enqueueJSON(path: "/ccapi", body:
+            "{\"ver100\":[{\"path\":\"/shooting/settings\",\"get\":true},{\"path\":\"\(card.suffix)\",\"get\":true,\"put\":true}]}")
+        await peer.enqueueJSON(path: Self.aggregate, body: "{}")
+        await peer.enqueueJSON(path: card.path, body: Self.cardBody("card1"))
+        let transport: any CameraHTTPTransport
+        if loseAcknowledgement { transport = CardSelectionLostACKTransport(peer: peer) }
+        else { transport = peer }
+        let client = try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .camera, transport: transport)
+        let capabilities = try await client.capabilities()
+        XCTAssertEqual(capabilities.setting(card.key)?.values, ["none", "card1", "card2"])
+        XCTAssertEqual(capabilities.setting(card.key)?.value, "card1")
+        await assertCardRequests(peer, card: card, actions: [])
+        return (client, peer, capabilities)
+    }
+    private func enqueueCardWrite(_ peer: MockCameraHTTPTransport, card: CardSelectionCase, readback: String? = nil) async {
+        await peer.enqueueJSON(path: card.path, body: Self.cardBody("card1"))
+        await peer.enqueue(method: "PUT", path: card.path, status: 204, body: Data())
+        if let readback { await peer.enqueueJSON(path: card.path, body: readback) }
+    }
+    private func cardApplyError(_ client: CCAPIClient, card: CardSelectionCase, requested: String,
+                                attempt: CameraShootingSettingAttempt) async -> Error? {
+        do {
+            try await client.applyShootingSetting(key: card.key, value: requested, attempt: attempt)
+            return nil
+        } catch { return error } // Every caller checks the exact error; missing/unexpected stubs cannot pass.
+    }
+    private func cardRefreshError(_ client: CCAPIClient, attempt: CameraShootingSettingAttempt) async -> Error? {
+        do { try await client.refreshShootingSetting(attempt); return nil } catch { return error }
+    }
+    private func assertCardPrewriteRejection(_ card: CardSelectionCase, fresh: String, marker: String) async throws {
+        let (client, peer, _) = try await cardSelectionClient(card)
+        await peer.enqueueJSON(path: card.path, body: fresh)
+        // Provision all unfixed-path responses so baseline failure is the assertion, never a fixture error.
+        await peer.enqueue(method: "PUT", path: card.path, status: 204, body: Data())
+        await peer.enqueueJSON(path: card.path, body: Self.cardBody("card2"))
+        let attempt = CameraShootingSettingAttempt(key: card.key, requestedValue: "card2")
+        let failure = await cardApplyError(client, card: card, requested: "card2", attempt: attempt)
+        XCTAssertEqual(attempt.snapshot.writeEvidence, .notSent, "\(marker):\(card.key)")
+        XCTAssertNil(attempt.snapshot.observedSetting)
+        XCTAssertEqual(failure as? CCAPIError, .invalidSetting(key: card.key, value: "card2"))
+        await assertCardRequests(peer, card: card, actions: ["GET"])
+        let requests = await peer.requests()
+        XCTAssertEqual(requests.filter { $0.method == "PUT" }.count, 0)
+        let remaining = await peer.remainingResponses()
+        XCTAssertEqual(remaining, 2)
+    }
+    private func assertCardLostAck(_ failure: Error?, attempt: CameraShootingSettingAttempt) {
+        XCTAssertEqual((failure as? URLError)?.code, .networkConnectionLost)
+        XCTAssertEqual(attempt.snapshot.writeEvidence, .unknown)
+        XCTAssertEqual(attempt.snapshot.readbackEvidence, .unavailable)
+        XCTAssertNil(attempt.snapshot.observedSetting)
+    }
+    private func assertCardRequests(_ peer: MockCameraHTTPTransport, card: CardSelectionCase, actions: [String]) async {
+        let requests = await peer.requests()
+        XCTAssertEqual(requests.map { "\($0.method) \($0.path)" }, card.setup + actions.map { "\($0) \(card.path)" })
+        XCTAssertTrue(requests.filter { $0.method == "GET" }.allSatisfy { $0.body == nil || $0.body?.isEmpty == true })
+    }
+    private func assertCardWriteBody(_ peer: MockCameraHTTPTransport, value: String) async throws {
+        let requests = await peer.requests()
+        let writes = requests.filter { $0.method == "PUT" }
+        XCTAssertEqual(writes.count, 1)
+        let body = try XCTUnwrap(writes.first?.body)
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: body) as? [String: String], ["value": value])
+    }
+}
+
+/// Only loses a recorded synthetic PUT response. It is not an explicit camera rejection and opens no socket.
+private struct CardSelectionLostACKTransport: CameraHTTPTransport {
+    let peer: MockCameraHTTPTransport
+    func send(_ request: URLRequest) async throws -> CameraHTTPResponse { try await peer.send(request) }
+    func sendShootingSetting(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        let response = try await peer.send(request)
+        if request.httpMethod == "PUT" { throw URLError(.networkConnectionLost) }
+        return response
+    }
+    func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse { try await peer.download(request) }
 }
