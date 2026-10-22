@@ -87,8 +87,7 @@ class UsbPtpCameraBackendTest {
         val failure = runCatching { backend.startBulbExposure() }.exceptionOrNull()
 
         assertTrue("USB_BULB_LOST_FULL_OWNER", failure is ShutterReleaseException)
-        assertTrue(failure?.cause is PtpResponseException)
-        assertTrue(failure?.suppressed?.any { it === transport.remotePressResponseFailure } == true)
+        assertRemoteReleaseFailure(failure, transport.remotePressResponseFailure)
         assertEquals(listOf(1L, 2L), transport.appliedRemotePressStages)
         assertEquals(listOf(
             CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
@@ -120,10 +119,7 @@ class UsbPtpCameraBackendTest {
         val failure = runCatching { backend.startBulbExposure() }.exceptionOrNull()
 
         assertTrue("USB_BULB_LOST_START_HALF_OFF_OWNER", failure is ShutterReleaseException)
-        val releaseFailure = failure?.cause as? PtpResponseException
-        assertEquals(CanonEosOperationCode.REMOTE_RELEASE_OFF, releaseFailure?.operationCode)
-        assertEquals(PtpResponseCode.GENERAL_ERROR, releaseFailure?.responseCode)
-        assertTrue(failure?.suppressed?.any { it === transport.remotePressResponseFailure } == true)
+        assertRemoteReleaseFailure(failure, transport.remotePressResponseFailure)
         assertEquals(listOf(2L), transport.acknowledgedRemoteReleaseStages)
         assertEquals(usbBulbOffOnly(), transport.remoteShutterCommands().filter {
             it.first == CanonEosOperationCode.REMOTE_RELEASE_OFF
@@ -161,8 +157,8 @@ class UsbPtpCameraBackendTest {
 
         assertTrue(start.isCancelled)
         assertTrue(failure is ShutterReleaseException)
-        assertTrue(failure?.suppressed?.any { it is kotlinx.coroutines.CancellationException } == true)
-        assertTrue(failure?.cause is PtpResponseException)
+        val primaryChain = assertRemoteReleaseFailure(failure)
+        assertTrue(suppressedEvidenceOnPrimaryChain(primaryChain).any { it is kotlinx.coroutines.CancellationException })
         assertEquals(usbBulbOffOnly(), transport.remoteShutterCommands().filter {
             it.first == CanonEosOperationCode.REMOTE_RELEASE_OFF
         })
@@ -434,9 +430,7 @@ class UsbPtpCameraBackendTest {
         val failedClose = runCatching { failedCloseBackend.close() }.exceptionOrNull()
         assertTrue(failedClose is ShutterReleaseException)
         val closeWarning = failedClose as ShutterReleaseException
-        assertTrue(closeWarning.cause is PtpResponseException)
-        assertEquals(CanonEosOperationCode.REMOTE_RELEASE_OFF, (closeWarning.cause as PtpResponseException).operationCode)
-        assertTrue(closeWarning.suppressed.any { it === shutdownFailure })
+        assertRemoteReleaseFailure(closeWarning, shutdownFailure)
         assertEquals(setOf(PreviousConnectionSafetyWarning.SHUTTER), previousConnectionSafetyWarnings(closeWarning))
         val failedCloseCommands = failedCloseTransport.sentContainers.drop(failedCloseStart)
         assertEquals(usbBulbOffOnly(), failedCloseCommands.filter { it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF }
@@ -485,7 +479,7 @@ class UsbPtpCameraBackendTest {
         val failure = runCatching { backend.halfPressShutter() }.exceptionOrNull()
 
         assertTrue(failure is ShutterReleaseException)
-        assertTrue(failure?.cause is PtpResponseException)
+        assertRemoteReleaseFailure(failure)
         assertEquals(listOf(
             CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
             CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
@@ -706,6 +700,104 @@ class UsbPtpCameraBackendTest {
         }
     }
 
+    @Test fun releaseFailureAssertionRejectsMissingOrWrongOuterOwner() {
+        val releaseFailure = PtpResponseException(
+            CanonEosOperationCode.REMOTE_RELEASE_OFF, PtpResponseCode.GENERAL_ERROR,
+        )
+        listOf(null, releaseFailure, IllegalStateException(releaseFailure)).forEach { failure ->
+            assertReleaseFailureAssertionRejected { assertRemoteReleaseFailure(failure) }
+        }
+    }
+
+    @Test fun releaseFailureAssertionRejectsUnrelatedIntermediateWrapper() {
+        val failure = ShutterReleaseException(IllegalStateException(
+            "Unrelated primary wrapper",
+            PtpResponseException(CanonEosOperationCode.REMOTE_RELEASE_OFF, PtpResponseCode.GENERAL_ERROR),
+        ))
+        assertReleaseFailureAssertionRejected { assertRemoteReleaseFailure(failure) }
+    }
+
+    @Test fun releaseFailureAssertionRejectsNonPtpRoot() {
+        val failure = ShutterReleaseException(java.io.IOException("Not a PTP release response"))
+        assertReleaseFailureAssertionRejected { assertRemoteReleaseFailure(failure) }
+    }
+
+    @Test fun releaseFailureAssertionRejectsWrongOperation() {
+        val failure = ShutterReleaseException(PtpResponseException(
+            CanonEosOperationCode.REMOTE_RELEASE_ON, PtpResponseCode.GENERAL_ERROR,
+        ))
+        assertReleaseFailureAssertionRejected { assertRemoteReleaseFailure(failure) }
+    }
+
+    @Test fun releaseFailureAssertionRejectsWrongResponse() {
+        val failure = ShutterReleaseException(PtpResponseException(
+            CanonEosOperationCode.REMOTE_RELEASE_OFF, PtpResponseCode.OK,
+        ))
+        assertReleaseFailureAssertionRejected { assertRemoteReleaseFailure(failure) }
+    }
+
+    @Test fun releaseFailureAssertionRejectsMissingExactOriginalSuppressedIdentity() {
+        val original = java.io.IOException("Synthetic original press response lost")
+        val failure = ShutterReleaseException(PtpResponseException(
+            CanonEosOperationCode.REMOTE_RELEASE_OFF, PtpResponseCode.GENERAL_ERROR,
+        ))
+        assertReleaseFailureAssertionRejected { assertRemoteReleaseFailure(failure, original) }
+        // Matching type and text are not evidence that the exact thrown original survived.
+        failure.addSuppressed(java.io.IOException(original.message))
+        assertReleaseFailureAssertionRejected { assertRemoteReleaseFailure(failure, original) }
+    }
+
+    private fun assertRemoteReleaseFailure(
+        failure: Throwable?,
+        vararg expectedSuppressed: Throwable,
+    ): List<Throwable> {
+        assertEquals("The outer failure must own shutter release", ShutterReleaseException::class.java, failure?.javaClass)
+        val primaryChain = boundedCauseChain(failure!!)
+        assertTrue("A release owner must retain its PTP cause", primaryChain.size >= 2)
+        // Coroutine recovery may copy ShutterReleaseException and retain the original as
+        // its cause. No other wrapper or suppressed-only PTP response satisfies ownership.
+        primaryChain.dropLast(1).forEach { owner ->
+            assertEquals("Only typed release owners may wrap the primary PTP response", ShutterReleaseException::class.java, owner.javaClass)
+        }
+        val root = primaryChain.last()
+        assertEquals("The primary root must be an exact PTP response failure", PtpResponseException::class.java, root.javaClass)
+        val releaseFailure = root as PtpResponseException
+        assertEquals(CanonEosOperationCode.REMOTE_RELEASE_OFF, releaseFailure.operationCode)
+        assertEquals(PtpResponseCode.GENERAL_ERROR, releaseFailure.responseCode)
+        expectedSuppressed.forEach { original ->
+            assertTrue("The exact original failure must survive as suppressed evidence on the primary chain",
+                suppressedEvidenceOnPrimaryChain(primaryChain).any { it === original })
+        }
+        return primaryChain
+    }
+
+    private fun boundedCauseChain(failure: Throwable): List<Throwable> {
+        val chain = mutableListOf<Throwable>()
+        var current: Throwable? = failure
+        while (current != null) {
+            val node = current
+            assertTrue("Failure cause chains must stay bounded", chain.size < 32)
+            assertFalse("Failure cause chains must not contain an identity cycle", chain.any { it === node })
+            chain += node
+            current = node.cause
+        }
+        return chain
+    }
+
+    private fun suppressedEvidenceOnPrimaryChain(primaryChain: List<Throwable>): List<Throwable> =
+        primaryChain.flatMap { owner -> owner.suppressed.flatMap { boundedCauseChain(it) } }
+
+    private fun assertReleaseFailureAssertionRejected(assertion: () -> Unit) {
+        // Only synchronous, synthetic helper checks belong here, never backend/async work.
+        val rejected = try {
+            assertion()
+            false
+        } catch (_: AssertionError) {
+            true
+        }
+        assertTrue("The malformed release failure must be rejected", rejected)
+    }
+
     private fun usbBulbOffOnly(): List<Pair<Int, List<Long>>> = listOf(
         CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(2L),
         CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
@@ -856,7 +948,7 @@ class UsbPtpCameraBackendTest {
         val failure = runCatching { backend.captureStill() }.exceptionOrNull()
 
         assertTrue("USB_STILL_RELEASE_OWNER", failure is ShutterReleaseException)
-        assertTrue(failure?.cause is PtpResponseException)
+        assertRemoteReleaseFailure(failure)
         assertEquals(listOf(
             CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
             CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(2L, 0L),
@@ -888,10 +980,7 @@ class UsbPtpCameraBackendTest {
         val failure = runCatching { backend.captureStill() }.exceptionOrNull()
 
         assertTrue(failure is ShutterReleaseException)
-        val releaseFailure = failure?.cause as? PtpResponseException
-        assertEquals(CanonEosOperationCode.REMOTE_RELEASE_OFF, releaseFailure?.operationCode)
-        assertEquals(PtpResponseCode.GENERAL_ERROR, releaseFailure?.responseCode)
-        assertTrue(failure?.suppressed?.any { it === transport.remotePressResponseFailure } == true)
+        assertRemoteReleaseFailure(failure, transport.remotePressResponseFailure)
         assertEquals(listOf(2L), transport.acknowledgedRemoteReleaseStages)
         assertEquals(listOf(listOf(2L), listOf(1L)), transport.remoteShutterCommands()
             .filter { it.first == CanonEosOperationCode.REMOTE_RELEASE_OFF }.map { it.second })
@@ -961,7 +1050,7 @@ class UsbPtpCameraBackendTest {
         val closeFailure = runCatching { backend.close() }.exceptionOrNull()
 
         assertTrue(closeFailure is ShutterReleaseException)
-        assertTrue(closeFailure?.cause is PtpResponseException)
+        assertRemoteReleaseFailure(closeFailure)
         val closeCommands = transport.sentContainers.drop(closeStart)
         assertEquals(listOf(
             CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(2L),

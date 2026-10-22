@@ -57,3 +57,22 @@ VM witness 的 no-new-listing 僅限受控的虛擬時間：原 poller 已停在
 此批證明目標是原 caller 的釋放責任，不是全 backend 任意並行呼叫皆已序列化，也不是 USB driver／實體快門、光學曝光、相機斷電或關閉後仍能再次送達 Stop 的保證。transport 已關閉時，保留的是未解責任和 replacement gate，不是宣稱硬體已停止。
 
 iOS picker native crash、Apple USB wire contract、合法 EDSDK provider、Android native color 與實體跨平台驗收仍各自未解。本批本機完成不授權外部交付，也不代表整體 EOS 開發目標完成。
+
+
+## 2026-10-22 Android host 協程例外恢復對齊
+
+原整合提交 `4cd1aafc3167db75aef0e5a899b34d5b4f0faf99` 的補充 Android host run `39753392913` 在 09:21:06 UTC 終止為失敗：2057 項中 8 項失敗。這 8 項均先通過外層 `ShutterReleaseException` 檢查，接著在直接 `cause` 型別或 operation 斷言失敗；後段 owner、OFF、禁止重按與 retirement 斷言因此尚未於該 CI 執行到。保留原失敗，不以本機 412 項通過替代完整 host 結果。
+
+既有 `ShutterReleaseSessionTest.ambiguousPressAndFailedReleasePreserveBothFailures` 已記錄 kotlinx-coroutines 的 stacktrace recovery 可能複製 typed exception，將原例外置於 cause。原本機整合 JVM 未開啟 `-ea`；本次驗證將明確開啟 assertions 與 coroutine recovery，以實際 backend 反證這個差異，不靠停用 recovery 或變更 production 例外來求綠。CI 日誌只有斷言失敗，沒有被捕捉的完整例外鏈，所以來源推論本身不算動態根因證明。
+
+修正範圍只有 `UsbPtpCameraBackendTest.kt` 與本文件。原 117 個 USB 方法均保留，只有上述 8 個方法的例外證據讀法對齊既有 helper 契約，其餘 109 方法 body 不變。允許的 primary 鏈只包含精確的 `ShutterReleaseException` wrapper，終點必須是精確 `PtpResponseException`，operation 必須為 `REMOTE_RELEASE_OFF`、response 必須為 `GENERAL_ERROR`；未知中介例外、錯誤 PTP 欄位、缺少原 suppressed 物件均不可被當成有效證據。所有原釋放順序、原 owner、UNKNOWN、無新 press、無新拍攝成功、關閉及替換阻擋斷言保持。新增 6 項拒絕控制用來防止寬鬆搜尋把無關例外當成通過。
+
+離線計畫保留原 401.957761 秒整合 gate，不重設原 720 秒上限。本次另有一次完整 hard 600 秒修正驗證窗，包含：原編譯產物的 8 個原方法在 recovery-on 下之精確失敗；僅加 assertion 訊息、原判斷式不變的單一 actual-backend 觀察；兩個 variant 的新鮮完整 UI/test closure 編譯；最終 418 個 distinct 方法（原 412 加 6 控制）完整執行。production data jar 只可在來源、原編譯 receipt 與 SHA 完全一致下沿用，不可引用 AF 或 iOS session-memory 候選。
+
+動態鏈若與預期不符，本次必須停止並回報，不擴大 normalization。資源仍為 2 CPU、768 MiB 取樣 process-tree RSS、2 GiB 磁碟 floor 與 512 MiB 起跑 reserve；不是真實相機、裝置或完整 Gradle/Apple 原生驗收。發布與額外 CI 尚未執行，需併原 Apple run 終態後評估；不更動 workflow、timeout、安全設定或 KVM。
+
+實際結果：2026-10-22 09:44:47.335013 至 09:51:35.704360 UTC，修正 gate 使用 408.370215 秒並通過。原 immutable 編譯產物的 8 方法在 recovery-on 下精確重現 8 個原斷言失敗；不是 compile/setup failure。單一實際 backend 的觀察證實 `ShutterReleaseException → ShutterReleaseException → PtpResponseException(operation=37161,response=8194)`，對應原 OFF／GENERAL_ERROR，並保留原判斷式失敗。這是可控制的 runtime parity 反證；CI 原捕捉物件本身未輸出，所以不冒稱已讀取 CI 例外鏈。
+
+兩次完整 UI/test closure 新鮮編譯分別 75.280309／82.393284 秒；最後單一 candidate run 418／418 通過，沒有 skip、ignore、assumption 或失敗，涵蓋 123 USB 方法（原 117＋6 控制）及其他原 295 個方法。最大取樣 RSS 為 757412 KiB，所有來源、依賴、class origin、原候選保護與 postcheck 均通過。production 77 檔來源與本次原整合 data jar SHA 對齊後沿用，非重新乾淨 Gradle app build；43 個 UI 檔與完整直接測試 closure 每個 variant 都重新編譯。
+
+原整合 401.957761 秒加上本次 408.370215 秒，共 810.327976 秒，分屬原 720 秒與另行通知 600 秒兩個明列窗口，沒有將前次消耗歸零。原 Android host 2057／8 失敗與其八項後段未執行事實保留；修正後全 host、APK 與簽章 CI 尚未執行，不能以本機 418 代替。原 Apple run `39753392872` 已於 09:55:14 UTC 完成：Core 694、App 857、UI 44 項皆通過，App/UI 38 分 45 秒，未改原 45 分鐘上限。原六情境 real-picker case 通過，僅代表本次未重現，並非永久修復證明。此 test-only 修正不聲稱解決 Apple picker 問題或證明實體相機釋放。
