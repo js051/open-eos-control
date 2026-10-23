@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from android_host_runtime import AndroidHostRuntime, add_runtime_arguments
+
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -22,6 +24,7 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--phase", choices=("baseline", "current"), default="baseline")
     parser.add_argument("--ref")
+    add_runtime_arguments(parser)
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     ref = args.ref or ("4163aad8" if args.phase == "baseline" else "WORKTREE")
@@ -29,43 +32,11 @@ def main():
         ref = subprocess.check_output(["git", "rev-parse", ref], cwd=repo, text=True).strip()
     output = args.out.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    jars = args.jars.resolve()
-    manifest = json.loads((jars / "installation-receipt.json").read_text())
-    verified = {}
-    for artifact in manifest["artifacts"]:
-        path = jars / artifact["file"]
-        actual = digest(path.read_bytes())
-        if actual != artifact["sha256"]:
-            raise ValueError(f"Existing tool checksum mismatch: {path.name}")
-        verified[path.name] = actual
-
-    def classpath(names):
-        paths = [jars / (name + ".jar") for name in names]
-        for path in paths:
-            if path.name not in verified:
-                raise ValueError(f"Required tool missing: {path.name}")
-        return os.pathsep.join(map(str, paths))
-
-    compiler = classpath(
-        [
-            "kotlin-compiler-embeddable-2.2.21",
-            "kotlin-stdlib-2.2.21",
-            "kotlin-script-runtime-2.2.21",
-            "kotlin-reflect-1.6.10",
-            "kotlin-daemon-embeddable-2.2.21",
-            "kotlinx-coroutines-core-jvm-1.8.0",
-            "annotations-23.0.0",
-        ]
+    host = AndroidHostRuntime(
+        repo, args.jars, java=args.java, receipt=args.tool_receipt, gradle_manifest=args.gradle_manifest,
     )
-    runtime = classpath(
-        [
-            "kotlin-stdlib-2.2.21",
-            "kotlinx-coroutines-core-jvm-1.9.0",
-            "annotations-23.0.0",
-            "junit-4.13.2",
-            "hamcrest-core-1.3",
-        ]
-    )
+    compiler = host.compiler_classpath
+    runtime = host.test_classpath
     hashes = {}
     extracts = {}
     files = []
@@ -135,7 +106,7 @@ def main():
         target = output / fixture.name
         target.write_text(data)
         files.append(target)
-    jvm = ["java", "-XX:ActiveProcessorCount=1", "-Xmx256m"]
+    jvm = host.command(tests=False)
     command = jvm + [
         "-cp",
         compiler,
@@ -168,7 +139,8 @@ def main():
         if args.phase == "current"
         else [],
         "fixture_sha256": fixture_hashes,
-        "verified_tools": verified,
+        "verified_tools": host.verified,
+        "runtime_contract": host.receipt(),
         "compile_exit": compiled.returncode,
         ("boundary"): (
             "Exact production startLiveView, JPEG/RTP entries, original Stop ownership, pos"
@@ -184,7 +156,7 @@ def main():
         print(compiled.stdout + compiled.stderr)
     else:
         executed = subprocess.run(
-            jvm
+            host.command(tests=True)
             + [
                 "-cp",
                 str(output / "tests.jar") + os.pathsep + runtime,

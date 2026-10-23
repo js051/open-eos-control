@@ -103,4 +103,139 @@ final class CameraMediaTypeTests: XCTestCase {
         XCTAssertEqual(CameraMediaType.classify(item), .photo)
         XCTAssertFalse(CameraMediaType.isAutomaticJPEG(item))
     }
+    func testStreamResponseRejectsUnrepresentableWildcardRangeLength() throws {
+        let item = CameraMediaItem(id: "range-overflow", name: "RANGE.MP4", kind: "video")
+        for status in [200, 206] {
+            let response = CameraHTTPStreamResponse(
+                statusCode: status,
+                headers: ["content-type": "video/mp4", "content-length": "1",
+                          "content-range": "bytes 0-9223372036854775807/*"],
+                chunks: AsyncThrowingStream { $0.finish() }
+            )
+            XCTAssertThrowsError(try CameraMediaStreamResponse(
+                item: item, response: response, fallbackTotalBytes: 16
+            )) { error in
+                guard case CameraMediaStreamValidationError.invalidContentRange = error else {
+                    return XCTFail("Unrepresentable range length must use the existing typed validation error: \(error)")
+                }
+            }
+        }
+    }
+
+    func testStreamResponseAcceptsLargestRepresentableZeroBasedRangeLength() throws {
+        let item = CameraMediaItem(id: "range-zero", name: "RANGE.MP4", kind: "video")
+        let response = CameraHTTPStreamResponse(
+            statusCode: 206,
+            headers: ["content-type": "video/mp4", "content-length": "1",
+                      "content-range": "bytes 0-9223372036854775806/*"],
+            chunks: AsyncThrowingStream { $0.finish() }
+        )
+        let stream = try CameraMediaStreamResponse(item: item, response: response, fallbackTotalBytes: nil)
+
+        XCTAssertEqual(stream.statusCode, 206)
+        XCTAssertEqual(stream.rangeStart, 0)
+        XCTAssertEqual(stream.contentLength, Int64.max)
+        XCTAssertNil(stream.totalBytes)
+    }
+
+    func testStreamResponseAcceptsLargestRepresentableNonzeroBasedRangeLength() throws {
+        let item = CameraMediaItem(id: "range-one", name: "RANGE.MP4", kind: "video")
+        let response = CameraHTTPStreamResponse(
+            statusCode: 206,
+            headers: ["content-type": "application/octet-stream",
+                      "content-range": "bytes 1-9223372036854775807/*"],
+            chunks: AsyncThrowingStream { $0.finish() }
+        )
+        let stream = try CameraMediaStreamResponse(item: item, response: response, fallbackTotalBytes: nil)
+
+        XCTAssertEqual(stream.rangeStart, 1)
+        XCTAssertEqual(stream.contentLength, Int64.max)
+        XCTAssertNil(stream.totalBytes)
+    }
+
+    func testStreamResponseAcceptsSingleByteAtMaximumRangeEndpoint() throws {
+        let item = CameraMediaItem(id: "range-last", name: "RANGE.MP4", kind: "video")
+        let response = CameraHTTPStreamResponse(
+            statusCode: 206,
+            headers: ["content-type": "video/mp4",
+                      "content-range": "bytes 9223372036854775807-9223372036854775807/*"],
+            chunks: AsyncThrowingStream { $0.finish() }
+        )
+        let stream = try CameraMediaStreamResponse(item: item, response: response, fallbackTotalBytes: nil)
+
+        XCTAssertEqual(stream.rangeStart, Int64.max)
+        XCTAssertEqual(stream.contentLength, 1)
+        XCTAssertNil(stream.totalBytes)
+    }
+
+    func testStreamResponsePreservesKnownTotalBoundaryValidation() throws {
+        let item = CameraMediaItem(id: "range-total", name: "RANGE.MP4", kind: "video")
+        let valid = CameraHTTPStreamResponse(
+            statusCode: 206,
+            headers: ["content-type": "video/mp4",
+                      "content-range": "bytes 0-9223372036854775806/9223372036854775807"],
+            chunks: AsyncThrowingStream { $0.finish() }
+        )
+        let stream = try CameraMediaStreamResponse(item: item, response: valid, fallbackTotalBytes: 8)
+        XCTAssertEqual(stream.contentLength, Int64.max)
+        XCTAssertEqual(stream.totalBytes, Int64.max)
+        for range in [
+            "bytes 1-9223372036854775807/9223372036854775807",
+            "bytes 0-9223372036854775806/9223372036854775806",
+            "bytes 0-0/0",
+            "bytes 2-1/*",
+            "bytes 0-9223372036854775808/*",
+        ] {
+            let invalid = CameraHTTPStreamResponse(
+                statusCode: 206, headers: ["content-type": "video/mp4", "content-range": range],
+                chunks: AsyncThrowingStream { $0.finish() }
+            )
+            XCTAssertThrowsError(try CameraMediaStreamResponse(
+                item: item, response: invalid, fallbackTotalBytes: 8
+            )) { error in
+                guard case CameraMediaStreamValidationError.invalidContentRange = error else {
+                    return XCTFail("Invalid bounds or total must preserve the typed error: \(error)")
+                }
+            }
+        }
+    }
+
+    func testStreamResponsePreservesOrdinaryRangesAndLengthFallbacks() throws {
+        let item = CameraMediaItem(id: "range-ordinary", name: "RANGE.MP4", kind: "video")
+        let cases: [(range: String?, status: Int, length: String?, fallback: Int64?,
+                     expectedStart: Int64, expectedLength: Int64?, expectedTotal: Int64?)] = [
+            ("bytes 0-0/*", 206, "9", nil, 0, 1, nil),
+            ("bytes 1024-1039/8192", 206, "16", 4096, 1024, 16, 8192),
+            ("bytes 4-7/*", 206, nil, 16, 4, 4, 16),
+            (nil, 200, "32", 64, 0, 32, 32),
+            (nil, 200, nil, 64, 0, nil, 64),
+        ]
+        for row in cases {
+            var headers = ["content-type": "video/mp4"]
+            headers["content-range"] = row.range
+            headers["content-length"] = row.length
+            let response = CameraHTTPStreamResponse(
+                statusCode: row.status, headers: headers,
+                chunks: AsyncThrowingStream { $0.finish() }
+            )
+            let stream = try CameraMediaStreamResponse(
+                item: item, response: response, fallbackTotalBytes: row.fallback
+            )
+            XCTAssertEqual(stream.statusCode, row.status)
+            XCTAssertEqual(stream.rangeStart, row.expectedStart)
+            XCTAssertEqual(stream.contentLength, row.expectedLength)
+            XCTAssertEqual(stream.totalBytes, row.expectedTotal)
+        }
+        let missingRange = CameraHTTPStreamResponse(
+            statusCode: 206, headers: ["content-type": "video/mp4", "content-length": "32"],
+            chunks: AsyncThrowingStream { $0.finish() }
+        )
+        XCTAssertThrowsError(try CameraMediaStreamResponse(
+            item: item, response: missingRange, fallbackTotalBytes: 64
+        )) { error in
+            guard case CameraMediaStreamValidationError.invalidContentRange = error else {
+                return XCTFail("Partial response without Content-Range must still be rejected: \(error)")
+            }
+        }
+    }
 }

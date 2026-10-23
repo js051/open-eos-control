@@ -590,6 +590,8 @@ class CameraViewModel(
                     ?.let { value -> runCatching { ConnectionTarget.valueOf(value) }.getOrNull() }
                     ?: it.connectionTarget,
                 baseUrl = preferences.getString(KEY_BASE_URL, it.baseUrl) ?: it.baseUrl,
+                ccapiSimulatorMode = preferences.all[KEY_CCAPI_SIMULATOR_MODE] as? Boolean
+                    ?: it.ccapiSimulatorMode,
                 username = preferences.getString(KEY_USERNAME, it.username) ?: it.username,
                 bridgeBaseUrl = preferences.getString(KEY_BRIDGE_BASE_URL, it.bridgeBaseUrl) ?: it.bridgeBaseUrl,
             )
@@ -1067,6 +1069,10 @@ class CameraViewModel(
             .putString(KEY_USERNAME, state.username)
             .putString(KEY_BRIDGE_BASE_URL, state.bridgeBaseUrl)
             .putString(KEY_CONNECTION_TARGET, state.connectionTarget.name)
+            .also { editor ->
+                state.ccapiSimulatorMode?.let { editor.putBoolean(KEY_CCAPI_SIMULATOR_MODE, it) }
+                    ?: editor.remove(KEY_CCAPI_SIMULATOR_MODE)
+            }
             .apply()
     }
 
@@ -5011,6 +5017,7 @@ class CameraViewModel(
     private companion object {
         const val PREFERENCES_NAME = "camera_connection"
         const val KEY_BASE_URL = "base_url"
+        const val KEY_CCAPI_SIMULATOR_MODE = "ccapi_simulator_mode"
         const val KEY_USERNAME = "username"
         const val KEY_BRIDGE_BASE_URL = "bridge_base_url"
         const val KEY_CONNECTION_TARGET = "connection_target"

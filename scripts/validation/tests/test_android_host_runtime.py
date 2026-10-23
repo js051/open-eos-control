@@ -110,6 +110,43 @@ class AndroidHostRuntimeTests(unittest.TestCase):
         self.assertNotIn("kotlinx-coroutines-core-jvm-1.9.0.jar", runtime.COMPILER_ARTIFACTS)
         self.assertEqual(len(runtime.TEST_ARTIFACTS), len(set(runtime.TEST_ARTIFACTS)))
 
+    def test_gradle_manifest_accepts_only_identical_resolved_duplicate(self):
+        verified = {name: hashlib.sha256(name.encode()).hexdigest() for name in runtime.TEST_ARTIFACTS}
+        artifacts = [{"coordinate": "synthetic:" + name, "file": name, "sha256": digest}
+                     for name, digest in verified.items()]
+        artifacts.append(dict(artifacts[0]))
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "gradle.json"
+            manifest.write_text(json.dumps({
+                "schema": 1, "entrypoint": ":app:testDebugUnitTest", "runtime_artifacts": artifacts,
+            }))
+            result = runtime.compare_gradle_manifest(manifest, verified)
+            self.assertEqual("SELECTED_ARTIFACT_HASHES_MATCH", result["state"])
+            self.assertFalse(result["full_app_equivalence"])
+
+    def test_gradle_manifest_rejects_conflicting_duplicate_and_missing_selected(self):
+        verified = {name: hashlib.sha256(name.encode()).hexdigest() for name in runtime.TEST_ARTIFACTS}
+        artifacts = [{"coordinate": "synthetic:" + name, "file": name, "sha256": digest}
+                     for name, digest in verified.items()]
+        selected = next(item for item in artifacts if not item["file"].startswith("annotations-"))
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "gradle.json"
+            for field, value in (("coordinate", "different:coordinate"), ("sha256", "0" * 64)):
+                with self.subTest(conflict=field):
+                    conflict = dict(selected, **{field: value})
+                    manifest.write_text(json.dumps({
+                        "schema": 1, "entrypoint": ":app:testDebugUnitTest",
+                        "runtime_artifacts": artifacts + [conflict],
+                    }))
+                    with self.assertRaisesRegex(ValueError, "invalid/duplicate"):
+                        runtime.compare_gradle_manifest(manifest, verified)
+            manifest.write_text(json.dumps({
+                "schema": 1, "entrypoint": ":app:testDebugUnitTest",
+                "runtime_artifacts": [item for item in artifacts if item is not selected],
+            }))
+            with self.assertRaisesRegex(ValueError, "differs or is missing"):
+                runtime.compare_gradle_manifest(manifest, verified)
+
 
 class FocusReceiptGuardTests(unittest.TestCase):
     @classmethod
