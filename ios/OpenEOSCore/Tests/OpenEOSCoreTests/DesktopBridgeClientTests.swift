@@ -944,6 +944,61 @@ final class DesktopBridgeClientTests: XCTestCase {
         }
     }
 
+    func testMediaStreamRejectsOverflowingRangeCancelsOriginalResponseAndRevokesPlaybackTicket() async throws {
+        let peer = MediaRangeCancellationPeer()
+        await peer.base.enqueueJSON(path: "/health", body: health)
+        await peer.base.enqueueJSON(
+            method: "POST",
+            path: "/v1/session",
+            status: 201,
+            body: #"{"id":"synthetic_range_session","engine":"libgphoto2"}"#
+        )
+        let ticketEndpoint = "/v1/session/synthetic_range_session/media/synthetic-video/playback"
+        let playbackPath = "/v1/media-playback/synthetic_range_ticket"
+        await peer.base.enqueueJSON(
+            method: "POST",
+            path: ticketEndpoint,
+            body: #"{"url":"/v1/media-playback/synthetic_range_ticket","expiresInSeconds":900}"#
+        )
+        await peer.base.enqueue(
+            path: playbackPath,
+            status: 206,
+            headers: [
+                "content-type": "video/mp4",
+                "content-range": "bytes 0-9223372036854775807/*",
+            ],
+            body: Data()
+        )
+        await peer.base.enqueue(method: "DELETE", path: playbackPath, status: 204)
+        let client = try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: peer)
+        try await client.initialize()
+        let item = CameraMediaItem(id: "synthetic-video", name: "SYNTHETIC_RANGE.MP4", kind: "video")
+
+        do {
+            _ = try await client.openMediaStream(item, offset: 0)
+            XCTFail("An unrepresentable inclusive range length must not produce a media stream")
+        } catch {
+            XCTAssertEqual(
+                error as? DesktopBridgeError,
+                .invalidResponse("Desktop Bridge returned an invalid media byte range.")
+            )
+        }
+
+        XCTAssertEqual(peer.cancelledPaths(), [playbackPath], "The original transport response must be cancelled")
+        // openMediaStream awaits the failed lease's close, so no polling or
+        // test-side cancellation may stand in for the production cleanup.
+        let requests = await peer.base.requests()
+        XCTAssertEqual(requests.map(\.path), ["/health", "/v1/session", ticketEndpoint, playbackPath, playbackPath])
+        XCTAssertEqual(requests.map(\.method), ["GET", "POST", "POST", "GET", "DELETE"])
+        let streamRequest = try XCTUnwrap(requests.first { $0.method == "GET" && $0.path == playbackPath })
+        XCTAssertEqual(
+            streamRequest.headers.first { $0.key.caseInsensitiveCompare("Range") == .orderedSame }?.value,
+            "bytes=0-"
+        )
+        let remainingResponses = await peer.base.remainingResponses()
+        XCTAssertEqual(remainingResponses, 0)
+    }
+
     private func enqueueStatus(method: String, path: String, on transport: MockCameraHTTPTransport) async {
         await transport.enqueueJSON(method: method, path: path, body: status)
     }

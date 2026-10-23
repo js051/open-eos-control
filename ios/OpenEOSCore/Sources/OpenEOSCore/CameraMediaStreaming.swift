@@ -33,7 +33,7 @@ public struct CameraMediaStreamResponse: Sendable {
             .components(separatedBy: ";")
             .first?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        self.contentLength = range.map { $0.end - $0.start + 1 } ?? contentLength
+        self.contentLength = range?.length ?? contentLength
         totalBytes = range?.totalBytes ?? (response.statusCode == 200 ? contentLength : nil) ?? fallbackTotalBytes
         rangeStart = range?.start ?? 0
         chunks = response.chunks
@@ -99,6 +99,12 @@ public struct CameraMediaStreamResponse: Sendable {
               end >= start else {
             throw CameraMediaStreamValidationError.invalidContentRange
         }
+        // The ordered, nonnegative bounds make subtraction safe, but a wildcard
+        // total permits 0...Int64.max, whose inclusive length is not representable.
+        let (length, overflow) = (end - start).addingReportingOverflow(1)
+        guard !overflow else {
+            throw CameraMediaStreamValidationError.invalidContentRange
+        }
         let totalBytes: Int64?
         if rangeAndTotal[1] == "*" {
             totalBytes = nil
@@ -110,7 +116,7 @@ public struct CameraMediaStreamResponse: Sendable {
         if let totalBytes, totalBytes <= end {
             throw CameraMediaStreamValidationError.invalidContentRange
         }
-        return ParsedContentRange(start: start, end: end, totalBytes: totalBytes)
+        return ParsedContentRange(start: start, length: length, totalBytes: totalBytes)
     }
 }
 
@@ -137,6 +143,6 @@ enum CameraMediaStreamValidationError: Error {
 
 private struct ParsedContentRange {
     let start: Int64
-    let end: Int64
+    let length: Int64
     let totalBytes: Int64?
 }

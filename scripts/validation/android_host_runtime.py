@@ -132,14 +132,22 @@ def compare_gradle_manifest(path: Path | None, verified: dict[str, str]) -> dict
     entries = {}
     for artifact in artifacts:
         name = artifact.get("file")
-        if not isinstance(name, str) or name in entries:
+        if not isinstance(name, str):
             raise ValueError("Gradle manifest has invalid/duplicate artifacts")
-        entries[name] = artifact.get("sha256")
+        identity = (artifact.get("coordinate"), name, artifact.get("sha256"))
+        if name in entries:
+            # Gradle may report the identical resolved artifact more than once.
+            # Only a complete, identical identity is idempotent; conflicts stay fatal.
+            if (identity != entries[name] or not all(isinstance(value, str) and value for value in identity)
+                    or re.fullmatch(r"[0-9a-f]{64}", identity[2]) is None):
+                raise ValueError("Gradle manifest has invalid/duplicate artifacts")
+            continue
+        entries[name] = identity
     for name in TEST_ARTIFACTS:
         # Annotation packaging may legitimately differ between Gradle and the diagnostic compiler.
         if name.startswith("annotations-"):
             continue
-        if entries.get(name) != verified[name]:
+        if entries.get(name, (None, None, None))[2] != verified[name]:
             raise ValueError("Gradle test artifact differs or is missing: " + name)
     return {
         "state": "SELECTED_ARTIFACT_HASHES_MATCH",

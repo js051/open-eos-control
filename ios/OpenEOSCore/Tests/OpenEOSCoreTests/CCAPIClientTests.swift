@@ -4140,6 +4140,56 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(report.contains("storageDevices=1"))
     }
 
+    func testMediaStreamRejectsOverflowingRangeAndCancelsEveryOriginalFallbackResponse() async throws {
+        let peer = MediaRangeCancellationPeer()
+        await peer.base.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        let path = "/ccapi/ver100/contents/card1/100CANON/SYNTHETIC_RANGE.MP4"
+        let paths = [path, "\(path)?kind=main", "\(path)?type=main"]
+        for candidate in paths {
+            await peer.base.enqueue(
+                path: candidate,
+                status: 206,
+                headers: [
+                    "content-type": "video/mp4",
+                    "content-range": "bytes 0-9223372036854775807/*",
+                ],
+                body: Data()
+            )
+        }
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .camera,
+            transport: peer
+        )
+        let item = CameraMediaItem(id: path, name: "SYNTHETIC_RANGE.MP4", kind: "video")
+
+        do {
+            _ = try await client.openMediaStream(item, offset: 0)
+            XCTFail("An unrepresentable inclusive range length must not produce a media stream")
+        } catch {
+            XCTAssertEqual(
+                error as? CCAPIError,
+                .invalidResponse(
+                    "Media streaming failed for '\(item.name)'.\n"
+                        + paths.map { "- \($0): invalid byte-range response" }.joined(separator: "\n")
+                )
+            )
+        }
+
+        XCTAssertEqual(peer.cancelledPaths(), paths, "Each original transport response must be cancelled")
+        let requests = await peer.base.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi"] + paths)
+        XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+        XCTAssertTrue(requests.dropFirst().allSatisfy { request in
+            request.headers.first { $0.key.caseInsensitiveCompare("Range") == .orderedSame }?.value == "bytes=0-"
+        })
+        let remainingResponses = await peer.base.remainingResponses()
+        XCTAssertEqual(remainingResponses, 0)
+    }
+
     private func enqueueStatus(on transport: MockCameraHTTPTransport, prefix: String = "/ccapi/ver100") async {
         await transport.enqueueJSON(path: "\(prefix)/devicestatus/batterylist", body: #"{"batterylist":[{"level":89}]}"#)
         await transport.enqueueJSON(
@@ -4233,4 +4283,48 @@ enum CCAPILiveViewTestFixture {
     static let jpeg = Data(base64Encoded:
         "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDzmiiivTPOP//Z"
     )!
+}
+
+/// Shared only by the two caller regressions: the existing mock owns request
+/// matching, and each original stream response owns its cancellation observation.
+final class MediaRangeCancellationPeer: CameraHTTPTransport, @unchecked Sendable {
+    let base = MockCameraHTTPTransport()
+    private let lock = NSLock()
+    private var cancelled: [String] = []
+
+    func cancelledPaths() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    private func recordCancellation(_ path: String) {
+        lock.lock()
+        cancelled.append(path)
+        lock.unlock()
+    }
+
+    func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        try await base.send(request)
+    }
+
+    func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse {
+        try await base.download(request)
+    }
+
+    func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
+        let response = try await base.send(request)
+        let path = (request.url?.path ?? "") + (request.url?.query.map { "?\($0)" } ?? "")
+        let output = AsyncThrowingStream<Data, Error>.makeStream()
+        if !response.body.isEmpty { output.continuation.yield(response.body) }
+        return CameraHTTPStreamResponse(
+            statusCode: response.statusCode,
+            headers: response.headers,
+            chunks: output.stream,
+            cancel: {
+                self.recordCancellation(path)
+                output.continuation.finish(throwing: CancellationError())
+            }
+        )
+    }
 }
