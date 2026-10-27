@@ -575,6 +575,153 @@ final class MediaResponseOwnershipTests: XCTestCase {
         XCTAssertEqual(deliveries, 1)
     }
 
+    func testPickerIdentityProbeIsAbsentForDisabledTicketsWithoutLoadingViews() {
+        let host = UIViewController(), picker = UIViewController()
+        XCTAssertNil(MediaUploadPicker.IdentityProbe(ticket: .disabled,
+            requestedHost: host, expectedPicker: picker))
+        XCTAssertFalse(host.isViewLoaded)
+        XCTAssertFalse(picker.isViewLoaded)
+    }
+
+    func testPickerIdentityRequiresExactNonnullPickerAndPresenter() throws {
+        let host = UIViewController(), picker = UIViewController(), unrelated = UIViewController()
+        let probe = try pickerIdentityProbe(requestedHost: host, expectedPicker: picker)
+        probe.captureOriginalPresenter(host)
+        let exact = probe.snapshot(picker: picker, actualPresenter: host)
+        XCTAssertTrue(exact.pickerMatches)
+        XCTAssertTrue(exact.requestedHostAlive)
+        XCTAssertFalse(exact.requestedHostAttached)
+        XCTAssertTrue(exact.originalPresenterKnown)
+        XCTAssertTrue(exact.originalPresenterAlive)
+        XCTAssertTrue(exact.currentIsRequestedHost)
+        XCTAssertFalse(exact.currentIsHostAncestor)
+        XCTAssertTrue(exact.ancestryComplete)
+        XCTAssertTrue(exact.currentIsOriginalPresenter)
+        for candidate in [nil, unrelated] as [UIViewController?] {
+            let other = probe.snapshot(picker: candidate, actualPresenter: candidate)
+            XCTAssertFalse(other.pickerMatches)
+            XCTAssertFalse(other.currentIsRequestedHost)
+            XCTAssertFalse(other.currentIsHostAncestor)
+            XCTAssertFalse(other.currentIsOriginalPresenter)
+        }
+        XCTAssertFalse(host.isViewLoaded)
+        XCTAssertFalse(picker.isViewLoaded)
+        XCTAssertFalse(unrelated.isViewLoaded)
+    }
+
+    func testPickerIdentityDistinguishesRequestedHostFromItsActualAncestor() throws {
+        let host = UIViewController(), ancestor = UIViewController(), picker = UIViewController()
+        ancestor.addChild(host)
+        defer { host.removeFromParent() }
+        let probe = try pickerIdentityProbe(requestedHost: host, expectedPicker: picker)
+        probe.captureOriginalPresenter(ancestor)
+        let snapshot = probe.snapshot(picker: picker, actualPresenter: ancestor)
+        XCTAssertTrue(snapshot.pickerMatches)
+        XCTAssertFalse(snapshot.currentIsRequestedHost)
+        XCTAssertTrue(snapshot.currentIsHostAncestor)
+        XCTAssertTrue(snapshot.ancestryComplete)
+        XCTAssertTrue(snapshot.currentIsOriginalPresenter)
+        XCTAssertFalse(host.isViewLoaded)
+        XCTAssertFalse(ancestor.isViewLoaded)
+        XCTAssertFalse(picker.isViewLoaded)
+    }
+
+    func testPickerIdentityBoundsAncestorTraversalAndMarksIncompleteSearch() throws {
+        let controllers = (0..<34).map { _ in UIViewController() }
+        let picker = UIViewController()
+        for index in 0..<33 { controllers[index + 1].addChild(controllers[index]) }
+        defer { for controller in controllers { controller.removeFromParent() } }
+        let probe = try pickerIdentityProbe(requestedHost: controllers[0], expectedPicker: picker)
+        let lastInspected = probe.snapshot(picker: picker, actualPresenter: controllers[32])
+        XCTAssertTrue(lastInspected.currentIsHostAncestor)
+        XCTAssertFalse(lastInspected.ancestryComplete)
+        let beyondBound = probe.snapshot(picker: picker, actualPresenter: controllers[33])
+        XCTAssertFalse(beyondBound.currentIsHostAncestor)
+        XCTAssertFalse(beyondBound.ancestryComplete, "An unvisited ancestor is unknown, not proven absent")
+        controllers[32].removeFromParent()
+        let exactBound = probe.snapshot(picker: picker, actualPresenter: controllers[32])
+        XCTAssertTrue(exactBound.currentIsHostAncestor)
+        XCTAssertTrue(exactBound.ancestryComplete)
+        XCTAssertTrue(controllers.allSatisfy { !$0.isViewLoaded })
+        XCTAssertFalse(picker.isViewLoaded)
+    }
+
+    func testPickerIdentityDoesNotRetainHostPickerOrOriginalPresenter() throws {
+        var probe: MediaUploadPicker.IdentityProbe?
+        weak var weakHost: UIViewController?
+        weak var weakPicker: UIViewController?
+        weak var weakOriginal: UIViewController?
+        try autoreleasepool {
+            let host = UIViewController(), picker = UIViewController(), original = UIViewController()
+            weakHost = host; weakPicker = picker; weakOriginal = original
+            probe = try pickerIdentityProbe(requestedHost: host, expectedPicker: picker)
+            probe?.captureOriginalPresenter(original)
+            let snapshot = try XCTUnwrap(probe).snapshot(picker: picker, actualPresenter: original)
+            XCTAssertTrue(snapshot.requestedHostAlive)
+            XCTAssertTrue(snapshot.originalPresenterAlive)
+            XCTAssertTrue(snapshot.currentIsOriginalPresenter)
+        }
+        XCTAssertNil(weakHost)
+        XCTAssertNil(weakPicker)
+        XCTAssertNil(weakOriginal)
+        let released = try XCTUnwrap(probe).snapshot(picker: nil, actualPresenter: nil)
+        XCTAssertFalse(released.pickerMatches, "Two nil weak references are not an identity match")
+        XCTAssertFalse(released.requestedHostAlive)
+        XCTAssertFalse(released.requestedHostAttached)
+        XCTAssertTrue(released.originalPresenterKnown)
+        XCTAssertFalse(released.originalPresenterAlive)
+        XCTAssertFalse(released.currentIsRequestedHost)
+        XCTAssertFalse(released.currentIsHostAncestor)
+        XCTAssertFalse(released.ancestryComplete, "A released host has no observable ancestry")
+        XCTAssertFalse(released.currentIsOriginalPresenter)
+    }
+
+    func testPickerIdentityOriginalPresenterCannotBeRetargeted() throws {
+        let host = UIViewController(), picker = UIViewController()
+        let original = UIViewController(), replacement = UIViewController()
+        let probe = try pickerIdentityProbe(requestedHost: host, expectedPicker: picker)
+        probe.captureOriginalPresenter(original)
+        probe.captureOriginalPresenter(replacement)
+        XCTAssertTrue(probe.snapshot(picker: picker, actualPresenter: original).currentIsOriginalPresenter)
+        XCTAssertFalse(probe.snapshot(picker: picker, actualPresenter: replacement).currentIsOriginalPresenter)
+    }
+
+    func testPickerIdentityNilOriginalObservationCannotBeFilledInLater() throws {
+        let host = UIViewController(), picker = UIViewController()
+        let probe = try pickerIdentityProbe(requestedHost: host, expectedPicker: picker)
+        probe.captureOriginalPresenter(nil)
+        probe.captureOriginalPresenter(host)
+        let snapshot = probe.snapshot(picker: picker, actualPresenter: host)
+        XCTAssertFalse(snapshot.originalPresenterKnown)
+        XCTAssertFalse(snapshot.originalPresenterAlive)
+        XCTAssertFalse(snapshot.currentIsOriginalPresenter)
+        XCTAssertTrue(snapshot.currentIsRequestedHost)
+    }
+
+    func testPickerIdentityAttachmentOnlyObservesAnAlreadyLoadedHostView() throws {
+        let host = UIViewController(), picker = UIViewController()
+        let probe = try pickerIdentityProbe(requestedHost: host, expectedPicker: picker)
+        XCTAssertFalse(probe.snapshot(picker: picker, actualPresenter: nil).requestedHostAttached)
+        XCTAssertFalse(host.isViewLoaded)
+        let window = UIWindow(frame: .zero), hostView = UIView()
+        host.view = hostView
+        window.addSubview(hostView)
+        withExtendedLifetime(window) {
+            XCTAssertTrue(probe.snapshot(picker: picker, actualPresenter: nil).requestedHostAttached)
+            hostView.removeFromSuperview()
+            XCTAssertFalse(probe.snapshot(picker: picker, actualPresenter: nil).requestedHostAttached)
+        }
+        XCTAssertFalse(picker.isViewLoaded)
+    }
+
+    private func pickerIdentityProbe(requestedHost: UIViewController, expectedPicker: UIViewController) throws
+        -> MediaUploadPicker.IdentityProbe {
+        let ticket = PickerFixtureJournal.Ticket(ordinal: 1, startedUptime: 0,
+            scenario: .success, language: .english)
+        return try XCTUnwrap(MediaUploadPicker.IdentityProbe(ticket: ticket,
+            requestedHost: requestedHost, expectedPicker: expectedPicker))
+    }
+
     func testRejectedProviderGrantNeverDispatchesAndDoesNotReleaseAnUnacquiredGrant() async throws {
         let peer = MediaOwnershipPeer()
         let state = makeState([peer])

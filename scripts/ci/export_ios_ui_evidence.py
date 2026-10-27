@@ -376,6 +376,10 @@ PICKER_STAGES = (
     "completion-end", "delegate-returning", "sheet-clear", "sheet-disappeared",
     "sheet-dismissed", "upload-returned", "outcome-not-sent", "outcome-uncertain",
     "outcome-verified", "presenter-deinit", "coordinator-deinit", "session-retired",
+    "identity-picker-matches", "identity-requested-host-alive", "identity-requested-host-attached",
+    "identity-original-presenter-known", "identity-original-presenter-alive",
+    "identity-current-is-requested-host", "identity-current-is-host-ancestor",
+    "identity-ancestry-complete", "identity-current-is-original-presenter",
 )
 PICKER_OPENING_SLOTS = range(1, 17)
 
