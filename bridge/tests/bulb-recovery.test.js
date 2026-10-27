@@ -1,5 +1,6 @@
 "use strict";
 
+const { describe, it: test } = require("node:test");
 // Exercise production control-flow functions without a DOM package. Real-browser coverage
 // lives in bulb-recovery.browser.test.js; these are intentionally narrower client contracts.
 const assert = require("node:assert/strict");
@@ -233,4 +234,6 @@ async function run() {
   console.log("PASS: production PC Bulb state contracts (mode/capability change, sticky failure, fresh Stop readback, legacy omission, session isolation)");
 }
 
-run().catch((error) => { console.error(error); process.exitCode = 1; });
+describe("bulb-recovery completion", { concurrency: false, timeout: 5000 }, () => {
+  test("production Bulb recovery and Stop ownership contracts", run);
+});

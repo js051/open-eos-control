@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const mediaDialogFocus = require("../open_eos_bridge/static/media-dialog-focus.js");
 const source = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/app.js"), "utf8");
 function extract(name) {
   const match = new RegExp(`^  (?:async )?function ${name}\\(`, "m").exec(source);
@@ -31,8 +32,11 @@ function fixture() {
   }
   const context = vm.createContext({ state, ui, document,
     clearMediaPreview() {}, clearMediaDetails() {} });
-  vm.runInContext(["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus",
-    "setMediaDialogActionDisabled", "closeMediaPreview", "closeMediaDetails", "restoreMediaMutationFocus"].map(extract).join("\n"), context);
+  context.mediaDialogFocusController = mediaDialogFocus.createController({ state, ui, document: context.document });
+  Object.assign(context, { beginMediaDialogFocus: context.mediaDialogFocusController.begin,
+    restoreMediaDialogFocus: context.mediaDialogFocusController.restore,
+    setMediaDialogActionDisabled: context.mediaDialogFocusController.setActionDisabled });
+  vm.runInContext(["closeMediaPreview", "closeMediaDetails", "restoreMediaMutationFocus"].map(extract).join("\n"), context);
   function open(kind, original) {
     const owner = { session: state.session, original, itemId: original.dataset.mediaId, role: original.dataset.mediaAction };
     cards = [original];
@@ -191,4 +195,62 @@ test("pending mutation return allows the browser to reveal the card moved by its
   c.context.restoreMediaMutationFocus(mutation);
   assert.equal(c.document.activeElement, current);
   assert.equal(options.preventScroll, false);
+});
+
+test("production browser module exports and page wiring match the imported focus controller", () => {
+  const filename = "media-dialog-focus.js";
+  const html = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/index.html"), "utf8");
+  const marker = `<script src="/app/${filename}"></script>`;
+  assert.equal(html.split(marker).length, 2);
+  assert.ok(html.indexOf(marker) < html.indexOf('<script src="/app/app.js"></script>'));
+  const browser = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static", filename), "utf8"), browser);
+  assert.equal(typeof browser.OpenEOSMediaDialogFocus.createController, "function");
+  assert.equal(typeof browser.OpenEOSMediaDialogFocus.isTarget, "function");
+  assert.ok(source.includes("mediaDialogFocus.createController({ state, ui, document })"));
+  assert.doesNotMatch(source, /function mediaDialogFocusTarget\(/);
+});
+
+test("imported focus controllers do not share dialog owner state", () => {
+  const a = fixture(), b = fixture();
+  const aButton = a.button("a"), bButton = b.button("b");
+  aButton.focus(); bButton.focus();
+  a.context.beginMediaDialogFocus("Details");
+  assert.equal(a.state.mediaDetailsFocusOwner.original, aButton);
+  assert.equal(b.state.mediaDetailsFocusOwner, undefined);
+  b.context.beginMediaDialogFocus("Preview");
+  assert.equal(b.state.mediaPreviewFocusOwner.original, bButton);
+  assert.equal(a.state.mediaPreviewFocusOwner, undefined);
+});
+
+test("begin preserves a currently open owner and inherits only exact session identity", () => {
+  const h = fixture(), original = h.button("original"), next = h.button("next");
+  const first = h.open("Details", original);
+  next.focus(); h.context.beginMediaDialogFocus("Details");
+  assert.equal(h.state.mediaDetailsFocusOwner, first);
+  h.ui.mediaDetailsDialog.open = false;
+  h.context.beginMediaDialogFocus("Details", first);
+  assert.equal(h.state.mediaDetailsFocusOwner.original, original);
+  h.state.session = { id: first.session.id };
+  h.context.beginMediaDialogFocus("Details", first);
+  assert.equal(h.state.mediaDetailsFocusOwner.original, next);
+  assert.equal(h.state.mediaDetailsFocusOwner.session, h.state.session);
+  assert.equal(h.state.mediaDetailsFocusOwner.itemId, "next");
+});
+
+test("exported focus target predicate preserves hidden inert detached and disabled vetoes", () => {
+  const h = fixture();
+  assert.equal(mediaDialogFocus.isTarget(null), false);
+  for (const cause of ["tag", "detached", "disabled", "hidden", "inert", "no-rect"] ) {
+    const button = h.button();
+    assert.equal(mediaDialogFocus.isTarget(button), true);
+    if (cause === "tag") button.tagName = "DIV";
+    if (cause === "detached") button.isConnected = false;
+    if (cause === "disabled") button.disabled = true;
+    if (cause === "hidden" || cause === "inert") button.closest = selector => {
+      assert.equal(selector, "[hidden], [inert]"); return {};
+    };
+    if (cause === "no-rect") button.getClientRects = () => [];
+    assert.equal(mediaDialogFocus.isTarget(button), false, cause);
+  }
 });

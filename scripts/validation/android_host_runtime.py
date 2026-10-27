@@ -131,16 +131,25 @@ def compare_gradle_manifest(path: Path | None, verified: dict[str, str]) -> dict
         raise ValueError("Gradle manifest has no runtime artifacts")
     entries = {}
     for artifact in artifacts:
-        name = artifact.get("file")
-        if not isinstance(name, str):
-            raise ValueError("Gradle manifest has invalid/duplicate artifacts")
-        identity = (artifact.get("coordinate"), name, artifact.get("sha256"))
+        invalid = "Gradle manifest has invalid/duplicate artifacts: "
+        if not isinstance(artifact, dict):
+            raise ValueError(invalid + "each artifact must be an object")
+        fields = ("coordinate", "file", "sha256")
+        identity = tuple(artifact.get(field) for field in fields)
+        for field, value in zip(fields, identity, strict=True):
+            if (not isinstance(value, str) or not value.strip()
+                    or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in value)):
+                raise ValueError(invalid + field + " must be a nonempty control-free string")
+        name = identity[1]
+        if name in {".", ".."} or any(char in name for char in "/\\:"):
+            raise ValueError(invalid + "file must be a flat filename, not a path")
+        if re.fullmatch(r"[0-9a-f]{64}", identity[2]) is None:
+            raise ValueError(invalid + "sha256 must be 64 lowercase hexadecimal characters")
         if name in entries:
             # Gradle may report the identical resolved artifact more than once.
-            # Only a complete, identical identity is idempotent; conflicts stay fatal.
-            if (identity != entries[name] or not all(isinstance(value, str) and value for value in identity)
-                    or re.fullmatch(r"[0-9a-f]{64}", identity[2]) is None):
-                raise ValueError("Gradle manifest has invalid/duplicate artifacts")
+            # Every row is now schema-checked before this idempotence decision.
+            if identity != entries[name]:
+                raise ValueError(invalid + "one filename has conflicting identities")
             continue
         entries[name] = identity
     for name in TEST_ARTIFACTS:

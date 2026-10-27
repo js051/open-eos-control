@@ -1,7 +1,6 @@
 const assert = require("node:assert/strict");
 const { createController } = require("../open_eos_bridge/static/media-auto-import.js");
-const tests = [];
-const test = (name, fn) => tests.push([name, fn]);
+const { describe, it: test } = require("node:test");
 const item = (id, extra = {}) => ({ id, name: `${id}.JPG`, kind: "image", sizeBytes: 900, ...extra });
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 function fixture(options = {}) {
@@ -17,6 +16,7 @@ function fixture(options = {}) {
   return { env, controller, async tick(ms = 1000) { env.time += ms; return controller.step(); },
     async start() { await controller.step(); env.time += 1000; return controller.step(); } };
 }
+describe("media auto import controller", { concurrency: false, timeout: 5000 }, () => {
 test("two complete baselines never download existing originals", async () => {
   const f = fixture(); await f.start(); assert.equal(f.controller.snapshot().phase, "watching");
   assert.deepEqual(f.env.calls, ["inventory", "inventory"]); await f.tick(5000);
@@ -146,4 +146,4 @@ test("observer failure fails closed before original I/O", async () => {
   const f = fixture({ callbacks: { onUpdate: () => { throw new Error(); } } }); await f.controller.step();
   assert.equal(f.controller.snapshot().reason, "observer-failed"); assert.deepEqual(f.env.calls, []);
 });
-(async () => { for (const [name, fn] of tests) { await fn(); console.log(`PASS ${name}`); } console.log(`${tests.length} tests passed`); })().catch((error) => { console.error(error); process.exitCode = 1; });
+});

@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const mediaDialogFocus = require("../open_eos_bridge/static/media-dialog-focus.js");
 const source = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/app.js"), "utf8");
 function extract(name) {
   const start = new RegExp(`^  function ${name}\\(`, "m").exec(source).index;
@@ -22,7 +23,8 @@ function fixture(item = {}, disabled = []) {
   const context = vm.createContext({ state, ui, FEATURES, featureSupported: value => !disabled.includes(value),
     cameraInteractionBusy: () => false, formatDate: () => "", formatMediaDimensions: () => "", formatMediaSize: () => "",
     formatMediaContentType: () => "", t: key => key });
-  vm.runInContext(["mediaDialogFocusTarget", "setMediaDialogActionDisabled", "renderMediaDetails"].map(extract).join("\n"), context);
+  context.mediaDialogFocusController = mediaDialogFocus.createController({ state, ui, document: context.document });
+  vm.runInContext(["setMediaDialogActionDisabled", "renderMediaDetails"].map(extract).join("\n"), context);
   context.renderMediaDetails();
   return { state, ui, render: () => context.renderMediaDetails() };
 }

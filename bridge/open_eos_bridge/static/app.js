@@ -11,6 +11,8 @@
   if (!monitoring) throw new Error("Open EOS monitoring module is unavailable.");
   const lut = globalThis.OpenEOSLut;
   if (!lut) throw new Error("Open EOS LUT module is unavailable.");
+  const lutImport = globalThis.OpenEOSLutImport;
+  if (!lutImport) throw new Error("Open EOS LUT import module is unavailable.");
   const localVideo = globalThis.OpenEOSLocalVideo;
   if (!localVideo) throw new Error("Open EOS local video module is unavailable.");
   const rtpAudio = globalThis.OpenEOSRtpAudio;
@@ -26,6 +28,8 @@
   if (!mediaUpload) throw new Error("Open EOS media upload module is unavailable.");
   const mediaListing = globalThis.OpenEOSMediaListing;
   if (!mediaListing) throw new Error("Open EOS media listing module is unavailable.");
+  const mediaDialogFocus = globalThis.OpenEOSMediaDialogFocus;
+  if (!mediaDialogFocus) throw new Error("Open EOS media dialog focus module is unavailable.");
   const mediaLibrary = globalThis.OpenEOSMediaLibrary;
   if (!mediaLibrary) throw new Error("Open EOS media library module is unavailable.");
   const mediaBatch = globalThis.OpenEOSMediaBatch;
@@ -2253,6 +2257,8 @@
     settingOptions: byId("setting-options"),
     toast: byId("toast"),
   };
+
+  const mediaDialogFocusController = mediaDialogFocus.createController({ state, ui, document });
 
   class ApiError extends Error {
     constructor(message, { code = "HTTP_ERROR", status = 0, feature = null, engine = null, connectionReason = null } = {}) {
@@ -7067,6 +7073,7 @@
 
   const monitorAnalysisCanvas = document.createElement("canvas");
   let lutPreviewRenderer = null;
+  let lutImportController = null;
 
   function monitorNeedsPixelAnalysis() {
     const settings = state.monitorSettings;
@@ -7574,57 +7581,27 @@
     }
   }
 
+  function cubeLutImportController() {
+    return lutImportController ||= lutImport.createController({
+      state,
+      readBytes: file => lut.readCubeLutBytes(file),
+      parseBytes: (bytes, name) => lut.parseCubeLutBytes(bytes, name),
+      prepareRenderer: () => { lutPreviewRenderer ||= lut.createWebGLRenderer(ui.monitorLutPreview); },
+      renderFrame: renderMonitoringFrame,
+      reportSuccess: () => showToast(t("lutLoaded")),
+      reportFailure: message => showToast(`${t("lutLoadFailed")}: ${message}`, true),
+      renderState: () => { renderMonitoringControls(); renderDiagnostics(); },
+    });
+  }
+
   function cancelCubeLutImport() {
     state.monitorLutPicker = null;
     ui.monitorLutFile.value = "";
-    if (!state.monitorLutImportOwner) return;
-    state.monitorLutImportOwner = null;
-    renderMonitoringControls();
-    renderDiagnostics();
+    cubeLutImportController().cancel();
   }
 
   function importCubeLutFile(file) {
-    if (!file) return;
-    // Keep at most one physical read and one latest queued replacement. Logical
-    // cancellation cannot stop Blob.arrayBuffer, so do not start unbounded
-    // parallel 16 MiB reads when selections change quickly.
-    state.monitorLutImportOwner = { file };
-    state.monitorLutImportError = null;
-    renderMonitoringControls();
-    renderDiagnostics();
-    return readPendingCubeLut();
-  }
-
-  async function readPendingCubeLut() {
-    if (state.monitorLutReadOwner || !state.monitorLutImportOwner) return;
-    const owner = state.monitorLutImportOwner;
-    state.monitorLutReadOwner = owner;
-    const current = () => state.monitorLutImportOwner === owner;
-    try {
-      const bytes = await lut.readCubeLutBytes(owner.file);
-      if (!current()) return;
-      const parsed = lut.parseCubeLutBytes(bytes, owner.file.name);
-      if (!current()) return;
-      lutPreviewRenderer ||= lut.createWebGLRenderer(ui.monitorLutPreview);
-      if (!current()) return;
-      state.monitorSettings = { ...state.monitorSettings, cubeLut: parsed };
-      state.monitorLutRevision = (state.monitorLutRevision || 0) + 1;
-      state.monitorFrameEvidence = null;
-      state.monitorAnalysisError = null;
-      renderMonitoringFrame();
-      showToast(t("lutLoaded"));
-    } catch (error) {
-      if (!current()) return;
-      const message = error instanceof Error ? error.message : String(error);
-      state.monitorLutImportError = message;
-      showToast(`${t("lutLoadFailed")}: ${message}`, true);
-    } finally {
-      state.monitorLutReadOwner = null;
-      if (current()) state.monitorLutImportOwner = null;
-      renderMonitoringControls();
-      renderDiagnostics();
-      if (state.monitorLutImportOwner) void readPendingCubeLut();
-    }
+    return cubeLutImportController().select(file);
   }
 
   function removeCubeLut() {
@@ -9852,53 +9829,16 @@
     setMediaDialogActionDisabled("Details", ui.mediaDetailsDelete, disabled || Boolean(state.mediaDeleteOwner) || !featureSupported(FEATURES.MEDIA_DELETE));
   }
 
-  function mediaDialogFocusTarget(button) {
-    return button?.tagName === "BUTTON" && button.isConnected && !button.disabled &&
-      !button.closest("[hidden], [inert]") && button.getClientRects().length > 0;
-  }
-
   function beginMediaDialogFocus(kind, inherited = null) {
-    const key = `media${kind}FocusOwner`;
-    if (ui[`media${kind}Dialog`].open && state[key]?.session === state.session) return;
-    const original = inherited?.session === state.session ? inherited.original : document.activeElement;
-    state[key] = {
-      session: state.session,
-      original,
-      itemId: inherited?.session === state.session ? inherited.itemId : original?.dataset?.mediaId,
-      role: inherited?.session === state.session ? inherited.role : original?.dataset?.mediaAction,
-    };
+    return mediaDialogFocusController.begin(kind, inherited);
   }
 
   function restoreMediaDialogFocus(owner, eligible, closedDialog, preventScroll = true) {
-    if (!eligible || !owner || owner.session !== state.session ||
-        state.mediaPreviewFocusOwner || state.mediaDetailsFocusOwner ||
-        document.querySelector("dialog[open]")) return;
-    // Firefox may retain Close as activeElement synchronously after native close().
-    // Only the exact retired dialog can supply that focus; never override a newer choice.
-    const retainedDialogFocus = closedDialog && !closedDialog.open && closedDialog.contains(document.activeElement);
-    if (document.activeElement !== document.body && document.activeElement !== owner.original && !retainedDialogFocus) return;
-    const cardInvoker = Boolean(owner.itemId && owner.role);
-    const currentCards = cardInvoker && state.activeView === "media" &&
-      state.mediaRenderOwner?.session === state.session && state.media.some(item => item.id === owner.itemId)
-      ? Array.from(ui.mediaList.querySelectorAll("button[data-media-id][data-media-action]")) : [];
-    let target = mediaDialogFocusTarget(owner.original) && (!cardInvoker || currentCards.includes(owner.original))
-      ? owner.original : null;
-    if (!target && cardInvoker) {
-      target = currentCards.find(button => button.dataset.mediaId === owner.itemId &&
-        button.dataset.mediaAction === owner.role && mediaDialogFocusTarget(button));
-    }
-    target?.focus({ preventScroll });
+    return mediaDialogFocusController.restore(owner, eligible, closedDialog, preventScroll);
   }
 
   function setMediaDialogActionDisabled(kind, button, disabled) {
-    const owner = state[`media${kind}FocusOwner`];
-    const dialog = ui[`media${kind}Dialog`];
-    const close = ui[`media${kind}Close`];
-    if (disabled && owner && owner.session === state.session && dialog.open &&
-        document.activeElement === button && dialog.contains(button) && mediaDialogFocusTarget(close)) {
-      close.focus({ preventScroll: true });
-    }
-    button.disabled = disabled;
+    return mediaDialogFocusController.setActionDisabled(kind, button, disabled);
   }
 
   function clearMediaDetails() {
