@@ -175,6 +175,8 @@ struct MediaUploadPicker: View {
             let session = Session(selection: opening.selection, completion: opening.completion)
             active = session
             let ticket = opening.selection.fixtureTicket
+            session.coordinator.identityProbe = IdentityProbe(ticket: ticket, requestedHost: self,
+                expectedPicker: session.picker)
             lastFixtureTicket = ticket
             session.coordinator.retirement = { [weak self, weak session] completion in
                 guard let self, let session else { return }
@@ -188,6 +190,8 @@ struct MediaUploadPicker: View {
                 session.presentationCompleted = true
                 MediaUploadPicker.trace(.presentationCompleted, session.picker, ticket: ticket,
                     flag: session.picker.presentingViewController != nil)
+                session.coordinator.identityProbe?.captureOriginalPresenter(session.picker.presentingViewController)
+                session.coordinator.traceIdentity(session.picker)
                 if session.retirementRequested { requestRetirement(session) }
             }
         }
@@ -290,6 +294,60 @@ struct MediaUploadPicker: View {
             transitioning: controller.transitionCoordinator != nil, dismissing: controller.isBeingDismissed, flag: flag)
     }
 
+    /// Fixture-only, weak observations of public UIKit relationships. A snapshot
+    /// is not a remote-service retirement or controller-deallocation receipt.
+    @MainActor
+    final class IdentityProbe {
+        private weak var requestedHost: UIViewController?
+        private weak var expectedPicker: UIViewController?
+        private weak var originalActualPresenter: UIViewController?
+        private var originalPresenterCaptured = false
+        private var originalPresenterKnown = false
+
+        init?(ticket: PickerFixtureJournal.Ticket, requestedHost: UIViewController,
+              expectedPicker: UIViewController) {
+            guard ticket.isEnabled else { return nil }
+            self.requestedHost = requestedHost
+            self.expectedPicker = expectedPicker
+        }
+
+        func captureOriginalPresenter(_ presenter: UIViewController?) {
+            guard !originalPresenterCaptured else { return }
+            originalPresenterCaptured = true
+            originalPresenterKnown = presenter != nil
+            originalActualPresenter = presenter
+        }
+
+        func snapshot(picker: UIViewController?, actualPresenter: UIViewController?)
+            -> PickerFixtureJournal.IdentitySnapshot {
+            let host = requestedHost
+            var ancestor = host?.parent
+            var visited = 0
+            var currentIsHostAncestor = false
+            while let controller = ancestor, visited < 32 {
+                if let actualPresenter, actualPresenter === controller { currentIsHostAncestor = true }
+                ancestor = controller.parent
+                visited += 1
+            }
+            return PickerFixtureJournal.IdentitySnapshot(
+                pickerMatches: matches(picker, expectedPicker),
+                requestedHostAlive: host != nil,
+                requestedHostAttached: host?.viewIfLoaded?.window != nil,
+                originalPresenterKnown: originalPresenterKnown,
+                originalPresenterAlive: originalActualPresenter != nil,
+                currentIsRequestedHost: matches(actualPresenter, host),
+                currentIsHostAncestor: currentIsHostAncestor,
+                ancestryComplete: host != nil && ancestor == nil,
+                currentIsOriginalPresenter: matches(actualPresenter, originalActualPresenter)
+            )
+        }
+
+        private func matches(_ lhs: UIViewController?, _ rhs: UIViewController?) -> Bool {
+            guard let lhs, let rhs else { return false }
+            return lhs === rhs
+        }
+    }
+
     @MainActor
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
         let selection: MediaUploadSelection
@@ -298,6 +356,7 @@ struct MediaUploadPicker: View {
         private var delivered = false
         private var invalidated = false
         private var completed = false
+        var identityProbe: IdentityProbe?
         var retirement: (@escaping () -> Void) -> Void = { $0() }
         func invalidate() { invalidated = true }
         deinit { PickerFixtureJournal.record(.coordinatorDeinit, ticket: fixtureTicket) }
@@ -309,11 +368,13 @@ struct MediaUploadPicker: View {
         }
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
             MediaUploadPicker.trace(.selected, controller, ticket: fixtureTicket)
+            traceIdentity(controller)
             defer { PickerFixtureJournal.record(.delegateReturning, ticket: fixtureTicket) }
             finish(urls, controller: controller)
         }
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
             MediaUploadPicker.trace(.cancelled, controller, ticket: fixtureTicket)
+            traceIdentity(controller)
             defer { PickerFixtureJournal.record(.delegateReturning, ticket: fixtureTicket) }
             finish(nil, controller: controller)
         }
@@ -326,7 +387,15 @@ struct MediaUploadPicker: View {
                 MediaUploadPicker.trace(.completionBegin, controller, ticket: fixtureTicket)
                 completion(selection, urls)
                 MediaUploadPicker.trace(.completionEnd, controller, ticket: fixtureTicket)
+                traceIdentity(controller)
             }
+        }
+        func traceIdentity(_ controller: UIDocumentPickerViewController) {
+            guard let identityProbe else { return }
+            let actualPresenter = controller.presentingViewController
+            PickerFixtureJournal.recordIdentity(identityProbe.snapshot(picker: controller, actualPresenter: actualPresenter),
+                ticket: fixtureTicket, presented: actualPresenter != nil,
+                transitioning: controller.transitionCoordinator != nil, dismissing: controller.isBeingDismissed)
         }
     }
 }

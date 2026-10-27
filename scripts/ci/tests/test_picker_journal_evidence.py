@@ -79,6 +79,46 @@ class PickerJournalEvidenceTests(unittest.TestCase):
             self.collect()
             self.assertFalse((self.output / "picker-lifecycle.txt").exists())
 
+    def test_identity_flags_preserve_each_boundary_within_existing_caps(self):
+        identity_stages = (
+            "identity-picker-matches", "identity-requested-host-alive",
+            "identity-requested-host-attached", "identity-original-presenter-known",
+            "identity-original-presenter-alive", "identity-current-is-requested-host",
+            "identity-current-is-host-ancestor", "identity-ancestry-complete",
+            "identity-current-is-original-presenter",
+        )
+        self.assertEqual(tuple(stage for stage in evidence.PICKER_STAGES
+                               if stage.startswith("identity-")), identity_stages)
+        lines = []
+        for boundary in ("presentation-completed", "selected", "completion-end"):
+            lines.append(self.v2.replace(b"stage=selected", f"stage={boundary}".encode("ascii")))
+            for index, stage in enumerate(identity_stages):
+                lines.append(self.v2.replace(b"stage=selected", f"stage={stage}".encode("ascii"))
+                             .replace(b"flag=0", f"flag={index % 2}".encode("ascii")))
+        data = b"".join(lines)
+        self.assertLessEqual(len(lines), 128)
+        self.assertLessEqual(len(data), 16_384)
+        self.source.write_bytes(data)
+        self.opening_source(1).write_bytes(data)
+        self.collect()
+        self.assertEqual((self.output / "picker-lifecycle.txt").read_bytes(), data)
+        self.assertEqual(self.opening_output(1).read_bytes(), data)
+        self.assertEqual(self.report["warnings"], [])
+
+    def test_identity_records_do_not_admit_object_metadata_or_nonboolean_flags(self):
+        line = self.v2.replace(b"stage=selected", b"stage=identity-picker-matches")
+        invalid = [line.rstrip(b"\n") + b" " + field + b"\n" for field in (
+            b"address=synthetic", b"class=synthetic", b"device=synthetic", b"filename=synthetic")]
+        invalid += [line.replace(b"flag=0", value) for value in (b"flag=2", b"flag=true", b"flag=unknown")]
+        invalid.append(line.replace(b"identity-picker-matches", b"identity-private-selector"))
+        for data in invalid:
+            with self.subTest(data=data):
+                self.source.write_bytes(data)
+                self.opening_source(1).write_bytes(data)
+                self.collect()
+                self.assertFalse((self.output / "picker-lifecycle.txt").exists())
+                self.assertFalse(self.opening_output(1).exists())
+
     def test_oversize_and_excess_lines_are_rejected(self):
         for data in (b"x" * (evidence.MAX_TEXT_BYTES + 1), self.line * 129):
             self.source.write_bytes(data)

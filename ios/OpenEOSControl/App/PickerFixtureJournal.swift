@@ -32,6 +32,15 @@ enum PickerFixtureJournal {
         case presenterDeinit = "presenter-deinit"
         case coordinatorDeinit = "coordinator-deinit"
         case sessionRetired = "session-retired"
+        case identityPickerMatches = "identity-picker-matches"
+        case identityRequestedHostAlive = "identity-requested-host-alive"
+        case identityRequestedHostAttached = "identity-requested-host-attached"
+        case identityOriginalPresenterKnown = "identity-original-presenter-known"
+        case identityOriginalPresenterAlive = "identity-original-presenter-alive"
+        case identityCurrentIsRequestedHost = "identity-current-is-requested-host"
+        case identityCurrentIsHostAncestor = "identity-current-is-host-ancestor"
+        case identityAncestryComplete = "identity-ancestry-complete"
+        case identityCurrentIsOriginalPresenter = "identity-current-is-original-presenter"
     }
     enum Scenario: String, Sendable { case success, cancel, lostAck = "lost-ack" }
     enum Language: String, Sendable { case english, traditionalChinese }
@@ -66,6 +75,44 @@ enum PickerFixtureJournal {
         guard ticket.isEnabled else { return }
         storage.append(line(stage, ticket: ticket, now: ProcessInfo.processInfo.systemUptime,
             presented: presented, transitioning: transitioning, dismissing: dismissing, flag: flag), ticket: ticket)
+        #endif
+    }
+
+    /// Public-controller relationships only; values cannot retain a UIKit owner.
+    /// Each flag has one fixed meaning, without addresses or arbitrary labels.
+    struct IdentitySnapshot: Equatable, Sendable {
+        let pickerMatches: Bool
+        let requestedHostAlive: Bool
+        let requestedHostAttached: Bool
+        let originalPresenterKnown: Bool
+        let originalPresenterAlive: Bool
+        let currentIsRequestedHost: Bool
+        let currentIsHostAncestor: Bool
+        let ancestryComplete: Bool
+        let currentIsOriginalPresenter: Bool
+
+        var records: [(Stage, Bool)] {
+            [(.identityPickerMatches, pickerMatches),
+             (.identityRequestedHostAlive, requestedHostAlive),
+             (.identityRequestedHostAttached, requestedHostAttached),
+             (.identityOriginalPresenterKnown, originalPresenterKnown),
+             (.identityOriginalPresenterAlive, originalPresenterAlive),
+             (.identityCurrentIsRequestedHost, currentIsRequestedHost),
+             (.identityCurrentIsHostAncestor, currentIsHostAncestor),
+             (.identityAncestryComplete, ancestryComplete),
+             (.identityCurrentIsOriginalPresenter, currentIsOriginalPresenter)]
+        }
+    }
+
+    static func recordIdentity(_ snapshot: IdentitySnapshot, ticket: Ticket,
+                               presented: Bool, transitioning: Bool, dismissing: Bool) {
+        #if DEBUG && OEC_REQUIRE_SIMULATOR_E2E
+        guard ticket.isEnabled else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        for (stage, flag) in snapshot.records {
+            storage.append(line(stage, ticket: ticket, now: now, presented: presented,
+                transitioning: transitioning, dismissing: dismissing, flag: flag), ticket: ticket)
+        }
         #endif
     }
 

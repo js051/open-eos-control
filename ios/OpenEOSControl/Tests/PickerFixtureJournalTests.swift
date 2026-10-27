@@ -148,6 +148,54 @@ final class PickerFixtureJournalTests: XCTestCase {
         XCTAssertNil(PickerFixtureJournal.nextTicketOrdinal(in: ["private"], lastOrdinal: 0, highestOccupiedOpening: 0))
     }
 
+    func testIdentityFlagsHaveFixedIndependentBooleanMeanings() {
+        let stages: [PickerFixtureJournal.Stage] = [
+            .identityPickerMatches, .identityRequestedHostAlive, .identityRequestedHostAttached,
+            .identityOriginalPresenterKnown, .identityOriginalPresenterAlive,
+            .identityCurrentIsRequestedHost, .identityCurrentIsHostAncestor,
+            .identityAncestryComplete, .identityCurrentIsOriginalPresenter,
+        ]
+        for enabledIndex in -1..<9 {
+            let flags = (0..<9).map { $0 == enabledIndex }
+            let snapshot = PickerFixtureJournal.IdentitySnapshot(
+                pickerMatches: flags[0], requestedHostAlive: flags[1], requestedHostAttached: flags[2],
+                originalPresenterKnown: flags[3], originalPresenterAlive: flags[4],
+                currentIsRequestedHost: flags[5], currentIsHostAncestor: flags[6],
+                ancestryComplete: flags[7], currentIsOriginalPresenter: flags[8])
+            XCTAssertEqual(snapshot.records.map { $0.0 }, stages)
+            XCTAssertEqual(snapshot.records.map { $0.1 }, flags)
+            for (stage, flag) in snapshot.records {
+                let line = PickerFixtureJournal.line(stage, ticket: ticket, now: 10.5, flag: flag)
+                XCTAssertTrue(PickerFixtureJournal.isValidLine(line))
+                XCTAssertTrue(line.hasSuffix(" flag=\(flag ? 1 : 0)"))
+            }
+        }
+    }
+
+    func testThreeIdentitySnapshotsFitUnchangedOpeningCapsAndRejectPrivateFields() throws {
+        let snapshot = PickerFixtureJournal.IdentitySnapshot(
+            pickerMatches: true, requestedHostAlive: true, requestedHostAttached: true,
+            originalPresenterKnown: true, originalPresenterAlive: true,
+            currentIsRequestedHost: false, currentIsHostAncestor: true,
+            ancestryComplete: true, currentIsOriginalPresenter: true)
+        var lines: [String] = []
+        for phase in [PickerFixtureJournal.Stage.presentationCompleted, .selected, .completionEnd] {
+            lines.append(PickerFixtureJournal.line(phase, ticket: ticket, now: 10.5))
+            lines += snapshot.records.map { stage, flag in
+                PickerFixtureJournal.line(stage, ticket: ticket, now: 10.5, flag: flag)
+            }
+        }
+        let bytes = try XCTUnwrap(PickerFixtureJournal.boundedOpeningJournal(lines, ordinal: 1))
+        XCTAssertLessThanOrEqual(bytes.count, 16_384)
+        XCTAssertLessThanOrEqual(lines.count, 128)
+        XCTAssertEqual(String(decoding: bytes, as: UTF8.self), lines.joined(separator: "\n") + "\n")
+        let identityLine = try XCTUnwrap(lines.last)
+        for field in ["address=private", "class=private", "device=private", "filename=private"] {
+            XCTAssertFalse(PickerFixtureJournal.isValidLine(identityLine + " " + field))
+            XCTAssertNil(PickerFixtureJournal.boundedOpeningJournal([identityLine + " " + field], ordinal: 1))
+        }
+    }
+
     func testDisabledTicketContainsNoOwnerAndCannotProduceAnAcceptedRecord() {
         XCTAssertFalse(PickerFixtureJournal.Ticket.disabled.isEnabled)
         XCTAssertTrue(ticket.isEnabled)
