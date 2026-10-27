@@ -168,6 +168,25 @@ async function run() {
     };
     const pageErrors = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
+    // Diagnostics only: retain the original request identity and never retry a mutation.
+    const recordingTerminals = new WeakMap();
+    const pageLifecycle = { mainFrameNavigations: 0, closed: false, crashed: false };
+    const isRecordingStart = request => request.method() === "POST" &&
+      request.url().endsWith("/recording/start/outcome");
+    page.on("requestfinished", request => {
+      if (isRecordingStart(request)) recordingTerminals.set(request, { terminal: "finished" });
+    });
+    page.on("requestfailed", request => {
+      if (!isRecordingStart(request)) return;
+      const reason = request.failure()?.errorText;
+      const allowed = ["net::ERR_ABORTED", "net::ERR_FAILED", "net::ERR_CONNECTION_RESET"];
+      recordingTerminals.set(request, { terminal: "failed", reason: allowed.includes(reason) ? reason : "other" });
+    });
+    page.on("framenavigated", frame => {
+      if (frame === page.mainFrame()) pageLifecycle.mainFrameNavigations += 1;
+    });
+    page.on("close", () => { pageLifecycle.closed = true; });
+    page.on("crash", () => { pageLifecycle.crashed = true; });
     let withdrawBulbCapability = false;
     await page.route(/\/capabilities$/, async (route) => {
       const response = await route.fetch();
@@ -456,11 +475,61 @@ async function run() {
       await configure({ drop_status: true });
       // This Canon-shaped peer does not implement a verified fresh recording
       // reader. A command receipt remains useful even when legacy status fails.
+      const navigationCountBeforeStart = pageLifecycle.mainFrameNavigations;
       const startResponse = page.waitForResponse(response => response.url().endsWith("/recording/start/outcome"));
       await page.click("#shutter-button");
       const startResult = await startResponse;
       assert.equal(startResult.status(), 200);
-      const startOutcome = await startResult.json();
+      let startOutcome;
+      try {
+        startOutcome = await startResult.json();
+      } catch (error) {
+        // Only safe synthetic metadata; a diagnostic failure must not hide the original error.
+        try {
+          const request = startResult.request();
+          const headers = startResult.headers();
+          console.error("OEC_RECORDING_RESPONSE_DIAGNOSTIC", JSON.stringify({
+            browserVersion: browser.version(), language, status: startResult.status(),
+            method: request.method(), resourceType: request.resourceType(),
+            redirected: request.redirectedFrom() !== null, serviceWorker: startResult.fromServiceWorker(),
+            noStore: /(?:^|,)\s*no-store(?:,|$)/i.test(headers["cache-control"] || ""),
+            contentLength: /^\d+$/.test(headers["content-length"] || "") ? Number(headers["content-length"]) : null,
+            requestTerminal: recordingTerminals.get(request) || { terminal: "not-observed" },
+            mainFrameNavigationsSinceStart: pageLifecycle.mainFrameNavigations - navigationCountBeforeStart,
+            pageClosed: pageLifecycle.closed, pageCrashed: pageLifecycle.crashed,
+            samePageOrigin: !page.isClosed() && page.url().startsWith(origin + "/"),
+          }));
+          // Optional observations must not stall or erase the core failure evidence.
+          const bounded = async operation => {
+            let timer;
+            try {
+              return await Promise.race([
+                Promise.resolve().then(operation).catch(() => ({ unavailable: true })),
+                new Promise(resolve => { timer = setTimeout(() => resolve({ timedOut: true }), 1000); }),
+              ]);
+            } finally { clearTimeout(timer); }
+          };
+          const [ui, camera] = await Promise.all([
+            bounded(() => page.evaluate(label => ({
+              stopRequiredLabel: document.querySelector("#shutter-button")?.getAttribute("aria-label") === label,
+              shutterDisabled: document.querySelector("#shutter-button")?.disabled ?? null,
+              recordIndicatorHidden: document.querySelector("#record-indicator")?.hidden ?? null,
+            }), stopUnknown)),
+            bounded(async () => {
+              const snapshot = await fetch(`${peer.origin}/__test/state`, {
+                signal: AbortSignal.timeout(1000),
+              }).then(response => response.json());
+              return {
+                recording: typeof snapshot.recording === "boolean" ? snapshot.recording : null,
+                commandActions: snapshot.commands.slice(beforeRecording, beforeRecording + 8).map(command =>
+                  ["start", "stop"].includes(command[2]?.action) ? command[2].action : "other"),
+              };
+            }),
+          ]);
+          console.error("OEC_RECORDING_RESPONSE_DIAGNOSTIC_STATE", JSON.stringify({ ui, camera }));
+        } catch (_) { console.error("OEC_RECORDING_RESPONSE_DIAGNOSTIC unavailable"); }
+        throw error;
+      }
       assert.equal(startOutcome.responseEvidence, "response-received");
       assert.equal(startOutcome.observation.observationEvidence, "unavailable");
       assert.equal(startOutcome.observation.recording, null);
