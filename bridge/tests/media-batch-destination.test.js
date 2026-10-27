@@ -1,5 +1,6 @@
 "use strict";
 
+const { describe, it: test } = require("node:test");
 const assert = require("node:assert/strict");
 const { createDirectoryBatchDestination } = require("../open_eos_bridge/static/media-batch-destination.js");
 const { safeDownloadName } = require("../open_eos_bridge/static/media-transfer.js");
@@ -7,8 +8,6 @@ const { safeDownloadName } = require("../open_eos_bridge/static/media-transfer.j
 const NONCE = "01234567-89ab-4def-8123-456789abcdef";
 const BATCH_NAME = `Open-EOS-${NONCE}`;
 const ITEM = Object.freeze({ id: "synthetic/media-1", name: "IMG_0001.CR3" });
-const tests = [];
-const test = (name, run) => tests.push({ name, run });
 const namedError = (name) => Object.assign(new Error(name), { name });
 const aborted = (error) => error.name === "AbortError";
 const collision = (error) => error.code === "MEDIA_BATCH_COLLISION";
@@ -96,6 +95,7 @@ function fixture(options = {}) {
   };
 }
 
+describe("media batch destination completion", { concurrency: false, timeout: 5000 }, () => {
 test("constructor is lazy and validates the selected handle, nonce, and timeout", () => {
   const f = fixture();
   assert.equal(f.events.length, 0);
@@ -422,11 +422,4 @@ test("primitive close failures also report uncertain outcomes without losing the
   assert.equal(f.destination.snapshot().unknownCount, 1);
 });
 
-async function run() {
-  for (const { name, run: check } of tests) {
-    try { await check(); } catch (error) { error.message = `${name}: ${error.message}`; throw error; }
-  }
-  console.log(`media-batch-destination: ${tests.length} tests passed`);
-}
-
-run().catch((error) => { console.error(error); process.exitCode = 1; });
+});

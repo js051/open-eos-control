@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const mediaDialogFocus = require("../open_eos_bridge/static/media-dialog-focus.js");
 const mediaAutoImport = require("../open_eos_bridge/static/media-auto-import.js");
 const mediaBatchDestination = require("../open_eos_bridge/static/media-batch-destination.js");
 const mediaTransfer = require("../open_eos_bridge/static/media-transfer.js");
@@ -17,7 +18,7 @@ function extract(name) {
   assert.ok(start, name);
   const dialogDependencies = ["openMediaPreview", "openMediaDetails", "renderMediaPreviewNavigation",
     "renderMediaDetails", "closeMediaPreview", "closeMediaDetails"].includes(name)
-    ? ["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
+    ? ["beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
       .map(extract).join("\n") + "\n" : "";
   return dialogDependencies + source.slice(start.index, source.indexOf("\n  }", start.index) + 4);
 }
@@ -151,6 +152,7 @@ function fixture(options = {}) {
       return response;
     },
   });
+  context.mediaDialogFocusController = mediaDialogFocus.createController({ state, ui, document: context.document });
   for (const name of ["releaseHeldAutofocusForLifecycle", "releaseBulbForLifecycle", "cancelCameraFocusInfo", "stopLiveLoop", "stopLocalVideo", "stopRtpAudio", "cancelEventLoop", "cancelMediaDownload", "cancelMediaUpload",
     "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh", "closeMediaPreview",
     "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "renderHealth"]) context[name] = () => {};

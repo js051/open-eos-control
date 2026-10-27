@@ -1,5 +1,6 @@
 "use strict";
 
+const { describe, it: test } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const rtpAudio = require(path.join(__dirname, "..", "open_eos_bridge", "static", "rtp-audio.js"));
@@ -30,7 +31,8 @@ assert.deepEqual(rtpAudio.scheduleTiming(10, 10.1, 0.02), {
 });
 assert.equal(rtpAudio.scheduleTiming(10, 10.1, 0.02, true).reset, true);
 
-(async () => {
+describe("rtp-audio completion", { concurrency: false, timeout: 5000 }, () => {
+test("existing asynchronous rtp-audio scenarios", async () => {
   const content = pcmBuffer([-32768, 32767, 0, 16384]);
   const response = new Response(content, {
     status: 200,
@@ -65,7 +67,5 @@ assert.equal(rtpAudio.scheduleTiming(10, 10.1, 0.02, true).reset, true);
     },
   });
   await assert.rejects(rtpAudio.readPcmResponse(invalid), RangeError);
-})().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
+});
 });

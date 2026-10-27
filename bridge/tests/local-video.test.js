@@ -1,5 +1,6 @@
 "use strict";
 
+const { describe, it: test } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const localVideo = require(path.join(__dirname, "..", "open_eos_bridge", "static", "local-video.js"));
@@ -31,7 +32,8 @@ assert.deepEqual(localVideo.buildConstraints("capture-card"), {
 });
 assert.equal("deviceId" in localVideo.buildConstraints().video, false);
 
-(async () => {
+describe("local-video completion", { concurrency: false, timeout: 5000 }, () => {
+test("existing asynchronous local-video scenarios", async () => {
   const inputs = await localVideo.enumerateInputs({
     async enumerateDevices() {
       return [
@@ -141,7 +143,5 @@ assert.equal("deviceId" in localVideo.buildConstraints().video, false);
   assert.deepEqual(localVideo.rollingFrameCount([], 1000, null), { samples: [], fps: null });
   assert.equal(localVideo.rollingFrameCount([{ at: 0, frames: 20 }], 1000, 10).fps, null);
   assert.throws(() => localVideo.rollingFrameCount([], Number.NaN, 0), RangeError);
-})().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
+});
 });

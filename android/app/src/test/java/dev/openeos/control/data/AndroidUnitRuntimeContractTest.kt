@@ -12,6 +12,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.test.runTest
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -57,9 +58,7 @@ class AndroidUnitRuntimeContractTest {
                 }
                 digest.digest().joinToString("") { "%02x".format(it) }
             }
-            val matches = (0 until declared.length()).map { declared.getJSONObject(it) }
-                .filter { it.getString("file") == origin.name && it.getString("sha256") == hash }
-            assertEquals("Loaded $label must have exactly one matching dependency receipt", 1, matches.size)
+            verifyLoadedRuntimeArtifact(declared, formal != null, origin.name, hash)
             actual.put(label, JSONObject().put("file", origin.name).put("sha256", hash))
         }
         // Closed fields only: no absolute paths, user assets, environment dump or credentials.
@@ -71,6 +70,112 @@ class AndroidUnitRuntimeContractTest {
         assertTrue("UNIT_RUNTIME_ASSERTIONS_ENABLED", javaClass.desiredAssertionStatus())
         assertEquals("UNIT_RUNTIME_DEBUG_ON", "on", System.getProperty("kotlinx.coroutines.debug"))
         assertEquals("UNIT_RUNTIME_RECOVERY_TRUE", "true", System.getProperty("kotlinx.coroutines.stacktrace.recovery"))
+    }
+
+    @Test fun formalRuntimeAcceptsOneCompleteIdentityWithoutRewritingReceipt() {
+        val declared = JSONArray().put(runtimeArtifact())
+        val before = declared.toString()
+        verifyLoadedRuntimeArtifact(declared, true, "runtime.jar", "a".repeat(64))
+        assertEquals(before, declared.toString())
+    }
+
+    @Test fun formalRuntimeAcceptsOnlyCompleteIdenticalDuplicateIdentities() {
+        val declared = JSONArray().put(runtimeArtifact()).put(runtimeArtifact())
+            .put(runtimeArtifact(file = "other.jar", coordinate = "test:other:1"))
+            .put(runtimeArtifact(file = "other.jar", coordinate = "test:other:1"))
+        val before = declared.toString()
+        verifyLoadedRuntimeArtifact(declared, true, "runtime.jar", "a".repeat(64))
+        assertEquals(4, declared.length())
+        assertEquals(before, declared.toString())
+    }
+
+    @Test fun formalRuntimeRejectsConflictingCoordinateOrHashInEitherOrder() {
+        for (conflict in listOf(runtimeArtifact(coordinate = "test:replacement:1"), runtimeArtifact(hash = "b".repeat(64)))) {
+            for (reverse in listOf(false, true)) {
+                val rows = listOf(runtimeArtifact(), conflict).let { if (reverse) it.reversed() else it }
+                assertThrows(IllegalArgumentException::class.java) {
+                    verifyLoadedRuntimeArtifact(JSONArray(rows), true, "runtime.jar", "a".repeat(64))
+                }
+            }
+        }
+    }
+
+    @Test fun formalRuntimeRejectsConflictEvenForAnUnloadedArtifact() {
+        val declared = JSONArray().put(runtimeArtifact())
+            .put(runtimeArtifact(file = "other.jar", coordinate = "test:other:1"))
+            .put(runtimeArtifact(file = "other.jar", coordinate = "test:replacement:1"))
+        assertThrows(IllegalArgumentException::class.java) {
+            verifyLoadedRuntimeArtifact(declared, true, "runtime.jar", "a".repeat(64))
+        }
+    }
+
+    @Test fun formalRuntimeRejectsIncompleteOrCoercedIdentityFields() {
+        for (field in listOf("coordinate", "file", "sha256")) {
+            for (value in listOf(JSONObject.NULL, "", " ", "bad\nvalue", 17)) {
+                val invalid = runtimeArtifact(file = "unloaded.jar", coordinate = "test:unloaded:1").put(field, value)
+                // A valid loaded entry cannot hide an incomplete additional row.
+                val failure = assertThrows(IllegalArgumentException::class.java) {
+                    verifyLoadedRuntimeArtifact(JSONArray().put(runtimeArtifact()).put(invalid), true, "runtime.jar", "a".repeat(64))
+                }
+                assertEquals("Runtime artifact requires a nonempty control-free string $field", failure.message)
+            }
+            val missing = runtimeArtifact(file = "unloaded.jar", coordinate = "test:unloaded:1").apply { remove(field) }
+            val failure = assertThrows(IllegalArgumentException::class.java) {
+                verifyLoadedRuntimeArtifact(JSONArray().put(runtimeArtifact()).put(missing), true, "runtime.jar", "a".repeat(64))
+            }
+            assertEquals("Runtime artifact requires a nonempty control-free string $field", failure.message)
+        }
+    }
+
+    @Test fun formalRuntimeRejectsMalformedDigestAndPathBearingFilenames() {
+        for (hash in listOf("a".repeat(63), "a".repeat(65), "A".repeat(64), "g".repeat(64))) {
+            assertThrows(IllegalArgumentException::class.java) {
+                verifyLoadedRuntimeArtifact(JSONArray().put(runtimeArtifact(hash = hash)), true, "runtime.jar", hash)
+            }
+        }
+        for (file in listOf("directory/runtime.jar", "/runtime.jar", "directory\\runtime.jar", "C:\\runtime.jar", "C:runtime.jar", ".", "..")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                verifyLoadedRuntimeArtifact(JSONArray().put(runtimeArtifact()).put(runtimeArtifact(file = file)), true, "runtime.jar", "a".repeat(64))
+            }
+        }
+    }
+
+    @Test fun runtimeRejectsMissingOrMismatchedLoadedArtifact() {
+        for (formal in listOf(false, true)) {
+            for ((file, hash) in listOf("missing.jar" to "a".repeat(64), "runtime.jar" to "b".repeat(64))) {
+                assertThrows(IllegalArgumentException::class.java) {
+                    verifyLoadedRuntimeArtifact(JSONArray().put(runtimeArtifact()), formal, file, hash)
+                }
+            }
+            assertThrows(IllegalArgumentException::class.java) {
+                verifyLoadedRuntimeArtifact(JSONArray(), formal, "runtime.jar", "a".repeat(64))
+            }
+        }
+    }
+
+    @Test fun runtimeRejectsNonObjectManifestRows() {
+        for (formal in listOf(false, true)) {
+            for (row in listOf(JSONObject.NULL, "runtime.jar", 17)) {
+                assertThrows(IllegalArgumentException::class.java) {
+                    verifyLoadedRuntimeArtifact(JSONArray().put(runtimeArtifact()).put(row), formal, "runtime.jar", "a".repeat(64))
+                }
+            }
+        }
+    }
+
+    @Test fun supplementalRuntimeKeepsItsExplicitCoordinateFreeMode() {
+        val declared = JSONArray().put(runtimeArtifact(coordinate = null))
+        verifyLoadedRuntimeArtifact(declared, false, "runtime.jar", "a".repeat(64))
+        assertThrows(IllegalArgumentException::class.java) {
+            verifyLoadedRuntimeArtifact(declared, true, "runtime.jar", "a".repeat(64))
+        }
+    }
+
+    @Test fun supplementalRuntimeStillRejectsEvenIdenticalDuplicateRows() {
+        val declared = JSONArray().put(runtimeArtifact(coordinate = null)).put(runtimeArtifact(coordinate = null))
+        assertThrows(IllegalArgumentException::class.java) {
+            verifyLoadedRuntimeArtifact(declared, false, "runtime.jar", "a".repeat(64))
+        }
     }
 
     @Test fun suspendedReleaseFailurePreservesTypedPrimaryAndSuppressedIdentity() = runTest {
@@ -251,6 +356,42 @@ class AndroidUnitRuntimeContractTest {
         assertFalse(session.hasPendingRelease)
         assertFalse(session.releaseUnconfirmed)
     }
+
+    private data class RuntimeArtifactIdentity(val coordinate: String?, val file: String, val sha256: String)
+
+    private fun verifyLoadedRuntimeArtifact(declared: JSONArray, formal: Boolean, loadedFile: String, loadedHash: String) {
+        val identities = linkedMapOf<String, RuntimeArtifactIdentity>()
+        for (index in 0 until declared.length()) {
+            val row = declared.opt(index) as? JSONObject
+                ?: throw IllegalArgumentException("Runtime receipt artifacts must be objects")
+            fun requiredString(field: String): String {
+                val value = row.opt(field) as? String
+                require(value != null && value.isNotBlank() && value.none(Char::isISOControl)) {
+                    "Runtime artifact requires a nonempty control-free string $field"
+                }
+                return value
+            }
+            val file = requiredString("file")
+            require('/' !in file && '\\' !in file && ':' !in file && file != "." && file != "..") {
+                "Runtime artifact file must be a filename, not a path"
+            }
+            val hash = requiredString("sha256")
+            require(hash.matches(Regex("[0-9a-f]{64}"))) { "Runtime artifact requires a complete SHA256" }
+            val identity = RuntimeArtifactIdentity(if (formal) requiredString("coordinate") else null, file, hash)
+            val previous = identities[file]
+            // Formal Gradle may repeat one resolved artifact; all three fields must agree.
+            // Supplemental receipts deliberately have no coordinates and remain unique.
+            require(previous == null || (formal && previous == identity)) { "Conflicting or duplicate runtime artifact identity" }
+            identities[file] = identity
+        }
+        val selected = requireNotNull(identities[loadedFile]) { "Loaded artifact is absent from runtime receipt" }
+        require(selected.sha256 == loadedHash) { "Loaded artifact hash differs from runtime receipt" }
+    }
+
+    private fun runtimeArtifact(file: String = "runtime.jar", coordinate: String? = "test:runtime:1", hash: String = "a".repeat(64)): JSONObject =
+        JSONObject().put("file", file).put("sha256", hash).apply {
+            if (coordinate != null) put("coordinate", coordinate)
+        }
 
     private fun boundaryObservation(failure: Throwable, press: Throwable, release: Throwable): JSONObject {
         val chain = primaryChain(failure)

@@ -10,6 +10,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const mediaDialogFocus = require("../open_eos_bridge/static/media-dialog-focus.js");
 const mediaBatch = require("../open_eos_bridge/static/media-batch.js");
 const mediaLibrary = require("../open_eos_bridge/static/media-library.js");
 const source = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/app.js"), "utf8");
@@ -21,7 +22,7 @@ function productionFunction(name) {
   assert.notEqual(end, -1, `Cannot locate end of production function ${name}`);
   const dependencies = ["renderMediaDetails", "renderMediaPreviewNavigation", "openMediaDetails", "openMediaPreview",
     "closeMediaDetails", "closeMediaPreview"].includes(name)
-    ? ["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"].map(productionFunction).join("\n") + "\n" : "";
+    ? ["beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"].map(productionFunction).join("\n") + "\n" : "";
   return dependencies + source.slice(start, start + 1 + end);
 }
 
@@ -104,6 +105,7 @@ function context(item = media(), { metadata } = {}) {
     cancelMediaDownload: unexpected("download cancellation"),
     observeMediaThumbnail: unexpected("thumbnail request"),
   });
+  sandbox.mediaDialogFocusController = mediaDialogFocus.createController({ state, ui, document: sandbox.document });
   // Session widgets do not participate in the storage-size formatting contract.
   for (const name of ["renderCaptureMode", "renderExposure", "renderAdvancedSettings",
     "renderPreviewInput", "renderLiveSource", "renderFps", "renderTapAction",

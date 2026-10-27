@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const mediaDialogFocus = require("../open_eos_bridge/static/media-dialog-focus.js");
 const mediaListing = require("../open_eos_bridge/static/media-listing.js");
 const mediaLibrary = require("../open_eos_bridge/static/media-library.js");
 const mediaBatch = require("../open_eos_bridge/static/media-batch.js");
@@ -17,7 +18,7 @@ function extract(name) {
   assert.ok(match, `Missing production function ${name}`);
   const dialogDependencies = ["openMediaPreview", "openMediaDetails", "renderMediaPreviewNavigation",
     "renderMediaDetails", "closeMediaPreview", "closeMediaDetails"].includes(name)
-    ? ["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
+    ? ["beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
       .map(extract).join("\n") + "\n" : "";
   return dialogDependencies + source.slice(match.index, source.indexOf("\n  }", match.index) + 4);
 }
@@ -97,6 +98,7 @@ function fixture() {
       throw new Error(`Unexpected request ${url}`);
     },
   });
+  context.mediaDialogFocusController = mediaDialogFocus.createController({ state, ui, document: context.document });
   const names = ["maintenanceHeld", "maintenancePaused", "api", "refreshMedia", "refreshMediaWhenCurrent", "cancelMediaListing", "renderMedia", "renderMediaSummary", "renderMediaSelection",
     "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel", "mediaDisplayTimeZone",
     "displayedMedia", "mediaDateGroup", "formatMediaTime", "mediaIsVideo", "renderMediaThumbnail", "observeMediaThumbnail", "loadMediaThumbnail",

@@ -1,5 +1,6 @@
 "use strict";
 
+const { describe, it: test } = require("node:test");
 const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
 const path = require("node:path");
@@ -117,7 +118,6 @@ async function testPhysicalValidation() {
   );
 }
 
-testPhysicalValidation().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
+describe("diagnostics completion", { concurrency: false, timeout: 5000 }, () => {
+  test("physical validation evidence contracts", testPhysicalValidation);
 });

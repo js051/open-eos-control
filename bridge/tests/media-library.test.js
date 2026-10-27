@@ -273,5 +273,3 @@ function run() {
 
 run();
 runDateContract();
-
-require("./media-date-review-contract.test.js");

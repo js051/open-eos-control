@@ -148,6 +148,108 @@ class AndroidHostRuntimeTests(unittest.TestCase):
                 runtime.compare_gradle_manifest(manifest, verified)
 
 
+class GradleManifestIdentityTests(unittest.TestCase):
+    """Synthetic comparator inputs, never genuine Gradle execution receipts."""
+
+    def setUp(self):
+        self.verified = {name: hashlib.sha256(name.encode()).hexdigest() for name in runtime.TEST_ARTIFACTS}
+        self.artifacts = [{"coordinate": "synthetic:" + name, "file": name, "sha256": digest}
+                          for name, digest in self.verified.items()]
+
+    def compare(self, artifacts):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic-comparator-unit-input.json"
+            payload = json.dumps({"schema": 1, "entrypoint": ":app:testDebugUnitTest",
+                                  "runtime_artifacts": artifacts})
+            path.write_text(payload)
+            result = runtime.compare_gradle_manifest(path, self.verified)
+            self.assertEqual(payload, path.read_text(), "Comparator must not rewrite original evidence")
+            self.assertEqual(hashlib.sha256(payload.encode()).hexdigest(), result["manifest_sha256"])
+            self.assertFalse(result["full_app_equivalence"])
+            return result
+
+    def unselected(self):
+        return {"coordinate": "synthetic:unloaded:1", "file": "unloaded.jar", "sha256": "a" * 64}
+
+    def test_complete_singletons_and_identical_duplicates_keep_original_manifest(self):
+        # Project coordinates can have an empty group; resolved artifacts need not be jars.
+        project = {"coordinate": ":camera-import-contract:unspecified", "file": "project.aar", "sha256": "b" * 64}
+        for rows in (self.artifacts, self.artifacts + [dict(self.artifacts[0]), project, dict(project)]):
+            with self.subTest(rows=len(rows)):
+                self.assertEqual("SELECTED_ARTIFACT_HASHES_MATCH", self.compare(rows)["state"])
+
+    def test_selected_singleton_requires_a_complete_coordinate(self):
+        selected = next(index for index, row in enumerate(self.artifacts)
+                        if not row["file"].startswith("annotations-"))
+        for value in (None, "", " ", 17, [], {}):
+            with self.subTest(coordinate=value):
+                rows = [dict(row) for row in self.artifacts]
+                rows[selected]["coordinate"] = value
+                with self.assertRaisesRegex(ValueError, "artifacts: coordinate must be a nonempty control-free string"):
+                    self.compare(rows)
+        rows = [dict(row) for row in self.artifacts]
+        del rows[selected]["coordinate"]
+        with self.assertRaisesRegex(ValueError, "artifacts: coordinate must be a nonempty control-free string"):
+            self.compare(rows)
+
+    def test_every_row_requires_complete_string_identity_fields(self):
+        for field in ("coordinate", "file", "sha256"):
+            for value in (None, "", " ", 17, [], {}, "control\nvalue", "control\u0085value"):
+                with self.subTest(field=field, value=value):
+                    row = dict(self.unselected(), **{field: value})
+                    with self.assertRaisesRegex(
+                        ValueError, f"artifacts: {field} must be a nonempty control-free string",
+                    ):
+                        self.compare(self.artifacts + [row])
+            with self.subTest(missing=field):
+                row = self.unselected()
+                del row[field]
+                with self.assertRaisesRegex(ValueError, f"artifacts: {field} must be a nonempty control-free string"):
+                    self.compare(self.artifacts + [row])
+
+    def test_non_object_artifact_rows_have_a_closed_validation_failure(self):
+        for row in (None, "unloaded.jar", [], 17, False):
+            with (
+                self.subTest(row=row),
+                self.assertRaisesRegex(ValueError, "artifacts: each artifact must be an object"),
+            ):
+                self.compare(self.artifacts + [row])
+
+    def test_even_unselected_hashes_require_canonical_sha256(self):
+        for digest in ("a" * 63, "a" * 65, "A" * 64, "g" * 64):
+            with self.subTest(digest=digest):
+                row = dict(self.unselected(), sha256=digest)
+                with self.assertRaisesRegex(
+                    ValueError, "artifacts: sha256 must be 64 lowercase hexadecimal characters",
+                ):
+                    self.compare(self.artifacts + [row])
+
+    def test_file_identity_is_a_flat_filename_not_a_path(self):
+        for name in ("folder/unloaded.jar", "/unloaded.jar", "folder\\unloaded.jar",
+                     "C:\\unloaded.jar", "C:unloaded.jar", ".", ".."):
+            with (
+                self.subTest(file=name),
+                self.assertRaisesRegex(ValueError, "artifacts: file must be a flat filename, not a path"),
+            ):
+                self.compare(self.artifacts + [dict(self.unselected(), file=name)])
+
+    def test_same_filename_conflicts_are_rejected_in_both_orders(self):
+        original = self.unselected()
+        for field, value in (("coordinate", "synthetic:replacement:1"), ("sha256", "b" * 64)):
+            conflict = dict(original, **{field: value})
+            for extra in ([original, conflict], [conflict, original]):
+                with (
+                    self.subTest(field=field, first=extra[0]),
+                    self.assertRaisesRegex(ValueError, "artifacts: one filename has conflicting identities"),
+                ):
+                    self.compare(self.artifacts + extra)
+
+    def test_annotation_hash_comparison_exemption_does_not_require_its_presence(self):
+        rows = [row for row in self.artifacts if not row["file"].startswith("annotations-")]
+        self.assertLess(len(rows), len(self.artifacts))
+        self.assertEqual("SELECTED_ARTIFACT_HASHES_MATCH", self.compare(rows)["state"])
+
+
 class FocusReceiptGuardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

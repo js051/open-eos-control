@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const mediaDialogFocus = require("../open_eos_bridge/static/media-dialog-focus.js");
 const test = require("node:test");
 const mediaLibrary = require("../open_eos_bridge/static/media-library.js");
 const source = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/app.js"), "utf8");
@@ -12,7 +13,7 @@ function extract(name) {
   const end = source.indexOf("\n  }", match.index);
   const dialogDependencies = ["openMediaPreview", "openMediaDetails", "renderMediaPreviewNavigation",
     "renderMediaDetails", "closeMediaPreview", "closeMediaDetails"].includes(name)
-    ? ["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
+    ? ["beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
       .map(extract).join("\n") + "\n" : "";
   return dialogDependencies + source.slice(match.index, end + 4);
 }
@@ -45,6 +46,7 @@ function fixture() {
     api: () => { throw new Error("Date filtering must not request data"); },
     openMediaPreview: x => calls.push(["open-preview", x.id]),
   });
+  s.mediaDialogFocusController = mediaDialogFocus.createController({ state, ui, document: s.document });
   for (const name of ["stopLiveLoop", "stopLocalVideo", "cancelEventLoop", "cancelMediaDownload", "cancelMediaUpload",
     "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh", "closeMediaDetails",
     "releaseObjectUrl", "clearBulbTimer", "renderAvailability", "renderHealth"]) s[name] = () => {};

@@ -5,6 +5,9 @@ on:
   push:
     branches: [dev]
     paths:
+      - 'ios/OpenEOSControl/Tests/Fixtures/valid-h264-baseline.mp4'
+      - 'scripts/ci/run-actionlint.sh'
+      - 'scripts/validation/**'
       - 'bridge/**'
       - 'simulator/**'
       - 'contracts/**'

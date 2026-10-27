@@ -5,6 +5,7 @@ on:
   push:
     branches: [dev]
     paths:
+      - 'scripts/ci/run-actionlint.sh'
       - 'bridge/**'
       - '.github/workflows/windows-dev.yml'
       - '.github/workflows/android.yml'

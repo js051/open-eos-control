@@ -1,5 +1,6 @@
 "use strict";
-// Production file decoder and app handlers with controlled Blob/DOM boundaries.
+// Imported production controller/decoder plus app DOM adapters with controlled Blob/DOM boundaries.
+// Queue ownership is never reconstructed from slices of the application controller.
 // This is Node orchestration evidence, not browser, native picker, GPU or camera evidence.
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -7,6 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const lut = require("../open_eos_bridge/static/lut.js");
+const lutImport = require("../open_eos_bridge/static/lut-import-controller.js");
 const contract = require("../../contracts/lut-import/v1/utf8-vectors.json");
 const source = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/app.js"), "utf8");
 const cube = contract.vectors.find(v => v.id === "ascii").normalizedText;
@@ -42,6 +44,7 @@ function fixture({ existing = true, rendererFailure = false } = {}) {
   const document = { body: {}, activeElement: null, querySelector: () => null };
   document.activeElement = document.body;
   const context = vm.createContext({ state, ui, document, Error, RangeError, TypeError,
+    lutImport, lutImportController: null,
     lut: { ...lut, parseCubeLutBytes(bytes, name) {
       calls.parses++; const parsed = lut.parseCubeLutBytes(bytes, name); options.afterParse?.(); return parsed;
     }, createWebGLRenderer() {
@@ -54,7 +57,7 @@ function fixture({ existing = true, rendererFailure = false } = {}) {
     renderDiagnostics() { calls.diagnostics++; }, showToast: (...args) => calls.toasts.push(args),
   });
   for (const name of ["renderMonitoringControls", "prepareCubeLutPicker", "openCubeLutPicker",
-    "cancelCubeLutImport", "importCubeLutFile", "readPendingCubeLut", "removeCubeLut"])
+    "cubeLutImportController", "cancelCubeLutImport", "importCubeLutFile", "removeCubeLut"])
     vm.runInContext(production(name), context);
   function file(name = "Replacement", { text = cube, bytes = encoder.encode(text), reportedSize = bytes.byteLength,
     hold = false, failure = null } = {}) {
@@ -442,4 +445,78 @@ test("LUT hiding does not steal focus moved by a synchronous blur handler", () =
   focusedLutControl(h, "monitorLutRemove", () => { h.document.activeElement = other; });
   h.context.removeCubeLut();
   assert.equal(h.document.activeElement, other);
+});
+
+test("standalone browser module loads before the app and exports the same controller API", () => {
+  const filename = "lut-import-controller.js";
+  const html = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/index.html"), "utf8");
+  const marker = `<script src="/app/${filename}"></script>`;
+  assert.equal(html.split(marker).length, 2, "The production page loads the controller exactly once");
+  assert.ok(html.indexOf(marker) < html.indexOf('<script src="/app/app.js"></script>'));
+  const browser = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static", filename), "utf8"), browser);
+  assert.equal(typeof browser.OpenEOSLutImport.createController, "function");
+  assert.deepEqual(Object.keys(browser.OpenEOSLutImport), Object.keys(lutImport));
+  assert.ok(source.includes("const lutImport = globalThis.OpenEOSLutImport;"));
+  assert.ok(production("cubeLutImportController").includes("lutImport.createController("));
+  assert.doesNotMatch(source, /function readPendingCubeLut\(/,
+    "Production queue ownership exists only in the imported module");
+});
+
+function controllerFixture(onRender = () => {}) {
+  const state = { monitorSettings: { cubeLut: null }, monitorLutImportOwner: null,
+    monitorLutReadOwner: null, monitorLutImportError: null, monitorLutRevision: 0 };
+  const reads = [], published = [], failures = [];
+  const controller = lutImport.createController({ state,
+    readBytes(file) { reads.push(file); return file.gate.promise; },
+    parseBytes: (bytes, name) => ({ bytes, name }), prepareRenderer() {}, renderFrame() {},
+    reportSuccess() { published.push(state.monitorSettings.cubeLut.name); },
+    reportFailure(message) { failures.push(message); },
+    renderState() { onRender(controller, state); },
+  });
+  return { controller, state, reads, published, failures };
+}
+
+test("imported controller instances do not share active reads or replacement ownership", async () => {
+  const first = controllerFixture(), second = controllerFixture();
+  const a = { name: "A", gate: deferred() }, b = { name: "B", gate: deferred() };
+  const aWork = first.controller.select(a), bWork = second.controller.select(b);
+  first.controller.cancel();
+  assert.equal(first.state.monitorLutImportOwner, null);
+  assert.equal(first.state.monitorLutReadOwner.file, a);
+  assert.equal(second.state.monitorLutImportOwner.file, b);
+  b.gate.resolve("B bytes"); await bWork;
+  a.gate.resolve("A bytes"); await aWork;
+  assert.deepEqual(first.published, []);
+  assert.deepEqual(second.published, ["B"]);
+  assert.equal(first.state.monitorSettings.cubeLut, null);
+  assert.equal(first.state.monitorLutReadOwner, null);
+  assert.equal(second.state.monitorLutReadOwner, null);
+});
+
+test("imported controller respects synchronous cancellation before physical read admission", async () => {
+  const h = controllerFixture((controller, state) => {
+    if (state.monitorLutImportOwner && !state.monitorLutReadOwner) controller.cancel();
+  });
+  await h.controller.select({ name: "Cancelled", gate: deferred() });
+  assert.deepEqual(h.reads, []);
+  assert.deepEqual(h.published, []);
+  assert.deepEqual(h.failures, []);
+  assert.equal(h.state.monitorLutImportOwner, null);
+  assert.equal(h.state.monitorLutReadOwner, null);
+});
+
+test("imported controller admits only a reentrant successor from state publication", async () => {
+  const a = { name: "A", gate: deferred() }, b = { name: "B", gate: deferred() };
+  let bWork;
+  const h = controllerFixture((controller, state) => {
+    if (state.monitorLutImportOwner?.file === a) bWork = controller.select(b);
+  });
+  await h.controller.select(a);
+  assert.deepEqual(h.reads, [b]);
+  assert.equal(h.state.monitorLutReadOwner.file, b);
+  b.gate.resolve("B bytes"); await bWork;
+  assert.deepEqual(h.published, ["B"]);
+  assert.equal(h.state.monitorLutRevision, 1);
+  assert.equal(h.state.monitorLutReadOwner, null);
 });

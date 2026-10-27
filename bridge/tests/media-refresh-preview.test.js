@@ -8,6 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const mediaDialogFocus = require("../open_eos_bridge/static/media-dialog-focus.js");
 const mediaLibrary = require("../open_eos_bridge/static/media-library.js");
 const mediaTransfer = require("../open_eos_bridge/static/media-transfer.js");
 const source = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/app.js"), "utf8");
@@ -19,7 +20,7 @@ function extract(name) {
   assert.notEqual(end, -1, `Missing end of production function ${name}`);
   const dialogDependencies = ["openMediaPreview", "openMediaDetails", "renderMediaPreviewNavigation",
     "renderMediaDetails", "closeMediaPreview", "closeMediaDetails"].includes(name)
-    ? ["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
+    ? ["beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
       .map(extract).join("\n") + "\n" : "";
   return dialogDependencies + source.slice(match.index, end + 4);
 }
@@ -146,6 +147,7 @@ function fixture(t, { dated = false } = {}) {
       throw new Error(`Unexpected request: ${url}`);
     },
   });
+  s.mediaDialogFocusController = mediaDialogFocus.createController({ state, ui, document: s.document });
   for (const name of ["renderAvailability", "renderLatestMedia", "renderSession", "setOperationState",
     "syncLiveMagnificationFromCapabilities", "clearMediaThumbnails", "stopLiveLoop", "stopLocalVideo",
     "renderMediaTransfer", "scheduleMediaTransferRender", "cancelMediaUpload",
