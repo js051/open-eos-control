@@ -235,7 +235,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
         }
     }
 
-    func testSensorRecoveryLiveViewCompletionCannotClearReplacementWarning() async throws {
+    func testDisconnectDrainsSensorRecoveryLiveViewBeforeReplacementAndPreservesItsWarning() async throws {
         for fails in [false, true] {
             let oldPeer = ControlOwnerPeer(owner: "A")
             let newPeer = ControlOwnerPeer(owner: "B")
@@ -243,13 +243,46 @@ final class ControlResponseOwnershipTests: XCTestCase {
             defer { state.requestDisconnect(); Task { await oldPeer.releaseAll(); await newPeer.releaseAll() } }
             try await connectAndPrepare(state)
             await oldPeer.enqueue(.liveViewStart, gate: "old-recovery", error: fails ? .networkConnectionLost : nil)
-            let old = Task { await state.cleanSensor(autoPowerOff: false) }
+            var oldFinished = false
+            let old = Task { await state.cleanSensor(autoPowerOff: false); oldFinished = true }
             try await waitForGate("old-recovery", peer: oldPeer)
-            await state.disconnect()
+            // Disconnect owns the pending Start and must drain it before the next
+            // camera is admitted. Releasing only after await disconnect deadlocks
+            // this deliberately cancellation-uncooperative fixture.
+            var disconnectEntered = false
+            var disconnected = false
+            let disconnect = Task { disconnectEntered = true; await state.disconnect(); disconnected = true }
+            defer { disconnect.cancel(); old.cancel() }
+            let entryClock = ContinuousClock()
+            let entryDeadline = entryClock.now.advanced(by: .seconds(3))
+            while !disconnectEntered, entryClock.now < entryDeadline { await Task.yield() }
+            XCTAssertTrue(disconnectEntered)
+            let originalStillHeld = await oldPeer.waiting("old-recovery")
+            XCTAssertTrue(originalStillHeld)
+            XCTAssertFalse(disconnected, "Disconnect must wait for A's held Start")
+            let beforeRelease = await newPeer.count(.info)
+            XCTAssertEqual(beforeRelease, 0)
+            await oldPeer.release("old-recovery")
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(5))
+            while !disconnected, clock.now < deadline { await Task.yield() }
+            guard disconnected else {
+                XCTFail("Disconnect did not settle after releasing the original Start")
+                throw URLError(.timedOut)
+            }
+            await disconnect.value
             try await connectAndPrepare(state)
             state.reportCubeLutRenderFailure()
             let saved = PreservedControl(state)
-            await oldPeer.release("old-recovery")
+            // The held wire reply is already drained; the outer maintenance
+            // completion may still be scheduled. Observe it without an unbounded
+            // await, and verify it cannot clear B's warning.
+            let completionDeadline = clock.now.advanced(by: .seconds(5))
+            while !oldFinished, clock.now < completionDeadline { await Task.yield() }
+            guard oldFinished else {
+                XCTFail("Original sensor recovery did not finish after its Start drained")
+                throw URLError(.timedOut)
+            }
             await old.value
 
             assertPreserved(saved, state: state)
@@ -259,7 +292,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
         }
     }
 
-    func testRetiredCancelledAutofocusAndHalfPressStillReleaseOnlyOriginalCamera() async throws {
+    func testDisconnectWaitsForCancelledAutofocusAndHalfPressToReleaseOnlyOriginalCamera() async throws {
         for action in [ControlOwnerAction.autofocus, .halfPress] {
             let oldPeer = ControlOwnerPeer(owner: "A")
             let newPeer = ControlOwnerPeer(owner: "B")
@@ -270,11 +303,24 @@ final class ControlResponseOwnershipTests: XCTestCase {
             let old = Task { await perform(action, state: state) }
             try await waitForGate("press", peer: oldPeer)
             old.cancel()
-            await state.disconnect()
-            try await connectAndPrepare(state)
+            state.requestDisconnect()
+            var reconnectEntered = false
+            let reconnect = Task {
+                reconnectEntered = true
+                try await connectAndPrepare(state)
+            }
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(5))
+            while !reconnectEntered, clock.now < deadline { await Task.yield() }
+            XCTAssertTrue(reconnectEntered)
+            let prematureReads = await newPeer.count(.info)
+            let prematureReleases = await oldPeer.count(.shutterRelease)
+            XCTAssertEqual(prematureReads, 0, "Reconnect must wait for the original in-flight short press")
+            XCTAssertEqual(prematureReleases, 0, "Stop must not overtake the held press")
+            await oldPeer.release("press")
+            try await reconnect.value
             state.reportCubeLutRenderFailure()
             let saved = PreservedControl(state)
-            await oldPeer.release("press")
             await old.value
 
             assertPreserved(saved, state: state)
@@ -293,13 +339,16 @@ final class ControlResponseOwnershipTests: XCTestCase {
         let state = makeState([oldPeer, newPeer], bridge: bridge)
         defer { state.requestDisconnect(); Task { await oldPeer.releaseAll(); await newPeer.releaseAll() } }
         try await connectAndPrepare(state)
+        let shortControl = !bridge && (action == .autofocus || action == .halfPress)
         await oldPeer.enqueue(action.wire(bridge: bridge), gate: "old-command",
-                              error: readback == nil && fails ? .networkConnectionLost : nil)
+                              error: readback == nil && !shortControl && fails ? .networkConnectionLost : nil)
         let old = Task { await perform(action, state: state) }
         try await waitForGate("old-command", peer: oldPeer)
-        if let readback {
+        if let readback = readback ?? (shortControl ? .status : nil) {
             // File naming performs its own capability preflight. Arm only after
             // the mutation has entered so this is the app's later readback.
+            // Short presses now settle their exact release before Close returns;
+            // gate their later status read to exercise a genuinely retired reply.
             await oldPeer.enqueue(readback, gate: "old-readback", error: fails ? .networkConnectionLost : nil)
             await oldPeer.release("old-command")
             try await waitForGate("old-readback", peer: oldPeer)
@@ -315,7 +364,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
         let saved = PreservedControl(state)
         XCTAssertTrue(state.isBusy(action.category))
 
-        await oldPeer.release(readback == nil ? "old-command" : "old-readback")
+        await oldPeer.release(readback == nil && !shortControl ? "old-command" : "old-readback")
         await old.value
 
         assertPreserved(saved, state: state)
@@ -479,7 +528,7 @@ private enum ControlOwnerAction: CaseIterable {
 }
 
 private enum ControlOwnerWire: Hashable, Sendable {
-    case health, open, close, info, status, capabilities, events, stopEvents, media, liveViewStart
+    case health, open, close, info, status, capabilities, events, stopEvents, media, liveViewStart, liveViewStop
     case clock, directory, naming, sleep, clean, autofocus, halfPress, shutterRelease
     case recordingStart, recordingStop, tap, whiteBalance, drive, magnification, setting
 }
@@ -578,7 +627,11 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case .magnification:
             magnification = 5
             object = ["accepted": true, "value": magnification]
-        case .close, .stopEvents, .liveViewStart, .sleep, .shutterRelease:
+        case .liveViewStart:
+            object = ["active": true]
+        case .liveViewStop:
+            object = ["active": false, "liveViewStopUnconfirmed": false]
+        case .close, .stopEvents, .sleep, .shutterRelease:
             break
         }
         if let gate = plan.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
@@ -605,6 +658,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case ("DELETE", "/events"): return .stopEvents
         case ("GET", "/media"): return .media
         case ("POST", "/liveview/start"): return .liveViewStart
+        case ("POST", "/liveview/stop"): return .liveViewStop
         case ("POST", "/clock/sync"): return .clock
         case ("POST", "/directory"), ("POST", "/directories"): return .directory
         case ("PUT", "/file-naming/still-user-setting-1"): return .naming

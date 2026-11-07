@@ -15,18 +15,22 @@ struct CameraControlView: View {
             }
         }
         .background(Color.black.ignoresSafeArea())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 40).onEnded { gesture in
-                if abs(gesture.translation.height) > abs(gesture.translation.width) {
-                    withAnimation(.easeOut(duration: 0.18)) { camera.hudVisible.toggle() }
-                }
+    }
+
+    // Camera controls own their touches. In particular, dragging out of AF-ON
+    // releases that press without also hiding its entire control hierarchy.
+    private var hudVisibilityGesture: some Gesture {
+        DragGesture(minimumDistance: 40).onEnded { gesture in
+            if abs(gesture.translation.height) > abs(gesture.translation.width) {
+                withAnimation(.easeOut(duration: 0.18)) { camera.hudVisible.toggle() }
             }
-        )
+        }
     }
 
     private func portraitLayout(_ proxy: GeometryProxy) -> some View {
         ZStack {
             LiveViewSurface()
+                .simultaneousGesture(hudVisibilityGesture)
             if camera.hudVisible {
                 VStack(spacing: 0) {
                     CameraOverlayHeader(controlRotation: controlRotation)
@@ -58,6 +62,7 @@ struct CameraControlView: View {
         HStack(spacing: 0) {
             ZStack(alignment: .top) {
                 LiveViewSurface()
+                    .simultaneousGesture(hudVisibilityGesture)
                 if camera.hudVisible {
                     VStack(spacing: 6) {
                         CameraOverlayHeader(controlRotation: controlRotation)
@@ -124,6 +129,19 @@ private struct CameraOverlayHeader: View {
     let controlRotation: Double
 
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            header(showDetails: true).fixedSize(horizontal: true, vertical: false)
+            header(showDetails: false)
+        }
+        .padding(.leading, 11)
+        .padding(.trailing, 4)
+        .frame(height: 54)
+        .foregroundStyle(Color.cameraText)
+        .background(Color.black.opacity(0.66))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func header(showDetails: Bool) -> some View {
         HStack(spacing: 7) {
             RotatingControl(degrees: controlRotation) {
                 HStack(spacing: 7) {
@@ -137,21 +155,27 @@ private struct CameraOverlayHeader: View {
             }
             .accessibilityIdentifier("camera-model-status")
             Spacer(minLength: 4)
-            RotatingControl(degrees: controlRotation) {
-                HStack(spacing: 4) {
-                    Image(systemName: "battery.75percent")
-                    Text(camera.status?.batteryLevel.map { "\($0)%" } ?? "--")
-                }
-                .font(.caption.weight(.semibold))
-            }
-            if let storageText {
+            if showDetails {
                 RotatingControl(degrees: controlRotation) {
                     HStack(spacing: 4) {
-                        Image(systemName: "sdcard")
-                        Text(storageText)
+                        Image(systemName: "battery.75percent")
+                        Text(camera.status?.batteryLevel.map { "\($0)%" } ?? "--")
                     }
                     .font(.caption.weight(.semibold))
                 }
+                if let storageText {
+                    RotatingControl(degrees: controlRotation) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "sdcard")
+                            Text(storageText)
+                        }
+                        .font(.caption.weight(.semibold))
+                    }
+                }
+            }
+            if camera.capabilities?.heldAutofocusSupported == true {
+                HeldAutofocusButton(camera: camera)
+                    .frame(width: 50, height: 44)
             }
             if camera.supports(.autofocus) {
                 Button {
@@ -177,12 +201,7 @@ private struct CameraOverlayHeader: View {
             .buttonStyle(CameraIconButtonStyle())
             .accessibilityIdentifier("more-actions-button")
         }
-        .padding(.leading, 11)
-        .padding(.trailing, 4)
-        .frame(height: 54)
-        .foregroundStyle(Color.cameraText)
-        .background(Color.black.opacity(0.66))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+
     }
 
     private var storageText: String? {
@@ -259,7 +278,10 @@ private struct CaptureModePicker: View {
     var body: some View {
         Picker("capture_mode", selection: Binding(
             get: { camera.captureMode },
-            set: { mode in Task { await camera.setCaptureMode(mode) } }
+            set: { mode in
+                camera.traceCaptureMode(.pickerSelection, requested: mode)
+                Task { await camera.setCaptureMode(mode) }
+            }
         )) {
             Text("photo").tag(AppCaptureMode.photo)
             Text("video").tag(AppCaptureMode.video)
@@ -267,7 +289,7 @@ private struct CaptureModePicker: View {
         .pickerStyle(.segmented)
         .frame(height: 38)
         .disabled(
-            camera.recording || camera.bulbExposureActive || camera.isBusy(.setting) ||
+            camera.recordingStopRequired || camera.bulbExposureActive || camera.isBusy(.setting) ||
                 camera.isBusy(.capture) || camera.isBusy(.recording)
         )
         .accessibilityIdentifier("capture-mode-picker")
@@ -417,14 +439,45 @@ private struct CaptureBar: View {
                 .padding(.bottom, 6)
             }
 
+            if let recovery = camera.recordingRecovery {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LocalizedStringKey(camera.recordingCommandRecovery != nil
+                        ? "recording_command_unconfirmed"
+                        : recovery.starting ? "recording_start_status_unknown" : "recording_stop_status_unknown"))
+                        .font(.caption)
+                        .foregroundStyle(Color.cameraWarning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("recording-readback-status")
+                    Button {
+                        Task { await camera.refresh() }
+                    } label: {
+                        Label("refresh", systemImage: "arrow.clockwise")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .disabled(camera.isBusy(.refresh) || camera.busyOperations.contains(.recording))
+                    .accessibilityIdentifier("recording-readback-refresh")
+                }
+                .padding(.horizontal, compact ? 8 : 18)
+                .padding(.bottom, 6)
+            }
+
             if camera.captureReviewState != .idle {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(LocalizedStringKey(camera.captureReviewState.localizationKey))
+                    Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(for: camera.captureReviewState, outcome: camera.captureReviewOutcome)))
                         .font(.caption)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("capture-review-status")
+                    if camera.captureReviewState == .notReady,
+                       camera.captureReviewOutcome.showsLastReadFailureWarning {
+                        Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(suffix: "last_read_failed")))
+                            .font(.caption)
+                            .foregroundStyle(Color.cameraWarning)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("capture-review-last-read-failed")
+                    }
                     if camera.captureReviewState != .capturing {
-                        Text("capture_review_limited_list")
+                        Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(suffix: "limited_list")))
+                            .accessibilityIdentifier("capture-review-limit")
                             .font(.caption2)
                             .foregroundStyle(Color.cameraSecondaryText)
                             .fixedSize(horizontal: false, vertical: true)
@@ -433,7 +486,7 @@ private struct CaptureBar: View {
                         Button {
                             camera.retryCaptureMediaReview()
                         } label: {
-                            Label("capture_review_retry", systemImage: "arrow.clockwise")
+                            Label(LocalizedStringKey(camera.captureReviewKind.localizationKey(suffix: "retry")), systemImage: "arrow.clockwise")
                                 .font(.caption.weight(.semibold))
                                 .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
                                 .contentShape(Rectangle())
@@ -492,7 +545,7 @@ private struct CaptureBar: View {
                     }
                     .overlay(alignment: .bottom) {
                         if camera.latestMediaIsPrevious {
-                            Text("capture_review_previous_badge")
+                            Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(suffix: "previous_badge")))
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity)
@@ -517,14 +570,20 @@ private struct CaptureBar: View {
         guard let item = camera.latestMediaItem else {
             return language.string("open_latest_media")
         }
-        let key = camera.latestMediaIsPrevious ? "open_previous_media_named"
-            : camera.captureReviewState == .available ? "open_visible_media_named" : "open_latest_media_named"
+        let key: String
+        if camera.latestMediaIsPrevious {
+            key = mediaIsVideo(item) ? "open_previous_video_named" : "open_previous_media_named"
+        } else if camera.captureReviewState == .available {
+            key = mediaIsVideo(item) ? "open_visible_video_named" : "open_visible_media_named"
+        } else {
+            key = "open_latest_media_named"
+        }
         return language.format(key, item.name)
     }
 
     private var captureSupported: Bool {
         if camera.shutterReleaseRequired { return true }
-        if camera.captureMode == .video && camera.recording { return true }
+        if camera.captureMode == .video && camera.recordingStopRequired { return true }
         if camera.captureMode == .photo && !camera.bulbMode && !camera.shutterAutofocusAllowed { return false }
         return camera.supports(
             camera.bulbMode ? .bulbExposure : camera.captureMode == .photo ? .stillCapture : .videoRecording
@@ -533,7 +592,7 @@ private struct CaptureBar: View {
 
     private var captureTemperatureAllowed: Bool {
         if camera.shutterReleaseRequired { return true }
-        if camera.captureMode == .video && camera.recording { return true }
+        if camera.captureMode == .video && camera.recordingStopRequired { return true }
         return camera.captureMode == .photo
             ? camera.stillCaptureTemperatureAllowed
             : camera.movieRecordingTemperatureAllowed
@@ -566,9 +625,9 @@ private struct CaptureBar: View {
                             .fill(Color.cameraWarning)
                             .frame(width: 40, height: 40)
                     } else if camera.captureMode == .video {
-                        RoundedRectangle(cornerRadius: camera.recording ? 5 : 25)
-                            .fill(Color.cameraRecording)
-                            .frame(width: camera.recording ? 28 : 54, height: camera.recording ? 28 : 54)
+                        RoundedRectangle(cornerRadius: camera.recordingStopRequired ? 5 : 25)
+                            .fill(camera.recordingRecovery != nil ? Color.cameraWarning : Color.cameraRecording)
+                            .frame(width: camera.recordingStopRequired ? 28 : 54, height: camera.recordingStopRequired ? 28 : 54)
                     } else {
                         Group {
                             if camera.bulbMode && camera.bulbExposureActive {
@@ -592,7 +651,7 @@ private struct CaptureBar: View {
                                 ? "start_bulb_exposure"
                                 : camera.captureMode == .photo
                                     ? camera.shutterAutofocus ? "capture_photo" : "capture_without_autofocus"
-                                    : camera.recording ? "stop_recording" : "start_recording"
+                                    : camera.recordingStopRequired ? "stop_recording" : "start_recording"
                         )
                     )
                 )

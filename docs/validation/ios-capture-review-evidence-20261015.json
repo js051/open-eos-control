@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "dateUTC": "2026-10-15T05:31:30.414360+00:00",
+  "baseCommit": "e381340ed3e69866f46962b8379f8604e59193d3",
+  "status": "implemented; source-verified; native NOT_RUN; not PR ready",
+  "scope": "iOS bounded capture/record-stop review observation and read-evidence alignment, malformed listing validation",
+  "sourceChecks": [
+    {
+      "command": "python -m unittest discover -s scripts/validation/tests -v",
+      "exitCode": 0,
+      "tests": 43,
+      "log": "ios-validation-source-tests.log",
+      "logSha256": "e0d68e93878aa4b0f7a3bf417c11be0e07544cd3529022bd2fd09f2175597b1e"
+    },
+    {
+      "command": "python -m unittest scripts.ci.tests.test_ios_files_export_history scripts.ci.tests.test_ios_recording_mode_diagnostics -v",
+      "exitCode": 0,
+      "tests": 9,
+      "log": "ios-protected-regression-source-tests.log",
+      "logSha256": "f37cd8b81ddbe67ed600e0885ee18126b2d3e107e430fd4d6b71266fffb3677c"
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0,
+      "tests": null,
+      "log": "ios-diff-check.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "uniqueLocalPythonTests": 95,
+  "fixture": {
+    "path": "contracts/capture-review-evidence/v1/review-evidence-vectors.json",
+    "bytes": 25745,
+    "sha256": "aab83ace169997c2f9788ea45f2863513f0a0d99e3211143c0e60475eb7ec7b1",
+    "terminalVectors": 106,
+    "freshRetryVectors": 2,
+    "retirementSpecifications": 4,
+    "resourceMapping": "individual XcodeGen unit-test resource; native resource execution NOT_RUN"
+  },
+  "native": {
+    "swift": "NOT_RUN: swift absent",
+    "xcodebuild": "NOT_RUN: xcodebuild absent",
+    "xcodegen": "NOT_RUN: xcodegen absent",
+    "newTestMethods": 22,
+    "newTestMethodNames": [
+      "testAll106FixedReviewEvidenceVectorsThroughProductionCameraAppState",
+      "testFixedFreshRetryVectorsDoNotReusePreviousInvocationEvidence",
+      "testFreshReviewPreemptedBeforeFirstReadDoesNotFabricateFailure",
+      "testReviewRetryStartsFreshEvidenceAfterSuccessfulChecks",
+      "testZeroCompletedReadRetryPreservesEveryPreviousTerminalOutcomeAndEvidence",
+      "testCancelledReviewInflightSuccessFailureAndCancelledErrorPublishNoOutcome",
+      "testReviewTransportCancellationWithoutTaskCancellationDoesNotBecomeReadFailure",
+      "testCancelledOrReplacedReviewDuringBackoffCannotPublishCompletedLocalReads",
+      "testCancelledRetryInFlightOrBackoffRestoresPriorMixedTerminalOutcome",
+      "testMediaBusyAfterOneCompletedRetryReadPreservesPreviousTerminalEvidence",
+      "testReplacedReviewOwnerRetiresLateSuccessAndFailureEvidence",
+      "testReplacedSessionReviewCannotChangeNewSessionOutcomeOrPreviousMedia",
+      "testBridgeMalformedItemsNeverBecomeSuccessfulEmptyReviewReads",
+      "testHTTP200MalformedListingIsFailedReadEvidence",
+      "testSimulatorMediaListRejectsMissingOrWrongTypeItemsWithoutPublishingEmptySuccess",
+      "testSimulatorMediaListAcceptsExplicitEmptyItemsArrayAsSuccessfulRead",
+      "testSimulatorMediaListRejectsMalformedItemsBeforeTruncatingOrPublishing",
+      "testRealMediaListRejectsMalformedPathEnvelopesBeforePublishing",
+      "testRealMediaListRejectsMalformedPageCountWithoutInventingZero",
+      "testRealMediaListKeepsUnsupportedCountAndValidUnpagedResponseFallbacks",
+      "testEmptyEvidenceMeansUnreadWithoutFabricatingReadFailure",
+      "testBothLocalizedFactsSurviveMixedReadEvidence"
+    ],
+    "fixedVectorStateMachineExecutionsPlanned": 106,
+    "freshRetryStateMachineExecutionsPlanned": 4,
+    "simulatorUI": "NOT_RUN",
+    "physicalCamera": "NOT_RUN"
+  },
+  "semantics": {
+    "observation": [
+      "found",
+      "no-candidate-observed",
+      "unread"
+    ],
+    "readEvidence": [
+      "successfulReads",
+      "failedReads",
+      "lastCompletedRead"
+    ],
+    "mixedFinalFailure": "no-candidate-observed with explicit localized last-read warning",
+    "freshInvocation": "local counters start from zero",
+    "retirement": "current generation restores previous terminal evidence/state; replacement generation cannot publish; partial counters discarded",
+    "freshNoPriorTerminalRetirement": "retryable notReady native state with unread/0/0/null and not_checked localized text",
+    "adapterValidation": "missing/wrong-type items, invalid item identity/name, invalid path envelope/entry, and malformed returned page count throw; valid empty arrays and unsupported/unpaged count fallback remain"
+  },
+  "invariants": [
+    "4 maximum outer listing reads; delays 250/750/1500 ms retained",
+    "original previous-ID snapshot, media kind, and camera response order retained",
+    "previous-media complete value preserved for no-candidate/unread outcomes",
+    "review paths contain no shutter/REC/AF resend",
+    "no changes to date fixture/parser, foreground Files/delivery implementation, RTP, LUT, security policy, signing, CI configuration or product version"
+  ],
+  "unchangedProtectedSources": {
+    "ios/OpenEOSControl/App/ForegroundMediaPlan.swift": "a18f9c81c3b692b3c0937ec9812210c6e238910a5934f80715078e80a8eacf0b",
+    "ios/OpenEOSControl/App/ForegroundMediaController.swift": "89232bd68b24c2558fbf902ab62ac9527e5cbb0aea3a776f3e455ba91f7f9c6f",
+    "ios/OpenEOSControl/App/ForegroundFilesDelivery.swift": "14fbda59dd5e37be464242504d2a39d7d7e42f93418e8d8aad933d1ed2c72a04",
+    "ios/OpenEOSControl/App/MediaFilesExport.swift": "d8484af0578856a1d209922b74538781377441613de988c5088444cd810b2a11",
+    "ios/OpenEOSControl/App/MediaDeliveryStore.swift": "204d278067584174e21e8f38d1d2e8156299c3e779ab2af123b419b36f179192",
+    "ios/OpenEOSControl/App/IOSRTPVideoProcessing.swift": "2f743fe0856df88e1298795b78c21d5bf1cd178af2b27bfb4baecc540cc66830",
+    "ios/OpenEOSControl/App/CubeLut.swift": "d54255b145b6370002163b6d69e136fc2427412c59eaf037ee5dea26d3ddd0e3"
+  },
+  "unchangedDateFixtureSha256": "8eb57e04446478fe523c1e8cd08c0cc57b524d9fcb7f63845fc28d6d02f57e9a",
+  "releaseAssessment": {
+    "cohortImpact": "patch",
+    "cumulativeBranchImpact": "minor",
+    "latestReleaseBaseline": "v0.12.0 (previously verified by coordinator; not re-queried in this local task)",
+    "reason": "Correct observation/evidence loss and malformed-list classification without adding camera mutations",
+    "blockers": [
+      "Swift/Core compilation and unit tests NOT_RUN",
+      "XcodeGen resource integration/App XCTest/UI NOT_RUN",
+      "exact-SHA CI and parent delivery gates pending"
+    ],
+    "physicalDeviceStatus": "NOT_RUN"
+  },
+  "existingSuccessfulFixtureAudit": {
+    "status": "SOURCE_REVIEW_PASS; native NOT_RUN",
+    "directListMediaCallerFiles": 5,
+    "reviewed": "CCAPIClientTests, CCAPIMediaFolderTests, DesktopBridgeClientTests, DesktopBridgeMediaFolderTests, BridgeMediaListingTests and App capture/readback/ownership/batch fixture routes",
+    "finding": "Successful simulator/Bridge fixtures provide items arrays with nonblank string IDs/names; successful Canon list fixtures provide integer page counts and valid path arrays. Deliberate malformed/error vectors preserved. No existing successful fixture required correction.",
+    "routingEvidenceLog": "ios-listing-fixture-callers.txt",
+    "routingEvidenceSha256": "cb17b97bb46958b4ea40bd08d7e3bb267ac85d507dfe6007d2182e517fed006a"
+  },
+  "coordinatorFinalChecks": [
+    {
+      "command": "/workspace/shared/eos-parity-recovery-20261013/bridge-validation-venv-20261014/bin/python -m ruff check --no-cache . ../scripts/validation",
+      "cwdRelativeToRepository": "bridge",
+      "exitCode": 0,
+      "log": "ios-ruff-final.log",
+      "logSha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "command": "/workspace/shared/eos-parity-recovery-20261013/bridge-validation-venv-20261014/bin/python -m pytest -q scripts/ci/tests scripts/validation/tests scripts/contracts/tests",
+      "cwdRelativeToRepository": ".",
+      "exitCode": 0,
+      "log": "ios-combined-source-tests-final.log",
+      "logSha256": "1259682e0aa93436969fecc26f467efa367c519b217e71772c65cfd82b49b4d4"
+    }
+  ],
+  "coordinatorCombinedPythonTests": {
+    "passed": 95,
+    "warnings": 1,
+    "includesEarlier52Tests": true,
+    "warning": "Existing PytestReturnNotNoneWarning in scripts/ci/tests/test_export_ios_ui_evidence.py::test_tree; returns dict. Not introduced or suppressed."
+  },
+  "formatCorrection": {
+    "originalRuffResult": "7 E501 line-length errors, preserved in ios-ruff.log",
+    "finalRuffResult": "PASS",
+    "assertionsUnchanged": true,
+    "pythonASTUnchanged": true,
+    "equivalenceLog": "ios-ruff-format-equivalence.json"
+  },
+  "sourceChecksums": [
+    {
+      "path": "contracts/capture-review-evidence/v1/README.md",
+      "sha256": "8348befbf8c3cf338cd37d3452a2b2b855fa48d20dbf0db6232f1e08d99876d4"
+    },
+    {
+      "path": "contracts/capture-review-evidence/v1/review-evidence-vectors.json",
+      "sha256": "aab83ace169997c2f9788ea45f2863513f0a0d99e3211143c0e60475eb7ec7b1"
+    },
+    {
+      "path": "ios/OpenEOSControl/App/CameraAppState.swift",
+      "sha256": "865ca01e64fde35f852c2761a2cae9cf5c0057e396ee47543bb171ad81fb8526"
+    },
+    {
+      "path": "ios/OpenEOSControl/App/CameraControlView.swift",
+      "sha256": "a8c97b95314609be417fa2296dc852f8b3b33e72e0bdc16fb42e1d80a7fa9de2"
+    },
+    {
+      "path": "ios/OpenEOSControl/App/MediaLibrary.swift",
+      "sha256": "892b824115d0370d1f207df7686be98b96c631d03721e1530c4c5e9c1d210a83"
+    },
+    {
+      "path": "ios/OpenEOSControl/App/Resources/en.lproj/Localizable.strings",
+      "sha256": "969daf4b91decc858d0a7d5f180dc091cc335c1a9c4a4a9b295d4d98ae6a221c"
+    },
+    {
+      "path": "ios/OpenEOSControl/App/Resources/zh-Hant.lproj/Localizable.strings",
+      "sha256": "908cebabc68e0cf2310703cbce0d0aefdf400b6c2d88ff7e5f6f82afc418195d"
+    },
+    {
+      "path": "ios/OpenEOSControl/Tests/CaptureMediaJourneyTests.swift",
+      "sha256": "2cba09b0f80a5cf885a030cb0fa74b84b518b06a3c4b153824c984f42a11b49d"
+    },
+    {
+      "path": "ios/OpenEOSControl/Tests/CaptureReviewEvidenceTests.swift",
+      "sha256": "3126c0e89cc2ca5ba8a9438bd303449b62c9232b8d7b69d62b4e5e80cdb85aca"
+    },
+    {
+      "path": "ios/OpenEOSControl/project.yml",
+      "sha256": "ba4087e0ce3e2db3fa111e29fb132ccdade47bb6c27ed37a716c8986fb1d3a1c"
+    },
+    {
+      "path": "ios/OpenEOSCore/Sources/OpenEOSCore/CCAPIClient.swift",
+      "sha256": "e948f253dbdca8f1b3f39535f2bbfd5d4d152bd464a048d87c87b2c8b3e7fde4"
+    },
+    {
+      "path": "ios/OpenEOSCore/Sources/OpenEOSCore/DesktopBridgeClient.swift",
+      "sha256": "975f8602080ea782b0f41cf7edb01984bcdf737b88d9e8de014292a44b675e8e"
+    },
+    {
+      "path": "ios/OpenEOSCore/Tests/OpenEOSCoreTests/CCAPIClientTests.swift",
+      "sha256": "414d8495e11e99844375da7c50221a7622dda09f80a363fc1683cd193bd7f382"
+    },
+    {
+      "path": "scripts/validation/tests/test_capture_review_evidence_source.py",
+      "sha256": "3148eba0ddfee9ecd9a2c6841fdc47fdef8d36a43feec6bcce996b20f48c522e"
+    }
+  ],
+  "sourceChecksumFormat": "Explicit path/SHA256 records; values preserved exactly. Two path-keyed SHA256 entries were detected as generic-api-key; locally verified to be source checksums, never credentials."
+}

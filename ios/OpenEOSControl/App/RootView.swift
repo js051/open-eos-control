@@ -22,7 +22,10 @@ struct RootView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            ShutterReleaseRecoveryView()
+            VStack(spacing: 0) {
+                ForegroundMediaBanner(controller: camera.foregroundMedia, delivery: camera.foregroundFiles)
+                ShutterReleaseRecoveryView()
+            }
         }
         .background(Color.cameraBackground.ignoresSafeArea())
         .sheet(item: $camera.activeSheet) { sheet in
@@ -31,6 +34,9 @@ struct RootView: View {
             VStack(spacing: 0) {
                 CameraSheetHost(sheet: sheet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if sheet != .foregroundImport {
+                    ForegroundMediaBanner(controller: camera.foregroundMedia, delivery: camera.foregroundFiles)
+                }
                 if camera.shutterReleaseRequired {
                     ShutterReleaseRecoveryView()
                         .layoutPriority(1)
@@ -58,6 +64,9 @@ struct RootView: View {
             camera.setApplicationActive(scenePhase == .active)
         }
         .onChange(of: scenePhase) { _, phase in camera.setApplicationActive(phase == .active) }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
+            camera.refreshMediaDateDisplayZone()
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             updateControlRotation()
         }
@@ -83,10 +92,12 @@ struct RootView: View {
 private struct ShutterReleaseRecoveryView: View {
     @EnvironmentObject private var camera: CameraAppState
     @State private var confirmingPreviousRelease = false
+    @State private var confirmingPreviousRecording = false
+    @State private var confirmingPreviousLiveView = false
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
-        if camera.shutterReleaseRequired || camera.previousShutterReleaseUnconfirmed {
+        if camera.shutterReleaseRequired || camera.previousShutterReleaseUnconfirmed || !camera.previousRecordingWarnings.isEmpty || camera.liveViewStopState.stopUnconfirmed || !camera.previousLiveViewWarnings.isEmpty {
             VStack(spacing: 8) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
@@ -98,6 +109,28 @@ private struct ShutterReleaseRecoveryView: View {
                                 Text("shutter_release_recovery_help")
                                     .font(.subheadline)
                             }
+                        }
+                        if camera.liveViewStopState.stopUnconfirmed {
+                            Text("live_view_stop_unconfirmed")
+                                .font(.headline)
+                                .accessibilityIdentifier("live-view-stop-warning")
+                        }
+                        if !camera.previousLiveViewWarnings.isEmpty {
+                            Text("previous_live_view_stop_warning")
+                                .font(.subheadline)
+                                .accessibilityIdentifier("previous-live-view-stop-warning")
+                            Button("confirm_previous_live_view_stopped") { confirmingPreviousLiveView = true }
+                                .buttonStyle(.bordered)
+                        }
+                        if !camera.previousRecordingWarnings.isEmpty {
+                            Text("previous_recording_warning")
+                                .font(.subheadline)
+                                .accessibilityIdentifier("previous-recording-warning")
+                            Button("confirm_previous_recording_stopped") {
+                                confirmingPreviousRecording = true
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("confirm-previous-recording-button")
                         }
                         if camera.previousShutterReleaseUnconfirmed {
                             Text("previous_shutter_release_warning")
@@ -114,6 +147,12 @@ private struct ShutterReleaseRecoveryView: View {
                 }
                 .frame(maxHeight: verticalSizeClass == .compact ? 72 : 130)
                 .accessibilityIdentifier("shutter-recovery-details")
+                if camera.liveViewStopState.stopUnconfirmed {
+                    Button("retry_live_view_stop") { Task { await camera.retryLiveViewStop() } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!camera.canRetryLiveViewStop)
+                        .accessibilityIdentifier("retry-live-view-stop-button")
+                }
                 if camera.shutterReleaseRequired {
                     Button {
                         Task { await camera.retryShutterRelease() }
@@ -133,6 +172,16 @@ private struct ShutterReleaseRecoveryView: View {
             .padding(12)
             .foregroundStyle(Color.cameraWarning)
             .background(Color.cameraSurface)
+            .confirmationDialog("confirm_previous_live_view_stopped", isPresented: $confirmingPreviousLiveView) {
+                Button("previous_live_view_physically_verified") { camera.confirmPreviousLiveViewStopped() }
+            } message: {
+                Text("previous_live_view_confirmation_help")
+            }
+            .confirmationDialog("confirm_previous_recording_stopped", isPresented: $confirmingPreviousRecording) {
+                Button("previous_recording_physically_verified") { camera.confirmPreviousRecordingStopped() }
+            } message: {
+                Text("previous_recording_confirmation_help")
+            }
             .confirmationDialog("confirm_previous_shutter_released", isPresented: $confirmingPreviousRelease) {
                 Button("previous_shutter_physically_verified") { camera.confirmPreviousShutterReleased() }
             } message: {

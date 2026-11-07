@@ -58,7 +58,7 @@ private struct CCAPIDetailedLiveView {
     let geometry: CCAPILiveViewGeometry?
 }
 
-public actor CCAPIClient {
+public actor CCAPIClient: CameraForegroundMediaReading {
     private static let maxDeviceStatusTextCharacters = 512
     private static let maximumErrorBodyCharacters = 2_000
     private static let noAPIListValue = "No list of APIs"
@@ -364,26 +364,33 @@ public actor CCAPIClient {
     private var settingPaths: [String: String] = [:]
     private var cameraSleepPath: String?
     private var cachedSettings: JSONDictionary?
+    private var shootingSettingsGeneration = UUID()
+    private var shootingSettingsReadRevision: UInt64 = 0
+    private var committedShootingSettingsRevision: UInt64 = 0
     private var cachedFileNaming: CameraFileNaming?
     private var fileNamingLoaded = false
     private var enforceAdvertisedOperations = false
     private var settingsLoaded = false
     private var discoverySource = "unknown"
     private var cachedModel = "Canon Camera"
+    public private(set) var recordingCommandEvidence: CameraRecordingCommandEvidence?
     private var recording: Bool?
     private var bulbExposureActive = false
-    private struct BulbRelease: Sendable {
+    private struct ShutterRelease: Sendable {
         let id: UUID
         let operation: CCAPIOperation
         let simulator: Bool
+        let payload: Data
     }
-    private var pendingBulbRelease: BulbRelease?
+    private var shortControlTask: Task<Void, Error>?
+    private var shortControlID: UUID?
+    private var pendingShutterRelease: ShutterRelease?
     private var bulbStartAcknowledged = false
-    private var bulbReleaseUnconfirmed = false
+    private var shutterReleaseUnconfirmed = false
     private var bulbStateAuthoritative = false
     private var bulbStartTask: Task<CameraStatus, Error>?
     private var bulbStartID: UUID?
-    private var bulbReleaseTask: Task<Void, Error>?
+    private var shutterReleaseTask: Task<Void, Error>?
     private var closing = false
     private var closeTask: Task<CameraShutterReleaseState, Never>?
     private var cameraMutationCount = 0
@@ -394,6 +401,20 @@ public actor CCAPIClient {
     private var activeLiveViewSource: LiveViewSource?
     private var requestedLiveViewRequest: LiveViewRequest?
     private var liveViewSizeFallbackAttempted = false
+    private struct LiveViewStopObligation: Sendable {
+        let id: UUID
+        let source: LiveViewSource
+        let stop: URLRequest
+        let closeStream: URLRequest?
+    }
+    private var pendingLiveViewStop: LiveViewStopObligation?
+    private var liveViewStopUnconfirmed = false
+    private var retiredLiveViewSource: LiveViewSource?
+    private var liveViewMaintenanceInFlight = false
+    private var liveViewStartTask: Task<Void, Error>?
+    private var liveViewStartID: UUID?
+    private var liveViewStopTask: Task<Void, Error>?
+    private var liveViewReleaseTask: Task<Void, Error>?
     private var rtpSession: (any CCAPIRTPSession)?
     private var multipartSession: CCAPIMultipartLiveViewSession?
     private var pendingMultipartFrame: Data?
@@ -451,6 +472,7 @@ public actor CCAPIClient {
     }
 
     public func initialize() async throws {
+        try Task.checkCancellation()
         guard !initialized else { return }
         discoveryTrace.removeAll()
         discoveryTraceTruncated = false
@@ -462,13 +484,15 @@ public actor CCAPIClient {
         }
 
         var errors: [String] = []
+        var failureReasons = Set<CameraConnectionFailureReason>()
         for path in ["/ccapi", "/ccapi/"] {
             do {
                 let rootDiscovery: JSONDictionary
                 do {
                     rootDiscovery = try await requestJSON(path: path)
+                    try Task.checkCancellation()
                 } catch {
-                    if error is CancellationError { throw error }
+                    if CameraConnectionFailureReason.isCancellation(error) { throw error }
                     recordDiscoveryFailure(endpoint: "GET \(path)", error: error)
                     throw error
                 }
@@ -495,8 +519,9 @@ public actor CCAPIClient {
                 let discovery: JSONDictionary
                 do {
                     discovery = try await requestJSON(path: Self.developerAPIPath)
+                    try Task.checkCancellation()
                 } catch {
-                    if error is CancellationError { throw error }
+                    if CameraConnectionFailureReason.isCancellation(error) { throw error }
                     recordDiscoveryFailure(endpoint: developerEndpoint, error: error)
                     throw error
                 }
@@ -517,7 +542,9 @@ public actor CCAPIClient {
                 initialized = true
                 return
             } catch {
-                if error is CancellationError { throw error }
+                if CameraConnectionFailureReason.isCancellation(error) { throw error }
+                try Task.checkCancellation()
+                failureReasons.insert(CameraConnectionFailureReason.classify(error) ?? .discoveryFailed)
                 errors.append("GET \(path): \(error.localizedDescription)")
             }
         }
@@ -525,6 +552,7 @@ public actor CCAPIClient {
         for prefix in ["/ccapi/ver110", "/ccapi/ver100"] {
             do {
                 let value = try await requestJSON(path: "\(prefix)/deviceinformation")
+                try Task.checkCancellation()
                 apiVersionPrefixes = [prefix]
                 preferredVersionPrefix = prefix
                 discoverySource = "GET \(prefix)/deviceinformation (identity fallback)"
@@ -540,17 +568,19 @@ public actor CCAPIClient {
                 initialized = true
                 return
             } catch {
-                if error is CancellationError { throw error }
+                if CameraConnectionFailureReason.isCancellation(error) { throw error }
+                try Task.checkCancellation()
+                failureReasons.insert(CameraConnectionFailureReason.classify(error) ?? .discoveryFailed)
                 recordDiscoveryFailure(endpoint: "GET \(prefix)/deviceinformation", error: error)
                 errors.append("GET \(prefix)/deviceinformation: \(error.localizedDescription)")
             }
         }
-        throw CCAPIError.discoveryFailed(errors)
+        throw CCAPIError.discoveryFailedWithReasons(errors, failureReasons)
     }
 
     public func connectSnapshot() async throws -> CameraSnapshot {
         try await initialize()
-        let cameraInfo = try await info()
+        let cameraInfo = try await readInfo(preservingConnectionEvidence: true)
         let cameraStatus = try await status()
         let cameraCapabilities = try await capabilities()
         return CameraSnapshot(info: cameraInfo, status: cameraStatus, capabilities: cameraCapabilities)
@@ -576,18 +606,28 @@ public actor CCAPIClient {
             bulbStartTask.cancel()
             _ = await bulbStartTask.result
         }
+        if let shortControlTask {
+            shortControlTask.cancel()
+            _ = await shortControlTask.result
+        }
         // Preserve Close's bounded final cleanup: if Start's compensation failed,
         // Close makes one last original-endpoint release attempt before retiring.
         // Concurrent/repeated Close calls share closeTask; this is separate from
         // one Stop action, which surfaces its failed compensation without retrying.
-        try? await releasePendingBulb()
+        try? await releasePendingShutter()
+        if let start = liveViewStartTask {
+            start.cancel()
+            _ = await start.result
+        }
         await stopEventPolling()
         await stopLiveView()
-        let unconfirmed = pendingBulbRelease != nil || bulbReleaseUnconfirmed
+        retiredLiveViewSource = pendingLiveViewStop?.source
+        pendingLiveViewStop = nil
+        let unconfirmed = pendingShutterRelease != nil || shutterReleaseUnconfirmed
         // A retired connection keeps a warning, never a command to replay in its replacement.
-        pendingBulbRelease = nil
+        pendingShutterRelease = nil
         bulbExposureActive = false
-        bulbReleaseUnconfirmed = unconfirmed
+        shutterReleaseUnconfirmed = unconfirmed
         return CameraShutterReleaseState(
             releaseRequired: false,
             releaseUnconfirmed: unconfirmed,
@@ -597,13 +637,17 @@ public actor CCAPIClient {
 
     public func shutterReleaseState() -> CameraShutterReleaseState {
         CameraShutterReleaseState(
-            releaseRequired: pendingBulbRelease != nil,
-            releaseUnconfirmed: bulbReleaseUnconfirmed,
-            bulbExposureActive: bulbReleaseUnconfirmed ? nil : bulbExposureActive
+            releaseRequired: pendingShutterRelease != nil,
+            releaseUnconfirmed: shutterReleaseUnconfirmed,
+            bulbExposureActive: shutterReleaseUnconfirmed ? nil : bulbExposureActive
         )
     }
 
     public func info() async throws -> CameraInfo {
+        try await readInfo(preservingConnectionEvidence: false)
+    }
+
+    private func readInfo(preservingConnectionEvidence: Bool) async throws -> CameraInfo {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/info")
@@ -617,7 +661,8 @@ public actor CCAPIClient {
             )
         }
 
-        let value = try await firstJSON(paths: versionedPaths("/deviceinformation"), required: true)
+        let value = try await firstJSON(paths: versionedPaths("/deviceinformation"), required: true,
+                                        preservingConnectionEvidence: preservingConnectionEvidence)
         let info = CameraInfo(
             model: value?.string("productname", default: "Canon Camera") ?? "Canon Camera",
             serial: value?.string("serialnumber", default: "unknown") ?? "unknown",
@@ -643,18 +688,20 @@ public actor CCAPIClient {
             else { observedFeatures.insert(.lensStatus) }
             if status.temperature == nil { observedFeatures.remove(.temperatureStatus) }
             else { observedFeatures.insert(.temperatureStatus) }
-            if !bulbStateAuthoritative, status.bulbExposureActive == true {
+            if !closing, !bulbStateAuthoritative, pendingShutterRelease == nil, status.bulbExposureActive == true {
                 // The Simulator contract explicitly reports an existing exposure.
                 // Adopt its known stop route without claiming a locally observed start.
-                pendingBulbRelease = BulbRelease(
-                    id: UUID(), operation: CCAPIOperation(method: .post, path: "/ccapi/bulb/stop"), simulator: true
+                pendingShutterRelease = ShutterRelease(
+                    id: UUID(), operation: CCAPIOperation(method: .post, path: "/ccapi/bulb/stop"),
+                    simulator: true, payload: try encodeJSONObject([:])
                 )
                 bulbStateAuthoritative = true
                 bulbExposureActive = true
                 bulbStartAcknowledged = false
-                bulbReleaseUnconfirmed = false
+                shutterReleaseUnconfirmed = false
             }
-            return bulbStateAuthoritative ? status.withShutterReleaseState(shutterReleaseState()) : status
+            return closing || bulbStateAuthoritative || pendingShutterRelease != nil || shutterReleaseUnconfirmed
+                ? status.withShutterReleaseState(shutterReleaseState()) : status
         }
 
         let battery = try await firstJSON(
@@ -711,8 +758,9 @@ public actor CCAPIClient {
             batteryLevel: batteryState.level,
             batteryStatus: batteryState.status,
             recording: recording,
-            bulbExposureActive: bulbReleaseUnconfirmed ? nil : bulbExposureActive,
-            shutterReleaseUnconfirmed: bulbReleaseUnconfirmed,
+            bulbExposureActive: shutterReleaseUnconfirmed ? nil : bulbExposureActive,
+            shutterReleaseUnconfirmed: shutterReleaseUnconfirmed,
+            liveViewStopUnconfirmed: liveViewStopUnconfirmed,
             mode: settingObject(in: settings, aliases: ["shootingmode"])?.string("value", default: "unknown") ?? "unknown",
             mediaAvailable: storageState?.available,
             exposure: exposureState(settings),
@@ -735,9 +783,11 @@ public actor CCAPIClient {
         if resolvedMode == .simulator {
             return try await simulatorCapabilities()
         }
-        let settings = try await cachedOrLoadShootingSettings()
+        _ = try await cachedOrLoadShootingSettings()
         let fileNaming = try await loadFileNaming()
-        let controls = cameraSettings(settings)
+        // File-naming reads can suspend; pair values with the committed routes
+        // available now, not a settings dictionary captured before that await.
+        let controls = cameraSettings(cachedSettings)
         var supported = observedFeatures
         if controls.contains(where: { ["iso", "shutter", "aperture"].contains($0.key) }) {
             supported.insert(.exposureControl)
@@ -859,11 +909,13 @@ public actor CCAPIClient {
                 currentSize: activeLiveViewSource == nil ? nil : activeLiveViewSize,
                 magnifications: liveViewMagnifications,
                 currentMagnification: currentLiveViewMagnification,
-                maximumFPS: 30
+                maximumFPS: 30,
+                focusInfoSupported: !ccapiLiveViewSources().isEmpty && detailedLiveViewOperation() != nil
             ),
             profile: CameraProfile.from(modelName: cachedModel),
             evidence: capabilityEvidence(),
-            shutterAutofocusSupported: directShutterOperation() != nil || manualShutterOperation() != nil
+            shutterAutofocusSupported: directShutterOperation() != nil || manualShutterOperation() != nil,
+            heldAutofocusSupported: autofocusOperation() != nil
         )
     }
 
@@ -903,6 +955,9 @@ public actor CCAPIClient {
     public func setSetting(key: String, value: String) async throws -> CameraStatus {
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
+        // A refresh that predates this command cannot later publish stale
+        // setting values or routes over the command's readback owner.
+        retireShootingSettingsReads()
         try await ensureInitialized()
         if resolvedMode == .simulator {
             switch key {
@@ -998,7 +1053,6 @@ public actor CCAPIClient {
             return try await status()
         }
 
-        let settings: JSONDictionary?
         if Self.cardSelectionSettingKeys.contains(key.lowercased()) ||
             Self.deviceFunctionSettingKeys.contains(key.lowercased()) ||
             Self.soundRecordingSettingKeys.contains(key.lowercased()) ||
@@ -1006,10 +1060,13 @@ public actor CCAPIClient {
             Self.focusBracketingSettingKeys.contains(key.lowercased()) ||
             Self.movieSettingKeys.contains(key.lowercased()) ||
             key.lowercased() == Self.directorySelectionSettingKey {
-            settings = try await loadShootingSettings()
+            _ = try await loadShootingSettings()
         } else {
-            settings = try await cachedOrLoadShootingSettings()
+            _ = try await cachedOrLoadShootingSettings()
         }
+        // Use one committed value/route view after all required reads. A
+        // concurrent invalidation remains a closed gate, never a stale fallback.
+        let settings = cachedSettings
         guard let control = cameraSettings(settings).first(where: { $0.key == key }),
               control.values.contains(value) else {
             throw CCAPIError.invalidSetting(key: key, value: value)
@@ -1019,28 +1076,28 @@ public actor CCAPIClient {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
             try await requestOK(path: path, method: .post, json: ["action": value])
-            cachedSettings = nil
+            invalidateShootingSettingsCache()
         } else if key == Self.zoomSettingKey {
             guard let path = settingPaths[Self.zoomSettingKey],
                   let zoom = Int(value), String(zoom) == value else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
             _ = try await requestJSON(path: path, method: .post, json: ["value": zoom])
-            cachedSettings = nil
+            invalidateShootingSettingsCache()
         } else if Self.soundRecordingLevelSettingKeys.contains(key) {
             guard let path = settingPaths[key],
                   let level = Int(value), String(level) == value else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
             _ = try await requestJSON(path: path, method: .put, json: ["value": level])
-            cachedSettings = nil
+            invalidateShootingSettingsCache()
         } else if Self.focusBracketingIntegerSettingKeys.contains(key) {
             guard let path = settingPaths[key],
                   let integer = Int(value), String(integer) == value else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
             _ = try await requestJSON(path: path, method: .put, json: ["value": integer])
-            cachedSettings = nil
+            invalidateShootingSettingsCache()
         } else if let structured = structuredSettingParts(key) {
             try await putStructuredSettingValue(
                 settings: settings,
@@ -1084,7 +1141,7 @@ public actor CCAPIClient {
             throw CCAPIError.invalidResponse("Canon directory creation returned an invalid directory name.")
         }
         observedFeatures.insert(.directoryControl)
-        cachedSettings = nil
+        invalidateShootingSettingsCache()
         if resolvedMode != .simulator { _ = try await loadShootingSettings() }
         return created
     }
@@ -1170,7 +1227,12 @@ public actor CCAPIClient {
 
     public func sleepCamera() async throws {
         try beginCameraMutation()
-        defer { cameraMutationCount -= 1 }
+        guard !liveViewMaintenanceInFlight else {
+            cameraMutationCount -= 1
+            throw CCAPIError.invalidResponse("Camera maintenance is already in progress.")
+        }
+        liveViewMaintenanceInFlight = true
+        defer { cameraMutationCount -= 1; liveViewMaintenanceInFlight = false }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             try await requestOK(path: "/ccapi/camera-sleep", method: .post, json: [:])
@@ -1178,8 +1240,9 @@ public actor CCAPIClient {
             return
         }
         await stopEventPolling()
-        await stopLiveView()
-        cachedSettings = nil
+        try await retryLiveViewStop()
+        try Task.checkCancellation()
+        invalidateShootingSettingsCache()
         _ = try await loadShootingSettings()
         guard let cameraSleepPath else { throw CCAPIError.unsupported(.cameraSleep) }
         try await requestOK(
@@ -1188,13 +1251,18 @@ public actor CCAPIClient {
             json: ["value": Self.autoPowerOffImmediately],
             expectedStatusCode: 202
         )
-        cachedSettings = nil
+        invalidateShootingSettingsCache()
         observedFeatures.insert(.cameraSleep)
     }
 
     public func cleanSensor(autoPowerOff: Bool) async throws {
         try beginCameraMutation()
-        defer { cameraMutationCount -= 1 }
+        guard !liveViewMaintenanceInFlight else {
+            cameraMutationCount -= 1
+            throw CCAPIError.invalidResponse("Camera maintenance is already in progress.")
+        }
+        liveViewMaintenanceInFlight = true
+        defer { cameraMutationCount -= 1; liveViewMaintenanceInFlight = false }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             try await requestOK(
@@ -1209,7 +1277,8 @@ public actor CCAPIClient {
             throw CCAPIError.unsupported(.sensorCleaning)
         }
         await stopEventPolling()
-        await stopLiveView()
+        try await retryLiveViewStop()
+        try Task.checkCancellation()
         try await requestOK(
             path: operation.path,
             method: .post,
@@ -1231,7 +1300,14 @@ public actor CCAPIClient {
         if resolvedMode == .simulator {
             _ = try await requestJSON(path: "/ccapi/capture/still", method: .post, json: ["af": autofocus])
             observedFeatures.insert(.stillCapture)
-            return try await status()
+            do { return try await status() }
+            catch {
+                // This required Simulator read follows an acknowledged capture. Canon
+                // camera status uses optional reads; retain that contract and cancellation.
+                try Task.checkCancellation()
+                if CameraConnectionFailureReason.isCancellation(error) { throw error }
+                throw CCAPIError.captureStatusReadbackFailed
+            }
         }
 
         let direct = directShutterOperation()
@@ -1241,8 +1317,8 @@ public actor CCAPIClient {
             try await commandOK(operation: direct, json: ["af": autofocus])
         } else if let manual {
             try await performGuaranteedRelease(
-                press: { try await self.commandOK(operation: manual, json: ["af": autofocus, "action": "full_press"]) },
-                release: { try await self.commandOK(operation: manual, json: ["af": false, "action": "release"]) }
+                operation: manual, press: ["af": autofocus, "action": "full_press"],
+                release: ["af": false, "action": "release"]
             )
         }
         observedFeatures.insert(.stillCapture)
@@ -1292,8 +1368,8 @@ public actor CCAPIClient {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             try await performGuaranteedRelease(
-                press: { _ = try await self.requestJSON(path: "/ccapi/shutter/half-press", method: .post, json: [:]) },
-                release: { _ = try await self.requestJSON(path: "/ccapi/shutter/release", method: .post, json: [:]) },
+                operation: CCAPIOperation(method: .post, path: "/ccapi/shutter/half-press"),
+                press: [:], release: [:], releasePath: "/ccapi/shutter/release",
                 holdNanoseconds: Self.halfPressNanoseconds
             )
             observedFeatures.insert(.shutterHalfPress)
@@ -1303,8 +1379,8 @@ public actor CCAPIClient {
             throw CCAPIError.unsupported(.shutterHalfPress)
         }
         try await performGuaranteedRelease(
-            press: { try await self.commandOK(operation: manual, json: ["af": true, "action": "half_press"]) },
-            release: { try await self.commandOK(operation: manual, json: ["af": false, "action": "release"]) },
+            operation: manual, press: ["af": true, "action": "half_press"],
+            release: ["af": false, "action": "release"],
             holdNanoseconds: Self.halfPressNanoseconds
         )
         observedFeatures.insert(.shutterHalfPress)
@@ -1314,7 +1390,7 @@ public actor CCAPIClient {
     public func startBulbExposure() async throws -> CameraStatus {
         try Task.checkCancellation()
         guard !closing else { throw CCAPIError.invalidResponse("This camera connection is closing.") }
-        guard bulbStartTask == nil, bulbReleaseTask == nil, pendingBulbRelease == nil,
+        guard bulbStartTask == nil, shortControlTask == nil, shutterReleaseTask == nil, pendingShutterRelease == nil,
               cameraMutationCount == 0 else {
             throw CCAPIError.invalidResponse("Release the shutter before starting another camera operation.")
         }
@@ -1339,7 +1415,7 @@ public actor CCAPIClient {
         }
         try await ensureInitialized()
         let baseline = try await status()
-        guard pendingBulbRelease == nil else {
+        guard pendingShutterRelease == nil else {
             throw CCAPIError.invalidResponse("Release the existing shutter exposure before starting again.")
         }
         try requireTemperatureAllowsStillCapture()
@@ -1354,24 +1430,27 @@ public actor CCAPIClient {
         } else {
             throw CCAPIError.unsupported(.bulbExposure)
         }
-        let release = BulbRelease(id: id, operation: operation, simulator: simulator)
-        pendingBulbRelease = release
+        let release = ShutterRelease(
+            id: id, operation: operation, simulator: simulator,
+            payload: try encodeJSONObject(simulator ? [:] : ["af": false, "action": "release"])
+        )
+        pendingShutterRelease = release
         bulbStateAuthoritative = true
         bulbStartAcknowledged = false
-        bulbReleaseUnconfirmed = true
+        shutterReleaseUnconfirmed = true
         do {
-            try await sendBulbCommand(release, start: true)
+            try await sendOwnedShutterCommand(release, start: true)
             bulbStartAcknowledged = true
             // A cancelled/closing caller still owes release after a late successful ACK.
             try Task.checkCancellation()
-            guard !closing, pendingBulbRelease?.id == id else { throw CancellationError() }
+            guard !closing, pendingShutterRelease?.id == id else { throw CancellationError() }
             bulbExposureActive = true
-            bulbReleaseUnconfirmed = false
+            shutterReleaseUnconfirmed = false
             return baseline.withShutterReleaseState(shutterReleaseState())
         } catch {
             let primary = error
             do {
-                try await releasePendingBulb()
+                try await releasePendingShutter()
             } catch {
                 throw CCAPIError.operationAndReleaseFailed(
                     operation: primary.localizedDescription,
@@ -1390,53 +1469,62 @@ public actor CCAPIClient {
     /// Stop-only; its successful return confirms release independently of status refresh.
     public func retryShutterRelease() async throws {
         guard !closing else { throw CCAPIError.invalidResponse("This camera connection is closing.") }
-        if let bulbStartTask {
-            bulbStartTask.cancel()
-            let result = await bulbStartTask.result
+        // Bind before awaiting: an old Stop must never cancel or release a newer owner.
+        guard let owner = pendingShutterRelease?.id ?? shortControlID ?? bulbStartID else { return }
+        let startingBulb = bulbStartTask
+        let startingShortControl = shortControlTask
+        if let startingBulb {
+            startingBulb.cancel()
+            let result = await startingBulb.result
             guard !closing else { throw CCAPIError.invalidResponse("This camera connection is closing.") }
             // A cancelled dispatched Start owns its one compensation attempt.
             // Do not silently repeat a failed release in this same Stop action.
-            if case let .failure(error) = result, pendingBulbRelease != nil {
-                throw error
-            }
+            if case let .failure(error) = result, pendingShutterRelease?.id == owner { throw error }
+        }
+        if let startingShortControl {
+            startingShortControl.cancel()
+            let result = await startingShortControl.result
+            guard !closing else { throw CCAPIError.invalidResponse("This camera connection is closing.") }
+            if case let .failure(error) = result, pendingShutterRelease?.id == owner { throw error }
         }
         guard !closing else { throw CCAPIError.invalidResponse("This camera connection is closing.") }
-        try await releasePendingBulb()
+        guard pendingShutterRelease?.id == owner else { return }
+        try await releasePendingShutter()
     }
 
-    private func releasePendingBulb() async throws {
-        if let bulbReleaseTask {
-            try await bulbReleaseTask.value
+    private func releasePendingShutter() async throws {
+        if let shutterReleaseTask {
+            try await shutterReleaseTask.value
             return
         }
-        guard let release = pendingBulbRelease else { return }
+        guard let release = pendingShutterRelease else { return }
         // This task is owned by the connection, not the cancelled UI caller.
-        let task = Task.detached(priority: .userInitiated) { try await self.performBulbRelease(release) }
-        bulbReleaseTask = task
-        defer { bulbReleaseTask = nil }
+        let task = Task.detached(priority: .userInitiated) { try await self.performShutterRelease(release) }
+        shutterReleaseTask = task
+        defer { shutterReleaseTask = nil }
         try await task.value
     }
 
-    private func performBulbRelease(_ release: BulbRelease) async throws {
-        guard pendingBulbRelease?.id == release.id else { return }
+    private func performShutterRelease(_ release: ShutterRelease) async throws {
+        guard pendingShutterRelease?.id == release.id else { return }
         do {
-            try await sendBulbCommand(release, start: false)
-            guard pendingBulbRelease?.id == release.id else { return }
-            pendingBulbRelease = nil
+            try await sendOwnedShutterCommand(release, start: false)
+            guard pendingShutterRelease?.id == release.id else { return }
+            pendingShutterRelease = nil
             bulbExposureActive = false
-            bulbReleaseUnconfirmed = false
+            shutterReleaseUnconfirmed = false
             if bulbStartAcknowledged { observedFeatures.insert(.bulbExposure) }
             bulbStartAcknowledged = false
         } catch {
-            if pendingBulbRelease?.id == release.id {
+            if pendingShutterRelease?.id == release.id {
                 bulbExposureActive = false
-                bulbReleaseUnconfirmed = true
+                shutterReleaseUnconfirmed = true
             }
             throw error
         }
     }
 
-    private func sendBulbCommand(_ release: BulbRelease, start: Bool) async throws {
+    private func sendOwnedShutterCommand(_ release: ShutterRelease, start: Bool) async throws {
         // The owned command deliberately bypasses the ordinary mutation interlock.
         // No alternate method, endpoint, or press retry is attempted here.
         let path = start && release.simulator ? "/ccapi/bulb/start" : release.operation.path
@@ -1444,12 +1532,90 @@ public actor CCAPIClient {
             throw CCAPIError.invalidResponse("Invalid saved shutter endpoint.")
         }
         var request = request(url: url, method: release.operation.method)
-        let payload: JSONDictionary = release.simulator ? [:] : ["af": false, "action": start ? "full_press" : "release"]
-        request.httpBody = try encodeJSONObject(payload)
+        if start {
+            request.httpBody = try encodeJSONObject(release.simulator ? [:] : ["af": false, "action": "full_press"])
+        } else {
+            request.httpBody = release.payload
+        }
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         let response = try await transport.send(request)
         try validate(response, request: request)
         if release.simulator { _ = try decodeJSONObject(response.body) }
+    }
+
+    /// The caller creates one owner for one physical press, then releases that exact owner.
+    /// Unlike bounded autofocus, this requires Canon's advertised AF start/stop operation.
+    public func startHeldAutofocus(owner: UUID) async throws {
+        try Task.checkCancellation()
+        guard !closing, shortControlTask == nil, bulbStartTask == nil,
+              shutterReleaseTask == nil, pendingShutterRelease == nil, cameraMutationCount == 0 else {
+            throw CCAPIError.invalidResponse("Release the shutter before another camera operation.")
+        }
+        shortControlID = owner
+        let task = Task { try await self.performHeldAutofocusStart(owner: owner) }
+        shortControlTask = task
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
+    }
+
+    private func performHeldAutofocusStart(owner: UUID) async throws {
+        defer {
+            if shortControlID == owner { shortControlID = nil; shortControlTask = nil }
+        }
+        try await ensureInitialized()
+        try Task.checkCancellation()
+        guard !closing, shortControlID == owner else { throw CancellationError() }
+        guard resolvedMode == .camera, let operation = autofocusOperation() else {
+            throw CCAPIError.unsupported(.autofocus)
+        }
+        guard let url = URL(string: baseURLString + operation.path) else {
+            throw CCAPIError.invalidResponse("Invalid advertised autofocus endpoint.")
+        }
+        var press = request(url: url, method: operation.method)
+        press.httpBody = try encodeJSONObject(["action": "start"])
+        press.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        pendingShutterRelease = ShutterRelease(id: owner, operation: operation, simulator: false,
+            payload: try encodeJSONObject(["action": "stop"]))
+        shutterReleaseUnconfirmed = true
+        do {
+            let response = try await transport.send(press)
+            try validate(response, request: press)
+            try Task.checkCancellation()
+            guard !closing, pendingShutterRelease?.id == owner else { throw CancellationError() }
+            shutterReleaseUnconfirmed = false
+            observedFeatures.insert(.autofocus)
+        } catch {
+            let primary = error
+            do { try await releasePendingShutter() }
+            catch { throw CCAPIError.operationAndReleaseFailed(operation: primary.localizedDescription, release: error.localizedDescription) }
+            throw primary
+        }
+    }
+
+    public func stopHeldAutofocus(owner: UUID) async throws {
+        // Bind before every suspension: a late release event cannot affect a newer press.
+        guard pendingShutterRelease?.id == owner || shortControlID == owner else { return }
+        if let start = shortControlTask, shortControlID == owner {
+            start.cancel()
+            let result = await start.result
+            if case let .failure(error) = result, pendingShutterRelease?.id == owner { throw error }
+        }
+        guard pendingShutterRelease?.id == owner else { return }
+        try await releasePendingShutter()
+    }
+
+    public func liveViewFocusInfo() async throws -> CameraFocusInfo? {
+        try Task.checkCancellation()
+        guard !closing, resolvedMode == .camera, activeLiveViewSource != nil,
+              let operation = detailedLiveViewOperation() else { return nil }
+        let liveViewOwner = pendingLiveViewStop?.id
+        var read = try request(path: operation.path + "?kind=info", method: .get, timeoutInterval: 2)
+        read.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+        read.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let data = try await CameraFocusMetadata.boundedRead(read, transport: transport)
+        guard !closing, activeLiveViewSource != nil, pendingLiveViewStop?.id == liveViewOwner else { return nil }
+        return try CameraFocusMetadata.canonPacket(data)
     }
 
     public func autofocus() async throws -> CameraStatus {
@@ -1458,8 +1624,8 @@ public actor CCAPIClient {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             try await performGuaranteedRelease(
-                press: { _ = try await self.requestJSON(path: "/ccapi/shutter/half-press", method: .post, json: [:]) },
-                release: { _ = try await self.requestJSON(path: "/ccapi/shutter/release", method: .post, json: [:]) },
+                operation: CCAPIOperation(method: .post, path: "/ccapi/shutter/half-press"),
+                press: [:], release: [:], releasePath: "/ccapi/shutter/release",
                 holdNanoseconds: Self.halfPressNanoseconds
             )
             observedFeatures.insert(.autofocus)
@@ -1467,14 +1633,13 @@ public actor CCAPIClient {
         }
         if let operation = autofocusOperation() {
             try await performGuaranteedRelease(
-                press: { try await self.commandOK(operation: operation, json: ["action": "start"]) },
-                release: { try await self.commandOK(operation: operation, json: ["action": "stop"]) },
+                operation: operation, press: ["action": "start"], release: ["action": "stop"],
                 holdNanoseconds: Self.halfPressNanoseconds
             )
         } else if let manual = manualShutterOperation() {
             try await performGuaranteedRelease(
-                press: { try await self.commandOK(operation: manual, json: ["af": true, "action": "half_press"]) },
-                release: { try await self.commandOK(operation: manual, json: ["af": false, "action": "release"]) },
+                operation: manual, press: ["af": true, "action": "half_press"],
+                release: ["af": false, "action": "release"],
                 holdNanoseconds: Self.halfPressNanoseconds
             )
         } else {
@@ -1590,9 +1755,32 @@ public actor CCAPIClient {
 
     public func startLiveView(_ request: LiveViewRequest = LiveViewRequest()) async throws {
         try beginCameraMutation()
-        defer { cameraMutationCount -= 1 }
+        guard !liveViewMaintenanceInFlight, liveViewStartTask == nil, liveViewStopTask == nil, pendingLiveViewStop == nil else {
+            cameraMutationCount -= 1
+            throw CCAPIError.liveViewStopUnconfirmed
+        }
+        let id = UUID()
+        liveViewStartID = id
+        let task = Task { try await self.performLiveViewStart(request, id: id) }
+        liveViewStartTask = task
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func performLiveViewStart(_ request: LiveViewRequest, id: UUID) async throws {
+        defer {
+            if liveViewStartID == id {
+                liveViewStartID = nil
+                liveViewStartTask = nil
+                cameraMutationCount -= 1
+            }
+        }
         try await ensureInitialized()
         try await refreshTemperatureStatusForRestrictedCommand()
+        try checkLiveViewStart()
         try requireTemperatureAllowsLiveView()
         latestLiveViewGeometry = nil
         requestedLiveViewRequest = request
@@ -1633,8 +1821,17 @@ public actor CCAPIClient {
                 }
                 return
             } catch {
-                lastError = error
-                guard request.source == .auto else { throw error }
+                let primary = error
+                do { try await releasePendingLiveView() }
+                catch {
+                    if CameraConnectionFailureReason.isCancellation(primary) { throw primary }
+                    try Task.checkCancellation()
+                    throw CCAPIError.liveViewStopUnconfirmed
+                }
+                if CameraConnectionFailureReason.isCancellation(primary) { throw primary }
+                try checkLiveViewStart()
+                lastError = primary
+                guard request.source == .auto else { throw primary }
             }
         }
         throw lastError ?? CCAPIError.unsupported(.liveView)
@@ -1642,15 +1839,16 @@ public actor CCAPIClient {
 
     private func startJPEGLiveView(_ request: LiveViewRequest) async throws {
         guard let operations = jpegLiveViewOperations() else { throw CCAPIError.unsupported(.liveView) }
-        try await startCCAPILiveView(request, path: operations.start.path)
+        let stop = try makeLiveViewStop(source: .ccapiJPEGPolling, operation: operations.stop)
+        try await startCCAPILiveView(request, path: operations.start.path, stop: stop)
         pendingMultipartFrame = nil
         activeLiveViewSource = .ccapiJPEGPolling
     }
 
-    private func startCCAPILiveView(_ request: LiveViewRequest, path: String) async throws {
+    private func startCCAPILiveView(_ request: LiveViewRequest, path: String, stop: LiveViewStopObligation) async throws {
         var effectiveSize = request.size
         do {
-            try await requestOK(
+            try await sendLiveViewStart(stop: stop,
                 path: path,
                 method: .post,
                 json: ["cameradisplay": "on", "liveviewsize": request.size.rawValue]
@@ -1659,7 +1857,7 @@ public actor CCAPIClient {
         } catch let error as CCAPIError {
             guard case let .http(statusCode, _, _, _) = error, statusCode == 400 else { throw error }
             do {
-                try await requestOK(path: path, method: .post, json: ["cameradisplay": "on"])
+                try await sendLiveViewStart(stop: stop, path: path, method: .post, json: ["cameradisplay": "on"])
                 liveViewSizeControlSupported = false
             } catch let parameterError as CCAPIError {
                 guard case let .http(statusCode, _, _, _) = parameterError, statusCode == 400 else {
@@ -1674,7 +1872,7 @@ public actor CCAPIClient {
                 var fallbackSucceeded = false
                 for fallbackSize in fallbackSizes {
                     do {
-                        try await requestOK(
+                        try await sendLiveViewStart(stop: stop,
                             path: path,
                             method: .post,
                             json: ["cameradisplay": "on", "liveviewsize": fallbackSize.rawValue]
@@ -1701,7 +1899,9 @@ public actor CCAPIClient {
         guard let operations = multipartLiveViewOperations() else {
             throw CCAPIError.unsupported(.liveViewMultipart)
         }
-        try await startCCAPILiveView(request, path: operations.startLiveView.path)
+        let stop = try makeLiveViewStop(source: .ccapiMultipart, operation: operations.stopLiveView,
+                                       closeStream: operations.closeStream)
+        try await startCCAPILiveView(request, path: operations.startLiveView.path, stop: stop)
         var stream: CameraHTTPStreamResponse?
         var candidateSession: CCAPIMultipartLiveViewSession?
         do {
@@ -1714,11 +1914,13 @@ public actor CCAPIClient {
             value.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
             let response = try await openMultipartStream(value)
             stream = response
+            try checkLiveViewStart()
             let boundary = try CCAPIMultipartLiveView.boundary(from: response.header("content-type"))
             let session = CCAPIMultipartLiveViewSession(response: response, boundary: boundary)
             candidateSession = session
             stream = nil
             let firstFrame = try await session.validatedFirstFrame()
+            try checkLiveViewStart()
             multipartSession?.close()
             multipartSession = session
             candidateSession = nil
@@ -1728,12 +1930,6 @@ public actor CCAPIClient {
         } catch {
             candidateSession?.close()
             stream?.cancel()
-            try? await requestOK(
-                path: operations.closeStream.path,
-                method: .delete,
-                expectedStatusCode: 200
-            )
-            await stopMultipartGeneralLiveView(operations)
             throw error
         }
     }
@@ -1792,23 +1988,98 @@ public actor CCAPIClient {
     }
 
     public func stopLiveView() async {
+        try? await retryLiveViewStop()
+    }
+
+    public func liveViewStopState() -> CameraLiveViewStopState {
+        CameraLiveViewStopState(stopRequired: pendingLiveViewStop != nil,
+            stopUnconfirmed: liveViewStopUnconfirmed,
+            source: pendingLiveViewStop?.source ?? retiredLiveViewSource)
+    }
+
+    /// Stop only. A failed acknowledgement retains the original request for a later retry.
+    public func retryLiveViewStop() async throws {
+        if let task = liveViewStopTask { return try await task.value }
+        let task = Task.detached { try await self.performLiveViewStop() }
+        liveViewStopTask = task
+        defer { liveViewStopTask = nil }
+        try await task.value
+    }
+
+    private func performLiveViewStop() async throws {
+        if let start = liveViewStartTask {
+            start.cancel()
+            _ = await start.result
+            // The interrupted Start already attempted compensation. One Stop action
+            // must expose its failure, not silently send a second retry.
+            if liveViewStopUnconfirmed { throw CCAPIError.liveViewStopUnconfirmed }
+        }
         latestLiveViewGeometry = nil
-        guard initialized else { return }
-        if resolvedMode == .simulator {
-            activeLiveViewSource = nil
-            return
+        if resolvedMode == .simulator { activeLiveViewSource = nil }
+        try await releasePendingLiveView()
+    }
+
+    private func checkLiveViewStart() throws {
+        try Task.checkCancellation()
+        guard !closing, liveViewStartID != nil, liveViewStopTask == nil else { throw CancellationError() }
+    }
+
+    private func makeLiveViewStop(source: LiveViewSource, operation: CCAPIOperation,
+                                  closeStream: CCAPIOperation? = nil) throws -> LiveViewStopObligation {
+        let payload: JSONDictionary? = operation.method == .delete ? nil :
+            (source == .ccapiRTP ? ["action": "stop", "ipaddress": ""] :
+                ["liveviewsize": "off", "cameradisplay": "on"])
+        return LiveViewStopObligation(id: UUID(), source: source,
+            stop: try request(path: operation.path, method: operation.method, json: payload),
+            closeStream: try closeStream.map { try request(path: $0.path, method: $0.method) })
+    }
+
+    private func sendLiveViewStart(stop: LiveViewStopObligation, path: String,
+                                   method: HTTPMethod, json: JSONDictionary) async throws {
+        // Construction/interlocks precede responsibility; no await separates ownership
+        // from dispatch. All retry commands use this exact session's captured stop.
+        let start = try request(path: path, method: method, json: json)
+        try checkLiveViewStart()
+        guard pendingLiveViewStop == nil || pendingLiveViewStop?.id == stop.id else {
+            throw CCAPIError.liveViewStopUnconfirmed
         }
-        switch activeLiveViewSource {
-        case .ccapiRTP:
-            await stopRTPLiveView()
-        case .ccapiMultipart:
-            await stopMultipartLiveView()
-        case .ccapiJPEGPolling:
-            await stopJPEGLiveView()
-        default:
-            break
-        }
+        pendingLiveViewStop = stop
+        let response = try await transport.send(start)
+        try validate(response, request: start)
+        try checkLiveViewStart()
+    }
+
+    private func releasePendingLiveView() async throws {
+        if let task = liveViewReleaseTask { return try await task.value }
+        guard let stop = pendingLiveViewStop else { return }
+        let task = Task.detached { try await self.sendLiveViewStop(stop) }
+        liveViewReleaseTask = task
+        defer { liveViewReleaseTask = nil }
+        try await task.value
+    }
+
+    private func sendLiveViewStop(_ stop: LiveViewStopObligation) async throws {
+        // Close local resources even if the wire acknowledgement is lost.
+        let native = rtpSession
+        rtpSession = nil
+        multipartSession?.close()
+        multipartSession = nil
+        pendingMultipartFrame = nil
         activeLiveViewSource = nil
+        if let native { await native.close() }
+        // Reader DELETE is best effort; only the general Live View stop discharges
+        // multipart responsibility, including firmware which returns reader 503.
+        if let closeStream = stop.closeStream { _ = try? await transport.send(closeStream) }
+        do {
+            let response = try await transport.send(stop.stop)
+            try validate(response, request: stop.stop)
+            guard pendingLiveViewStop?.id == stop.id else { return }
+            pendingLiveViewStop = nil
+            liveViewStopUnconfirmed = false
+        } catch {
+            if pendingLiveViewStop?.id == stop.id { liveViewStopUnconfirmed = true }
+            throw CCAPIError.liveViewStopUnconfirmed
+        }
     }
 
     public func currentLiveViewSource() -> LiveViewSource? {
@@ -1990,6 +2261,217 @@ public actor CCAPIClient {
         )
     }
 
+    public func foregroundMediaReadsAvailable() async -> Bool {
+        initialized && !closing && resolvedMode == .camera && supports(.get, suffix: "/contents") &&
+            transport is any CameraForegroundHTTPTransport
+    }
+
+    public func foregroundMediaInventory() async throws -> [CameraMediaItem] {
+        try await foregroundMediaInventory(timeout: .seconds(30))
+    }
+
+    // A shorter budget is available only to deterministic deadline tests.
+    func foregroundMediaInventory(timeout: Duration) async throws -> [CameraMediaItem] {
+        let strictTransport = try foregroundTransport()
+        var budget = CameraForegroundReadBudget(timeout: timeout)
+        let root = apiPath(.get, suffix: "/contents")
+        _ = try foregroundResourcePath(root, root: root)
+        var containers = [root]
+        var seenContainers: Set<Data> = [Data(root.utf8)]
+        var index = 0
+        var seenItems = Set<Data>()
+        var items: [CameraMediaItem] = []
+
+        func append(_ body: JSONDictionary) throws {
+            guard let paths = body["path"] as? [String] else {
+                throw CameraForegroundMediaError.invalidInventory
+            }
+            for rawID in paths {
+                _ = try budget.remaining()
+                let path = try foregroundResourcePath(rawID, root: root)
+                if Self.isMediaPath(path) {
+                    // Swift String equality folds Unicode canonical equivalents;
+                    // camera identities are exact UTF-8 byte sequences instead.
+                    if seenItems.insert(Data(rawID.utf8)).inserted {
+                        guard items.count < CameraForegroundReadBudget.maximumItems else {
+                            throw CameraForegroundMediaError.inventoryLimitExceeded
+                        }
+                        items.append(CameraMediaItem(
+                            id: rawID, name: (path as NSString).lastPathComponent,
+                            kind: Self.mediaKind(path),
+                            previewAvailable: Self.isCCAPIDisplayPreviewPath(path),
+                            folder: Self.listedMediaFolder(path)
+                        ))
+                    }
+                } else if seenContainers.insert(Data(path.utf8)).inserted {
+                    guard containers.count < CameraForegroundReadBudget.maximumContainers else {
+                        throw CameraForegroundMediaError.inventoryLimitExceeded
+                    }
+                    containers.append(path)
+                }
+            }
+        }
+
+        while index < containers.count {
+            _ = try budget.remaining()
+            let container = containers[index]
+            index += 1
+            let count = try await foregroundJSON(
+                path: "\(container)?kind=number", transport: strictTransport, budget: &budget
+            )
+            if count["pagenumber"] == nil {
+                // An explicit, well-typed unpaged path array is positive evidence;
+                // a missing/malformed count alone is never an empty baseline.
+                try append(count)
+                continue
+            }
+            guard let pageCount = Self.foregroundInteger(count["pagenumber"]), pageCount >= 0 else {
+                throw CameraForegroundMediaError.invalidInventory
+            }
+            guard pageCount <= Int64(CameraForegroundReadBudget.maximumRequests - budget.requests) else {
+                throw CameraForegroundMediaError.inventoryLimitExceeded
+            }
+            if pageCount == 0 {
+                let body = try await foregroundJSON(path: container, transport: strictTransport, budget: &budget)
+                try append(body)
+            } else {
+                // Plain ascending pages avoid the manual browser's ordering probe
+                // and compatibility retries. Every advertised page must succeed.
+                for page in 1...Int(pageCount) {
+                    let body = try await foregroundJSON(
+                        path: "\(container)?page=\(page)", transport: strictTransport, budget: &budget
+                    )
+                    try append(body)
+                }
+            }
+        }
+        _ = try budget.remaining()
+        return items
+    }
+
+    public func foregroundMediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
+        let strictTransport = try foregroundTransport()
+        var budget = CameraForegroundReadBudget()
+        let path = try foregroundResourcePath(item.id, root: apiPath(.get, suffix: "/contents"))
+        guard Self.isMediaPath(path) else { throw CameraForegroundMediaError.invalidInventory }
+        let body = try await foregroundJSON(path: "\(path)?kind=info", transport: strictTransport, budget: &budget)
+        let canonicalName = (path as NSString).lastPathComponent
+        let freshID = try Self.mediaInfoString(body, keys: ["id"], fallback: item.id)
+        let freshName = try Self.mediaInfoString(body, keys: ["name", "filename"], fallback: canonicalName)
+        guard freshID?.utf8.elementsEqual(item.id.utf8) == true,
+              freshName?.utf8.elementsEqual(item.name.utf8) == true else {
+            throw CameraMediaMetadataError.invalidMetadata
+        }
+        guard let size = Self.foregroundInteger(body["filesize"]), size > 0 else {
+            throw CameraForegroundMediaError.freshSizeUnavailable
+        }
+        // Missing type/name declarations bind to the requested camera resource,
+        // never to cached kind/MIME. Fresh absent MIME remains genuinely absent.
+        let canonical = CameraMediaItem(id: item.id, name: canonicalName, kind: Self.mediaKind(path),
+                                        previewAvailable: item.previewAvailable, folder: item.folder)
+        let metadata = try parseMediaInfo(canonical, body: body)
+        guard CameraMediaType.admitsFreshAutomaticJPEG(original: item, metadata: metadata, fresh: true) else {
+            throw CameraMediaMetadataError.invalidMetadata
+        }
+        return metadata
+    }
+
+    public func downloadForegroundOriginal(
+        _ item: CameraMediaItem,
+        expectedBytes: Int64,
+        to destination: URL,
+        progress: @escaping CameraMediaProgressHandler = { _ in }
+    ) async throws -> CameraMediaDownload {
+        let strictTransport = try foregroundTransport()
+        try Task.checkCancellation()
+        guard CameraMediaType.isAutomaticJPEG(item) else { throw CameraMediaMetadataError.invalidMetadata }
+        guard expectedBytes > 0, item.sizeBytes == expectedBytes else {
+            throw CameraForegroundMediaError.freshSizeUnavailable
+        }
+        guard expectedBytes <= Int64(CameraOriginalJPEG.maximumBytes) else {
+            throw CameraOriginalJPEG.Failure.resourceLimit
+        }
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw CCAPIError.destinationExists(destination.path)
+        }
+        let path = try foregroundResourcePath(item.id, root: apiPath(.get, suffix: "/contents"))
+        guard Self.isMediaPath(path) else { throw CameraForegroundMediaError.invalidInventory }
+        let budget = CameraForegroundReadBudget()
+        var request = try request(path: path, method: .get, timeoutInterval: try budget.remaining())
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        let response = try await strictTransport.downloadForeground(
+            request, maximumBytes: expectedBytes, progress: progress
+        )
+        defer { try? FileManager.default.removeItem(at: response.temporaryFileURL) }
+        _ = try budget.remaining()
+        let size = try CameraHTTPResponseIntegrity.validateOriginalMedia(response)
+        guard size == expectedBytes else { throw CameraForegroundMediaError.originalSizeMismatch }
+        let contentType = response.header("content-type")
+        try CameraOriginalJPEG.validate(fileURL: response.temporaryFileURL, expectedBytes: expectedBytes,
+                                        contentTypeValues: response.contentTypeValues)
+        _ = try budget.remaining()
+        try FileManager.default.moveItem(at: response.temporaryFileURL, to: destination)
+        return CameraMediaDownload(item: item, fileURL: destination, bytesTransferred: size, contentType: contentType)
+    }
+
+    private func foregroundTransport() throws -> any CameraForegroundHTTPTransport {
+        try Task.checkCancellation()
+        // Initialization belongs to the explicit connection flow. Never discover,
+        // open a Bridge session, or mutate a camera to enable an automatic read.
+        guard initialized, !closing, resolvedMode == .camera, supports(.get, suffix: "/contents"),
+              let transport = transport as? any CameraForegroundHTTPTransport else {
+            throw CameraForegroundMediaError.unsupported
+        }
+        return transport
+    }
+
+    private func foregroundJSON(
+        path: String,
+        transport: any CameraForegroundHTTPTransport,
+        budget: inout CameraForegroundReadBudget
+    ) async throws -> JSONDictionary {
+        var request = try request(path: path, method: .get, timeoutInterval: budget.nextRequestTimeout())
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        let response = try await transport.sendForeground(
+            request, maximumResponseBytes: CameraForegroundReadBudget.maximumJSONBytes
+        )
+        _ = try budget.remaining()
+        guard response.statusCode == 200, response.header("content-range") == nil,
+              !response.body.isEmpty, response.body.count <= CameraForegroundReadBudget.maximumJSONBytes else {
+            throw CameraForegroundMediaError.invalidInventory
+        }
+        try CameraHTTPResponseIntegrity.validate(response, requestMethod: "GET")
+        return try decodeForegroundJSONObject(response.body)
+    }
+
+    private func foregroundResourcePath(_ rawID: String, root: String) throws -> String {
+        guard !rawID.isEmpty, rawID.utf8.count <= 4_096,
+              let components = URLComponents(string: rawID),
+              components.query == nil, components.fragment == nil,
+              components.user == nil, components.password == nil,
+              let decoded = rawID.removingPercentEncoding,
+              !decoded.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw CameraForegroundMediaError.invalidInventory
+        }
+        let path = try normalizeCameraResource(rawID)
+        guard root.range(of: #"^/ccapi/ver[0-9]+/contents$"#, options: .regularExpression) != nil,
+              path == root || path.hasPrefix(root + "/"),
+              !path.hasSuffix("/"), !path.contains("//") else {
+            throw CameraForegroundMediaError.invalidInventory
+        }
+        return path
+    }
+
+    private static func foregroundInteger(_ value: Any?) -> Int64? {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              ["c", "s", "i", "l", "q", "C", "S", "I", "L", "Q"].contains(String(cString: number.objCType)) else {
+            return nil
+        }
+        return Int64(number.stringValue)
+    }
+
     public func listMedia(
         maximumItems: Int? = nil,
         onProgress: CameraMediaListProgressHandler = { _ in }
@@ -2000,23 +2482,31 @@ public actor CCAPIClient {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/media")
-            let allItems = value.array("items")?.objects.map {
-                CameraMediaItem(
-                    id: $0.string("id"),
-                    name: $0.string("name"),
-                    kind: $0.string("kind", default: "other"),
-                    sizeBytes: $0.integer64("size_bytes"),
-                    captureTime: $0.string("capture_time").nilIfEmpty,
-                    previewAvailable: ["image", "raw"].contains($0.string("kind", default: "other").lowercased()),
-                    protected: $0.bool("protect"),
-                    rating: $0.integer("rating").flatMap { (0...5).contains($0) ? $0 : nil },
-                    rotationDegrees: $0.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil },
-                    archived: $0.bool("archive"),
-                    contentType: $0.string("content_type").nilIfEmpty,
-                    widthPixels: $0.integer("width_pixels").flatMap { $0 > 0 ? $0 : nil },
-                    heightPixels: $0.integer("height_pixels").flatMap { $0 > 0 ? $0 : nil }
+            guard let rawItems = value.array("items") else {
+                throw CCAPIError.invalidResponse("Simulator media response must contain an items array.")
+            }
+            let allItems = try rawItems.map { raw -> CameraMediaItem in
+                guard let item = raw as? JSONDictionary,
+                      let id = item["id"] as? String, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      let name = item["name"] as? String, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw CCAPIError.invalidResponse("Simulator media response contains an invalid item.")
+                }
+                return CameraMediaItem(
+                    id: id,
+                    name: name,
+                    kind: item.string("kind", default: "other"),
+                    sizeBytes: item.integer64("size_bytes"),
+                    captureTime: item.string("capture_time").nilIfEmpty,
+                    previewAvailable: ["image", "raw"].contains(item.string("kind", default: "other").lowercased()),
+                    protected: item.bool("protect"),
+                    rating: item.integer("rating").flatMap { (0...5).contains($0) ? $0 : nil },
+                    rotationDegrees: item.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil },
+                    archived: item.bool("archive"),
+                    contentType: try CameraMediaType.declaredMIME(in: item),
+                    widthPixels: item.integer("width_pixels").flatMap { $0 > 0 ? $0 : nil },
+                    heightPixels: item.integer("height_pixels").flatMap { $0 > 0 ? $0 : nil }
                 )
-            } ?? []
+            }
             let items = maximumItems.map { Array(allItems.prefix($0)) } ?? allItems
             await onProgress(items)
             observedFeatures.insert(.mediaBrowser)
@@ -2080,9 +2570,22 @@ public actor CCAPIClient {
                 id: $0,
                 name: ($0 as NSString).lastPathComponent,
                 kind: Self.mediaKind($0),
-                previewAvailable: Self.isCCAPIDisplayPreviewPath($0)
+                previewAvailable: Self.isCCAPIDisplayPreviewPath($0),
+                folder: Self.listedMediaFolder($0)
             )
         }
+    }
+
+    /// Called only for normalized paths from a successful camera listing, never caller-supplied item IDs.
+    private static func listedMediaFolder(_ path: String) -> CameraMediaFolder? {
+        guard let separator = path.lastIndex(of: "/") else { return nil }
+        let parent = String(path[..<separator])
+        // Qualify the encoded path before decoding: other/contents and encoded endpoint names
+        // remain browsable media but do not establish folder provenance.
+        guard parent.range(of: #"^/ccapi/ver[0-9]+/contents(?:/.+)?$"#, options: .regularExpression) != nil,
+              let prefix = parent.range(of: #"^/ccapi/ver[0-9]+/contents"#, options: .regularExpression),
+              let label = String(parent[prefix.upperBound...]).removingPercentEncoding else { return nil }
+        return CameraMediaFolder(id: parent, label: label.isEmpty ? "/" : label)
     }
 
     public func downloadMedia(
@@ -2119,23 +2622,20 @@ public actor CCAPIClient {
                     )
                 }
             )
+            defer { try? FileManager.default.removeItem(at: download.temporaryFileURL) }
+            // A custom transport can return a file despite task cancellation.
+            try Task.checkCancellation()
             if (200..<300).contains(download.statusCode) {
+                let size = try CameraHTTPResponseIntegrity.validateOriginalMedia(download)
                 let contentType = download.header("content-type")
-                let prefix = (try? Data(contentsOf: download.temporaryFileURL).prefix(2_000)).map { Data($0) } ?? Data()
+                let prefix = try download.readPrefix(limit: Self.maximumErrorBodyCharacters)
                 if Self.isTextContentType(contentType) || Self.looksLikeTextPayload(prefix) {
                     let preview = String(data: prefix, encoding: .utf8) ?? ""
-                    try? FileManager.default.removeItem(at: download.temporaryFileURL)
                     failures.append("\(path): HTTP \(download.statusCode): \(preview)")
                     continue
                 }
-                do {
-                    try FileManager.default.moveItem(at: download.temporaryFileURL, to: destination)
-                } catch {
-                    try? FileManager.default.removeItem(at: download.temporaryFileURL)
-                    throw error
-                }
-                let fileSize = try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize
-                let size = Int64(fileSize ?? 0)
+                try Task.checkCancellation()
+                try FileManager.default.moveItem(at: download.temporaryFileURL, to: destination)
                 progress(
                     CameraMediaTransferProgress(
                         bytesTransferred: size,
@@ -2150,9 +2650,8 @@ public actor CCAPIClient {
                     contentType: contentType
                 )
             }
-            let preview = (try? Data(contentsOf: download.temporaryFileURL).prefix(2_000))
-                .flatMap { String(data: Data($0), encoding: .utf8) } ?? ""
-            try? FileManager.default.removeItem(at: download.temporaryFileURL)
+            let preview = (try? download.readPrefix(limit: Self.maximumErrorBodyCharacters))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? ""
             failures.append("\(path): HTTP \(download.statusCode): \(preview)")
         }
         throw CCAPIError.invalidResponse(
@@ -2165,6 +2664,7 @@ public actor CCAPIClient {
         offset: Int64,
         length: Int64? = nil
     ) async throws -> CameraMediaStreamResponse {
+        guard CameraMediaType.classify(item) == .video else { throw CameraMediaMetadataError.invalidMetadata }
         try await ensureInitialized()
         guard offset >= 0, length.map({ $0 > 0 }) ?? true else {
             throw CCAPIError.invalidResponse("Media byte range must be positive.")
@@ -2234,6 +2734,9 @@ public actor CCAPIClient {
     }
 
     public func mediaThumbnail(_ item: CameraMediaItem) async throws -> CameraMediaThumbnail {
+        guard [.photo, .video].contains(CameraMediaType.classify(item)) else {
+            throw CameraMediaMetadataError.invalidMetadata
+        }
         let response = try await mediaImageRepresentation(
             item,
             kind: "thumbnail",
@@ -2250,7 +2753,7 @@ public actor CCAPIClient {
         let previewEligible = resolvedMode == .simulator
             ? imageKind
             : imageKind && Self.isCCAPIDisplayPreviewPath(item.id)
-        guard previewEligible else {
+        guard CameraMediaType.classify(item) == .photo, previewEligible else {
             throw CCAPIError.invalidResponse("CCAPI display preview is available only for JPEG or CR3 items.")
         }
         let response = try await mediaImageRepresentation(
@@ -2271,7 +2774,7 @@ public actor CCAPIClient {
         }
         let path = try mediaPath(item)
         let body = try await requestJSON(path: "\(path)?kind=info")
-        return parseMediaInfo(item, body: body)
+        return try parseMediaInfo(item, body: body)
     }
 
     public func setMediaProtection(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
@@ -2366,7 +2869,9 @@ public actor CCAPIClient {
         return try normalizeCameraResource(item.id).components(separatedBy: "?")[0]
     }
 
-    private func parseMediaInfo(_ item: CameraMediaItem, body: JSONDictionary) -> CameraMediaItem {
+    private func parseMediaInfo(_ item: CameraMediaItem, body: JSONDictionary) throws -> CameraMediaItem {
+        let id = try Self.mediaInfoString(body, keys: ["id"], fallback: item.id)
+        guard id?.utf8.elementsEqual(item.id.utf8) == true else { throw CameraMediaMetadataError.invalidMetadata }
         let protected: Bool? = switch body.string("protect") {
         case "enable": true
         case "disable": false
@@ -2381,8 +2886,8 @@ public actor CCAPIClient {
         let archived = Self.parseMediaArchive(body.string("archive"))
         return CameraMediaItem(
             id: item.id,
-            name: item.name,
-            kind: item.kind,
+            name: try Self.mediaInfoString(body, keys: ["name", "filename"], fallback: item.name) ?? "",
+            kind: try Self.mediaInfoString(body, keys: ["kind"], fallback: item.kind) ?? "",
             sizeBytes: body.integer64("filesize").flatMap { $0 > 0 ? $0 : nil } ?? item.sizeBytes,
             captureTime: body.string("lastmodifieddate").nilIfEmpty ?? item.captureTime,
             previewAvailable: item.previewAvailable,
@@ -2390,10 +2895,31 @@ public actor CCAPIClient {
             rating: rating,
             rotationDegrees: rotation,
             archived: archived,
-            contentType: item.contentType,
+            contentType: try CameraMediaType.declaredMIME(in: body),
             widthPixels: item.widthPixels,
-            heightPixels: item.heightPixels
+            heightPixels: item.heightPixels,
+            folder: item.folder
         )
+    }
+
+    /// Do not erase an explicit blank, null, malformed field or conflicting
+    /// alias by substituting listing metadata in an explicitly fresh response.
+    private static func mediaInfoString(_ body: JSONDictionary, keys: [String], fallback: String?) throws -> String? {
+        var present = false
+        var result: String?
+        for key in keys {
+            guard let raw = body[key] else { continue }
+            let value: String?
+            if raw is NSNull { value = nil }
+            else if let string = raw as? String { value = string }
+            else { throw CameraMediaMetadataError.invalidMetadata }
+            if present, result.map({ Data($0.utf8) }) != value.map({ Data($0.utf8) }) {
+                throw CameraMediaMetadataError.invalidMetadata
+            }
+            present = true
+            result = value
+        }
+        return present ? result : fallback
     }
 
     private static func parseMediaArchive(_ value: String) -> Bool? {
@@ -3067,64 +3593,31 @@ public actor CCAPIClient {
     }
 
     private func startRTPLiveView(_ request: LiveViewRequest) async throws {
-        guard supportsRTPLiveView(),
-              let rtpDestinationAddress,
-              let rtpSessionFactory else {
+        guard supportsRTPLiveView(), let rtpDestinationAddress, let rtpSessionFactory else {
             throw CCAPIError.unsupported(.liveViewRTP)
         }
         let descriptionPath = apiPath(.get, suffix: "/shooting/liveview/rtpsessiondesc")
         let controlPath = apiPath(.post, suffix: "/shooting/liveview/rtp")
         let text = try await requestText(path: descriptionPath, maximumBytes: Self.maximumRTPSessionDescriptionBytes)
+        try checkLiveViewStart()
         let description = try CCAPIRTPSessionDescriptionParser.parse(text)
-        let session = try await rtpSessionFactory.makeSession(
-            description: description,
-            destinationAddress: rtpDestinationAddress
-        )
-        await session.setTargetFPS(request.fps)
+        let session = try await rtpSessionFactory.makeSession(description: description, destinationAddress: rtpDestinationAddress)
         do {
+            // Late allocation still belongs to this Start and must be closed on cancellation.
+            try checkLiveViewStart()
+            await session.setTargetFPS(request.fps)
+            try checkLiveViewStart()
             try await session.start()
-            try await requestOK(
-                path: controlPath,
-                method: .post,
-                json: ["action": "start", "ipaddress": rtpDestinationAddress]
-            )
+            let stop = try makeLiveViewStop(source: .ccapiRTP,
+                operation: CCAPIOperation(method: .post, path: controlPath))
+            try await sendLiveViewStart(stop: stop, path: controlPath, method: .post,
+                json: ["action": "start", "ipaddress": rtpDestinationAddress])
+            rtpSession = session
+            activeLiveViewSource = .ccapiRTP
+            observedFeatures.formUnion([.liveView, .liveViewRTP])
         } catch {
             await session.close()
-            try? await requestOK(
-                path: controlPath,
-                method: .post,
-                json: ["action": "stop", "ipaddress": ""]
-            )
             throw error
-        }
-        if let existing = rtpSession { await existing.close() }
-        rtpSession = session
-        activeLiveViewSource = .ccapiRTP
-        observedFeatures.formUnion([.liveView, .liveViewRTP])
-    }
-
-    private func stopRTPLiveView() async {
-        if !enforceAdvertisedOperations || supports(.post, suffix: "/shooting/liveview/rtp") {
-            try? await requestOK(
-                path: apiPath(.post, suffix: "/shooting/liveview/rtp"),
-                method: .post,
-                json: ["action": "stop", "ipaddress": ""]
-            )
-        }
-        if let session = rtpSession { await session.close() }
-        rtpSession = nil
-    }
-
-    private func stopJPEGLiveView() async {
-        guard let operations = jpegLiveViewOperations() else { return }
-        if operations.stop.method == .delete {
-            try? await requestOK(path: operations.stop.path, method: .delete)
-        } else {
-            try? await requestOK(
-                path: operations.stop.path,
-                method: .post,
-                json: ["liveviewsize": "off", "cameradisplay": "on"]
-            )
         }
     }
 
@@ -3148,39 +3641,10 @@ public actor CCAPIClient {
         liveViewSizeFallbackAttempted = true
         let requestedFPS = requestedLiveViewRequest?.fps ?? 1
         rejectedLiveViewSizes.insert(activeLiveViewSize)
-        await stopLiveView()
-        try await startJPEGLiveView(
-            LiveViewRequest(fps: requestedFPS, size: .small, source: .ccapiJPEGPolling)
-        )
+        try await retryLiveViewStop()
+        try await startLiveView(LiveViewRequest(fps: requestedFPS, size: .small, source: .ccapiJPEGPolling))
+        liveViewSizeFallbackAttempted = true
         return try await liveViewFrame(cacheKey: cacheKey)
-    }
-
-    private func stopMultipartLiveView() async {
-        multipartSession?.close()
-        multipartSession = nil
-        pendingMultipartFrame = nil
-        guard let operations = multipartLiveViewOperations() else { return }
-        // Closing the reader is best-effort: Canon firmware may return 503 after
-        // the multipart stream has already ended. The general Live View stop is
-        // the authoritative cleanup and must still be sent.
-        try? await requestOK(
-            path: operations.closeStream.path,
-            method: .delete,
-            expectedStatusCode: 200
-        )
-        await stopMultipartGeneralLiveView(operations)
-    }
-
-    private func stopMultipartGeneralLiveView(_ operations: CCAPIMultipartOperations) async {
-        if operations.stopLiveView.method == .delete {
-            try? await requestOK(path: operations.stopLiveView.path, method: .delete)
-        } else {
-            try? await requestOK(
-                path: operations.stopLiveView.path,
-                method: .post,
-                json: ["liveviewsize": "off", "cameradisplay": "on"]
-            )
-        }
     }
 
     private func supportsMediaDelete() -> Bool {
@@ -3260,18 +3724,16 @@ public actor CCAPIClient {
     }
 
     private func loadShootingSettings() async throws -> JSONDictionary? {
-        settingPaths.removeAll()
-        liveViewMagnifications.removeAll()
-        currentLiveViewMagnification = nil
-        observedFeatures.remove(.liveViewMagnification)
-        cameraSleepPath = nil
-        observedFeatures.remove(.cardSelectionControl)
-        observedFeatures.remove(.soundRecordingControl)
-        observedFeatures.remove(.soundRecordingLevelControl)
-        observedFeatures.remove(.focusBracketingControl)
-        observedFeatures.remove(.movieSettingsControl)
-        observedFeatures.remove(.directoryControl)
-        settingsLoaded = false
+        let generation = shootingSettingsGeneration
+        shootingSettingsReadRevision &+= 1
+        let revision = shootingSettingsReadRevision
+        // Actor methods can reenter at every request. Keep the last complete
+        // values/routes/capabilities together until this entire refresh is ready.
+        var settingPaths: [String: String] = [:]
+        var liveViewMagnifications: [LiveViewMagnification] = []
+        var currentLiveViewMagnification: LiveViewMagnification?
+        var cameraSleepPath: String?
+        var refreshedFeatures = Set<CameraFeature>()
         var merged: JSONDictionary = [:]
         let paths = enforceAdvertisedOperations
             ? advertisedPaths(.get, suffix: "/shooting/settings")
@@ -3299,7 +3761,7 @@ public actor CCAPIClient {
             settingPaths[Self.liveViewMagnificationSettingKey] = operations.write.path
             liveViewMagnifications = setting.magnifications
             currentLiveViewMagnification = setting.current
-            observedFeatures.insert(.liveViewMagnification)
+            refreshedFeatures.insert(.liveViewMagnification)
         }
         if let operations = zoomOperations(),
            let raw = try await firstJSON(paths: [operations.read.path], required: false),
@@ -3319,7 +3781,7 @@ public actor CCAPIClient {
                   let cardSelection = Self.validatedCardSelectionSetting(raw) else { continue }
             settingPaths[key] = operations.write.path
             merged[key] = cardSelection
-            observedFeatures.insert(.cardSelectionControl)
+            refreshedFeatures.insert(.cardSelectionControl)
         }
         for endpoint in Self.deviceFunctionSettingEndpoints {
             guard let operations = readWriteSettingOperations(suffix: endpoint.suffix),
@@ -3349,7 +3811,7 @@ public actor CCAPIClient {
             }
             settingPaths[endpoint.key] = operations.write.path
             merged[endpoint.key] = setting
-            observedFeatures.insert(.soundRecordingControl)
+            refreshedFeatures.insert(.soundRecordingControl)
         }
         for endpoint in Self.soundRecordingLevelEndpoints {
             if let operations = soundRecordingLevelOperations(suffix: endpoint.suffix),
@@ -3357,7 +3819,7 @@ public actor CCAPIClient {
                let soundRecordingLevel = Self.validatedIntegerRangeSetting(raw) {
                 settingPaths[endpoint.key] = operations.write.path
                 merged[endpoint.key] = soundRecordingLevel
-                observedFeatures.insert(.soundRecordingLevelControl)
+                refreshedFeatures.insert(.soundRecordingLevelControl)
             }
         }
         var focusBracketingAvailable = false
@@ -3372,7 +3834,7 @@ public actor CCAPIClient {
             merged[endpoint.key] = setting
             if endpoint.key == Self.focusBracketingSettingKey {
                 focusBracketingAvailable = true
-                observedFeatures.insert(.focusBracketingControl)
+                refreshedFeatures.insert(.focusBracketingControl)
             }
         }
         if focusBracketingAvailable {
@@ -3395,17 +3857,35 @@ public actor CCAPIClient {
             }
             settingPaths[endpoint.key] = operations.write.path
             merged[endpoint.key] = setting
-            observedFeatures.insert(.movieSettingsControl)
+            refreshedFeatures.insert(.movieSettingsControl)
         }
         if let operations = directoryOperations(),
            let raw = try await firstJSON(paths: [operations.read.path], required: false),
            let selection = Self.validatedDirectorySelectionSetting(raw) {
             settingPaths[Self.directorySelectionSettingKey] = operations.write.path
             merged[Self.directorySelectionSettingKey] = selection
-            observedFeatures.insert(.directoryControl)
+            refreshedFeatures.insert(.directoryControl)
         }
+        try Task.checkCancellation()
+        // A newer completed read is fresh enough for this caller; a merely
+        // pending read is not. Never turn forced validation into an old-cache
+        // fallback or let an older read overwrite a newer committed snapshot.
+        if committedShootingSettingsRevision > revision { return cachedSettings }
+        guard shootingSettingsGeneration == generation, !closing else {
+            throw CCAPIError.invalidResponse("Camera settings changed while refreshing. Refresh settings before retrying.")
+        }
+        self.settingPaths = settingPaths
+        self.liveViewMagnifications = liveViewMagnifications
+        self.currentLiveViewMagnification = currentLiveViewMagnification
+        self.cameraSleepPath = cameraSleepPath
+        observedFeatures.subtract([
+            .liveViewMagnification, .cardSelectionControl, .soundRecordingControl,
+            .soundRecordingLevelControl, .focusBracketingControl, .movieSettingsControl, .directoryControl,
+        ])
+        observedFeatures.formUnion(refreshedFeatures)
         settingsLoaded = true
         cachedSettings = merged.isEmpty ? nil : merged
+        committedShootingSettingsRevision = revision
         return cachedSettings
     }
 
@@ -3432,6 +3912,16 @@ public actor CCAPIClient {
         fileNamingLoaded = true
         if state != nil { observedFeatures.insert(.fileNamingControl) }
         return state
+    }
+
+    private func retireShootingSettingsReads() {
+        shootingSettingsGeneration = UUID()
+        committedShootingSettingsRevision = 0
+    }
+
+    private func invalidateShootingSettingsCache() {
+        retireShootingSettingsReads()
+        cachedSettings = nil
     }
 
     private func cachedOrLoadShootingSettings() async throws -> JSONDictionary? {
@@ -3874,22 +4364,62 @@ public actor CCAPIClient {
     }
 
     private func setRecording(_ enabled: Bool) async throws -> CameraStatus {
+        try Task.checkCancellation()
         try await ensureInitialized()
         if enabled {
             try await refreshTemperatureStatusForRestrictedCommand()
             try requireTemperatureAllowsMovieRecording()
         }
+        try Task.checkCancellation()
+        let command: URLRequest
         if resolvedMode == .simulator {
-            _ = try await requestJSON(path: "/ccapi/record/\(enabled ? "start" : "stop")", method: .post, json: [:])
+            command = try request(path: "/ccapi/record/\(enabled ? "start" : "stop")", method: .post, json: [:])
         } else {
             guard let operation = recordingOperation() else {
                 throw CCAPIError.unsupported(.videoRecording)
             }
-            try await commandOK(operation: operation, json: ["action": enabled ? "start" : "stop"])
+            command = try request(path: operation.path, method: operation.method, json: ["action": enabled ? "start" : "stop"])
         }
+        guard !closing else { throw CCAPIError.notInitialized }
+        try Task.checkCancellation()
+        recordingCommandEvidence = .unconfirmed(starting: enabled)
+        let exchange: CameraHTTPRecordingResponse
+        do {
+            exchange = try await transport.sendRecordingCommand(command)
+        } catch {
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+            throw CCAPIError.recordingCommandUnconfirmed(starting: enabled)
+        }
+        let response = exchange.response
+        let rejected = !(200..<300).contains(response.statusCode)
+        // A received rejection remains known even if its diagnostic body is lost.
+        if rejected { recordingCommandEvidence = nil }
+        if exchange.cancelled { throw CancellationError() }
+        if !exchange.bodyComplete, !rejected {
+            throw CCAPIError.recordingCommandUnconfirmed(starting: enabled)
+        }
+        try validate(response, request: command)
+        try Task.checkCancellation()
+        guard !closing else { throw CCAPIError.notInitialized }
+        if resolvedMode == .simulator {
+            do { _ = try decodeJSONObject(response.body) }
+            catch { throw CCAPIError.recordingCommandUnconfirmed(starting: enabled) }
+        }
+        recordingCommandEvidence = .acknowledged(starting: enabled)
         recording = enabled
         observedFeatures.insert(.videoRecording)
-        return try await status()
+        do {
+            let status = try await status()
+            if status.recording == false { recordingCommandEvidence = nil }
+            return status
+        } catch {
+            // Cancellation retains its existing propagation contract. In camera
+            // mode ordinary optional status-read failures are absorbed by status().
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+            // Only this read follows a received command ACK. Command result
+            // uncertainty has its own evidence and never enters this branch.
+            throw CCAPIError.recordingStatusReadbackFailed(starting: enabled)
+        }
     }
 
     private func commandOK(operation: CCAPIOperation, json: JSONDictionary) async throws {
@@ -3897,32 +4427,75 @@ public actor CCAPIClient {
     }
 
     private func performGuaranteedRelease(
-        press: @escaping @Sendable () async throws -> Void,
-        release: @escaping @Sendable () async throws -> Void,
+        operation: CCAPIOperation,
+        press: JSONDictionary,
+        release: JSONDictionary,
+        releasePath: String? = nil,
         holdNanoseconds: UInt64? = nil
     ) async throws {
+        try Task.checkCancellation()
+        guard !closing, shortControlTask == nil, bulbStartTask == nil,
+              shutterReleaseTask == nil, pendingShutterRelease == nil else {
+            throw CCAPIError.invalidResponse("Release the shutter before another camera operation.")
+        }
+        // Prepare and freeze the original session's exact commands before any send.
+        let pressRequest = try request(path: operation.path, method: operation.method, json: press)
+        let ownedRelease = ShutterRelease(
+            id: UUID(), operation: CCAPIOperation(method: operation.method, path: releasePath ?? operation.path),
+            simulator: resolvedMode == .simulator, payload: try encodeJSONObject(release)
+        )
+        shortControlID = ownedRelease.id
+        let task = Task {
+            try await self.performShortControl(pressRequest, release: ownedRelease, holdNanoseconds: holdNanoseconds)
+        }
+        shortControlTask = task
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func performShortControl(
+        _ press: URLRequest, release: ShutterRelease, holdNanoseconds: UInt64?
+    ) async throws {
+        defer {
+            if shortControlID == release.id {
+                shortControlTask = nil
+                shortControlID = nil
+            }
+        }
+        // Cancellation/Close before dispatch has no camera-side cleanup obligation.
+        try Task.checkCancellation()
+        guard !closing, shortControlID == release.id else { throw CancellationError() }
+        guard pendingShutterRelease == nil else {
+            throw CCAPIError.invalidResponse("Release the existing shutter exposure before starting again.")
+        }
+        pendingShutterRelease = release
+        shutterReleaseUnconfirmed = true
         var primaryFailure: (any Error)?
         do {
-            try await press()
+            let response = try await transport.send(press)
+            try validate(response, request: press)
+            if release.simulator { _ = try decodeJSONObject(response.body) }
+            try Task.checkCancellation()
+            guard !closing, pendingShutterRelease?.id == release.id else { throw CancellationError() }
             if let holdNanoseconds { try await Task.sleep(nanoseconds: holdNanoseconds) }
         } catch {
             primaryFailure = error
         }
-
-        var releaseFailure: (any Error)?
-        do {
-            try await Task.detached(priority: .userInitiated) { try await release() }.value
-        } catch {
-            releaseFailure = error
-        }
-        if let primaryFailure, let releaseFailure {
-            throw CCAPIError.operationAndReleaseFailed(
-                operation: primaryFailure.localizedDescription,
-                release: releaseFailure.localizedDescription
-            )
+        // The shared, detached stop survives caller cancellation and is retained
+        // on failure. Close and explicit Retry settle this task before releasing.
+        do { try await releasePendingShutter() }
+        catch {
+            if let primaryFailure {
+                throw CCAPIError.operationAndReleaseFailed(
+                    operation: primaryFailure.localizedDescription, release: error.localizedDescription
+                )
+            }
+            throw error
         }
         if let primaryFailure { throw primaryFailure }
-        if let releaseFailure { throw releaseFailure }
     }
 
     private func simulatorCapabilities() async throws -> CameraCapabilities {
@@ -4105,6 +4678,14 @@ public actor CCAPIClient {
         )
     }
 
+    private func simulatorRecordingObservation(_ value: Any?) throws -> Bool? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            throw CCAPIError.invalidResponse("Simulator recording status must be Boolean, null, or absent.")
+        }
+        return number.boolValue
+    }
+
     private func parseSimulatorStatus(_ value: JSONDictionary) throws -> CameraStatus {
         guard let battery = value.object("battery"),
               let media = value.object("media"),
@@ -4115,7 +4696,7 @@ public actor CCAPIClient {
             connected: value.bool("connected") ?? true,
             batteryLevel: battery.integer("level"),
             batteryStatus: battery.string("status", default: "unknown"),
-            recording: value.bool("recording"),
+            recording: try simulatorRecordingObservation(value["recording"]),
             bulbExposureActive: value.bool("bulb_exposure_active") ?? value.bool("bulbExposureActive"),
             mode: value.string("mode", default: "unknown"),
             mediaAvailable: media.bool("available"),
@@ -4280,9 +4861,26 @@ public actor CCAPIClient {
             paths: ["\(container)?kind=number", "\(container)?type=all,kind=number"],
             required: false
         )
-        let pageCount = pageInfo?.integer("pagenumber") ?? 0
-        guard pageCount >= 0 else {
-            throw CCAPIError.invalidResponse("Camera returned a negative media page count.")
+        let pageCount: Int
+        if let pageInfo {
+            if pageInfo["pagenumber"] == nil {
+                // Some cameras ignore kind=number and return a valid unpaged list.
+                // Missing count alone is never evidence of an empty card.
+                _ = try Self.validatedContentPaths(pageInfo)
+                pageCount = 0
+            } else {
+                guard let count = Self.strictInteger(pageInfo["pagenumber"]) else {
+                    throw CCAPIError.invalidResponse("Camera returned an invalid media page count.")
+                }
+                guard count >= 0 else {
+                    throw CCAPIError.invalidResponse("Camera returned a negative media page count.")
+                }
+                pageCount = count
+            }
+        } else {
+            // The optional count endpoint may be unsupported; the required
+            // fallback listing still has to contain a valid path array.
+            pageCount = 0
         }
         var result: [String] = []
         var seenPaths = Set<String>()
@@ -4307,14 +4905,14 @@ public actor CCAPIClient {
         if pageCount <= 0 {
             try Task.checkCancellation()
             if let value = try await firstJSON(paths: [container], required: true) {
-                appendUnique(value.array("path")?.strings ?? [])
+                appendUnique(try Self.validatedContentPaths(value))
             }
             try await onPage(boundedResult())
         } else if mediaDescendingOrderSupported == false {
             for page in stride(from: pageCount, through: 1, by: -1) {
                 try Task.checkCancellation()
                 guard let value = try await contentPage(container: container, page: page) else { continue }
-                let paths = value.array("path")?.strings ?? []
+                let paths = try Self.validatedContentPaths(value)
                 appendUnique(paths, reversed: true)
                 try await onPage(boundedResult())
                 if reachedMediaLimit() { return boundedResult() }
@@ -4333,20 +4931,20 @@ public actor CCAPIClient {
                         }
                         value = response
                     }
-                    let paths = value.array("path")?.strings ?? []
+                    let paths = try Self.validatedContentPaths(value)
                     appendUnique(paths, reversed: true)
                     try await onPage(boundedResult())
                     if reachedMediaLimit() { return boundedResult() }
                 }
             } else {
-                appendUnique(firstPage.array("path")?.strings ?? [])
+                appendUnique(try Self.validatedContentPaths(firstPage))
                 try await onPage(boundedResult())
                 if reachedMediaLimit() { return boundedResult() }
                 if pageCount >= 2 {
                     for page in 2...pageCount {
                         try Task.checkCancellation()
                         if let value = try await contentPage(container: container, page: page) {
-                            appendUnique(value.array("path")?.strings ?? [])
+                            appendUnique(try Self.validatedContentPaths(value))
                             try await onPage(boundedResult())
                             if reachedMediaLimit() { return boundedResult() }
                         }
@@ -4355,6 +4953,14 @@ public actor CCAPIClient {
             }
         }
         return boundedResult()
+    }
+
+    private static func validatedContentPaths(_ value: JSONDictionary) throws -> [String] {
+        guard let paths = value["path"] as? [String],
+              paths.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            throw CCAPIError.invalidResponse("Camera media response must contain a valid path array.")
+        }
+        return paths
     }
 
     private func contentPage(container: String, page: Int) async throws -> JSONDictionary? {
@@ -4425,17 +5031,27 @@ public actor CCAPIClient {
         return value
     }
 
-    private func firstJSON(paths: [String], required: Bool) async throws -> JSONDictionary? {
+    private func firstJSON(paths: [String], required: Bool,
+                           preservingConnectionEvidence: Bool = false) async throws -> JSONDictionary? {
         var failures: [String] = []
+        var reasons = Set<CameraConnectionFailureReason>()
         for path in paths {
             do {
-                return try await requestJSON(path: path)
+                let result = try await requestJSON(path: path)
+                if preservingConnectionEvidence { try Task.checkCancellation() }
+                return result
             } catch {
                 if error is CancellationError { throw error }
+                if preservingConnectionEvidence {
+                    if CameraConnectionFailureReason.isCancellation(error) { throw error }
+                    try Task.checkCancellation()
+                    reasons.insert(CameraConnectionFailureReason.classify(error) ?? .unknown)
+                }
                 failures.append("\(path): \(error.localizedDescription)")
             }
         }
         if required {
+            if preservingConnectionEvidence { throw CCAPIError.connectionReadFailed(failures, reasons) }
             throw CCAPIError.invalidResponse("Camera JSON request failed.\n" + failures.map { "- \($0)" }.joined(separator: "\n"))
         }
         return nil
@@ -4497,14 +5113,16 @@ public actor CCAPIClient {
     }
 
     private func beginCameraMutation() throws {
-        guard !closing, bulbStartTask == nil, bulbReleaseTask == nil, pendingBulbRelease == nil else {
+        try Task.checkCancellation()
+        guard !closing, bulbStartTask == nil, shortControlTask == nil,
+              shutterReleaseTask == nil, pendingShutterRelease == nil else {
             throw CCAPIError.invalidResponse("Release the shutter before another camera operation.")
         }
         cameraMutationCount += 1
     }
 
     private func validateShutterMutation(path: String, method: HTTPMethod, json: JSONDictionary?) throws {
-        guard method != .get, closing || bulbStartTask != nil || bulbReleaseTask != nil || pendingBulbRelease != nil else { return }
+        guard method != .get, closing || bulbStartTask != nil || shortControlTask != nil || shutterReleaseTask != nil || pendingShutterRelease != nil else { return }
         let action = json?["action"] as? String
         // Only existing, explicit cleanup contracts may pass the interlock.
         let safeStop =

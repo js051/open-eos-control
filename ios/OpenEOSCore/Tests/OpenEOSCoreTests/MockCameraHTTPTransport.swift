@@ -46,6 +46,7 @@ actor MockCameraHTTPTransport: CameraHTTPTransport {
     private var downloadStubs: [DownloadStub] = []
     private var uploadStubs: [UploadStub] = []
     private var recorded: [RecordedRequest] = []
+    private var downloadFiles: [URL] = []
 
     func enqueue(
         method: String = "GET",
@@ -108,6 +109,7 @@ actor MockCameraHTTPTransport: CameraHTTPTransport {
         }
         let temporaryURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try stub.body.write(to: temporaryURL, options: .atomic)
+        downloadFiles.append(temporaryURL)
         return CameraHTTPDownloadResponse(
             statusCode: stub.statusCode,
             headers: stub.headers,
@@ -143,6 +145,10 @@ actor MockCameraHTTPTransport: CameraHTTPTransport {
 
     func requests() -> [RecordedRequest] {
         recorded
+    }
+
+    func downloadedTemporaryURLs() -> [URL] {
+        downloadFiles
     }
 
     func remainingResponses() -> Int {

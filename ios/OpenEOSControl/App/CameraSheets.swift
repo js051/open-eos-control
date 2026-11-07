@@ -21,6 +21,10 @@ struct CameraSheetHost: View {
             FocusDriveView()
         case .language:
             LanguageSettingsView()
+        case .deliveryHistory:
+            MediaDeliveryHistoryView()
+        case .foregroundImport:
+            ForegroundMediaView()
         }
     }
 }
@@ -525,11 +529,16 @@ private struct MonitoringAssistView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if !pixelAnalysisAvailable {
-                        Label("monitoring_assists_rtp_unavailable", systemImage: "exclamationmark.triangle")
+                        Label(LocalizedStringKey("monitoring_assists_rtp_unavailable"), systemImage: "exclamationmark.triangle")
                             .font(.caption)
                             .foregroundStyle(Color.cameraWarning)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("monitor-pixel-analysis-unavailable")
+                    }
+                    if camera.activeLiveViewSource == .ccapiRTP {
+                        Text("native_monitor_scope_notice")
+                            .font(.caption)
+                            .foregroundStyle(Color.cameraSecondaryText)
                     }
                     monitorToggle(
                         "histogram",
@@ -555,7 +564,7 @@ private struct MonitoringAssistView: View {
                     )
                     VStack(alignment: .leading, spacing: 8) {
                         Text("lut_preview")
-                            .foregroundStyle(pixelAnalysisAvailable ? Color.cameraText : Color.cameraSecondaryText)
+                            .foregroundStyle(lutAvailable ? Color.cameraText : Color.cameraSecondaryText)
                         Text(
                             camera.monitorSettings.cubeLut.map {
                                 language.format("cube_lut_summary", $0.name, $0.size)
@@ -573,7 +582,7 @@ private struct MonitoringAssistView: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(Color.cameraAccent)
-                            .disabled(!pixelAnalysisAvailable)
+                            .disabled(!lutAvailable)
                             .accessibilityIdentifier("monitor-lut-import")
                             if camera.monitorSettings.cubeLut != nil {
                                 Button(role: .destructive) {
@@ -583,7 +592,6 @@ private struct MonitoringAssistView: View {
                                         .frame(width: 44, height: 44)
                                 }
                                 .buttonStyle(.bordered)
-                                .disabled(!pixelAnalysisAvailable)
                                 .accessibilityLabel(Text("remove_cube_lut"))
                                 .accessibilityIdentifier("monitor-lut-remove")
                             }
@@ -675,7 +683,10 @@ private struct MonitoringAssistView: View {
     private var pixelAnalysisAvailable: Bool {
         !camera.isPreview
             && camera.activeLiveViewSource != nil
-            && camera.activeLiveViewSource != .ccapiRTP
+    }
+
+    private var lutAvailable: Bool {
+        pixelAnalysisAvailable
     }
 
     private func monitorToggle(

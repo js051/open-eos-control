@@ -88,12 +88,6 @@ final class CCAPIClientRTPTests: XCTestCase {
         )
         await transport.enqueue(
             method: "POST",
-            path: "/ccapi/ver130/shooting/liveview/rtp",
-            status: 204,
-            body: Data()
-        )
-        await transport.enqueue(
-            method: "POST",
             path: "/ccapi/ver130/shooting/liveview",
             status: 204,
             body: Data()
@@ -118,7 +112,6 @@ final class CCAPIClientRTPTests: XCTestCase {
             [
                 "GET /ccapi",
                 "GET /ccapi/ver130/shooting/liveview/rtpsessiondesc",
-                "POST /ccapi/ver130/shooting/liveview/rtp",
                 "POST /ccapi/ver130/shooting/liveview",
             ]
         )
