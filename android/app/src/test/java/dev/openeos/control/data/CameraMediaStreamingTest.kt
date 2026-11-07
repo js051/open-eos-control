@@ -23,6 +23,17 @@ class CameraMediaStreamingTest {
     fun tearDown() = server.shutdown()
 
     @Test
+    fun contradictoryOrMalformedResponseMimeCannotOpenAVideoDecoderHandle() = runTest {
+        for (mime in listOf("image/jpeg", "audio/wav", "application/pdf", "not-a-mime")) {
+            server.enqueue(MockResponse().setHeader("Content-Type", mime).setBody("0123456789"))
+            val source = source { listOf(Request.Builder().url(server.url("/clip.mp4")).build()) }
+            val failure = runCatching { source.open(0) }.exceptionOrNull()
+            assertTrue(failure?.message.orEmpty().contains("unexpected"))
+        }
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
     fun readsValidatedHttpRangeAtRequestedPosition() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(206)

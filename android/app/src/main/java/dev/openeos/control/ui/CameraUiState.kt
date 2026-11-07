@@ -8,6 +8,7 @@ import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaStreamSource
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraNetworkDiagnostics
+import dev.openeos.control.data.RecordingCommand
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraSettingControl
@@ -59,6 +60,10 @@ data class MediaBatchResult(
 ) {
     val failedItems: Int
         get() = failedItemNames.size
+
+    /** A stopped download must not count the untouched remainder as failures. */
+    val notStartedItems: Int
+        get() = (totalItems - succeededItems - failedItems).coerceAtLeast(0)
 }
 
 data class LiveViewDiagnostics(
@@ -86,6 +91,8 @@ data class CameraUiState(
     val shutterAutofocus: Boolean = true,
     val shutterReleaseUnconfirmed: Boolean = false,
     val shutterDisconnectWarning: Boolean = false,
+    val liveViewStopUnconfirmed: Boolean = false,
+    val liveViewDisconnectWarning: Boolean = false,
     val connectionTarget: ConnectionTarget = ConnectionTarget.CCAPI,
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
     val ccapiSimulatorMode: Boolean? = null,
@@ -116,7 +123,13 @@ data class CameraUiState(
     val captureReviewThumbnail: Bitmap? = null,
     val captureReviewLoading: Boolean = false,
     val captureReviewStatus: CaptureReviewStatus = CaptureReviewStatus.IDLE,
+    val captureReviewObservation: CaptureReviewObservation = CaptureReviewObservation.UNREAD,
+    val captureReviewEvidence: CaptureReviewEvidence = CaptureReviewEvidence(),
     val captureStatusReadbackFailed: Boolean = false,
+    val pendingRecordingCommand: RecordingCommand? = null,
+    val recordingCommandUnconfirmed: Boolean = false,
+    val recordingDisconnectWarning: Boolean = false,
+    val recordingStartNotConfirmed: Boolean = false,
     val mediaThumbnails: Map<String, Bitmap> = emptyMap(),
     val mediaThumbnailLoadingIds: Set<String> = emptySet(),
     val mediaPreviewItem: CameraMediaItem? = null,
@@ -124,6 +137,7 @@ data class CameraUiState(
     val mediaPreviewLoading: Boolean = false,
     val mediaStreamSource: CameraMediaStreamSource? = null,
     val mediaSaveFeedback: Map<String, MediaSaveFeedback> = emptyMap(),
+    val mediaWorklistUnavailable: Boolean = false,
     val foregroundJpegImport: ForegroundJpegImportStatus = ForegroundJpegImportStatus(),
     // A previous connection's local-output cleanup warning does not belong to the new camera.
     val foregroundImportCleanupUnconfirmed: Boolean = false,
@@ -185,6 +199,16 @@ data class CameraUiState(
     val busy: Boolean
         get() = pendingOperations.isNotEmpty() || bulbExposureActive || shutterReleaseUnconfirmed
 
+    val needsLiveViewStopRecovery: Boolean
+        get() = liveViewStopUnconfirmed || status?.liveViewStopUnconfirmed == true
+
+    fun liveViewRecoveryActionEnabled(): Boolean =
+        (supports(CameraFeature.LIVE_VIEW) || needsLiveViewStopRecovery) && !isBusy(CameraOperation.LIVE_VIEW) &&
+            (liveViewAutoRefresh || needsLiveViewStopRecovery || errorOperation == CameraOperation.LIVE_VIEW)
+
+    val recordingStopAvailable: Boolean
+        get() = pendingRecordingCommand != null || status?.recording == true
+
     val bulbExposureActive: Boolean
         get() = status?.bulbExposureActive == true
 
@@ -203,9 +227,11 @@ data class CameraUiState(
 
     fun isBusy(operation: CameraOperation): Boolean =
         operation in pendingOperations ||
+            (pendingRecordingCommand != null && operation in setOf(CameraOperation.CAPTURE, CameraOperation.SETTING,
+                CameraOperation.POWER, CameraOperation.MAINTENANCE)) ||
             (CameraOperation.MEDIA in pendingOperations && foregroundJpegImport.phase in FOREGROUND_IMPORT_ACTIVE_PHASES &&
                 operation in FOREGROUND_IMPORT_CONTROL_OPERATIONS &&
-                !(operation == CameraOperation.RECORDING && status?.recording == true) &&
+                !(operation == CameraOperation.RECORDING && recordingStopAvailable) &&
                 !(operation == CameraOperation.CAPTURE && bulbExposureActive)) ||
             ((shutterReleaseUnconfirmed || CameraOperation.SHUTTER_RELEASE in pendingOperations) &&
                 operation !in setOf(CameraOperation.SHUTTER_RELEASE, CameraOperation.STATUS, CameraOperation.USB, CameraOperation.BRIDGE)) ||
@@ -228,9 +254,13 @@ private val FOREGROUND_IMPORT_CONTROL_OPERATIONS = setOf(
     CameraOperation.POWER, CameraOperation.MAINTENANCE,
 )
 
+internal val CameraUiState.mediaListingDefersThumbnails: Boolean
+    get() = transport == CameraTransport.DESKTOP_BRIDGE &&
+        (mediaLibraryLoading || mediaLibraryLoadStatus != MediaLibraryLoadStatus.COMPLETE)
+
 internal fun CameraUiState.foregroundImportCameraIdle(): Boolean =
     pendingOperations.isEmpty() && !bulbExposureActive && !shutterReleaseUnconfirmed &&
-        autofocusHoldState == AutofocusHoldState.IDLE && status?.recording != true &&
+        autofocusHoldState == AutofocusHoldState.IDLE && !recordingStopAvailable &&
         !mediaLibraryLoading && !captureReviewLoading && !mediaPreviewLoading && mediaPreviewItem == null &&
         activeMediaDownloadName == null && activeMediaUploadName == null && mediaBatchProgress == null &&
         mediaSaveFeedback.values.none { it.isPending } && !cameraImportPreparing
@@ -242,9 +272,15 @@ internal fun CameraUiState.canEnableForegroundJpegImport(platformSupported: Bool
         foregroundJpegImport.phase in setOf(ForegroundImportPhase.OFF, ForegroundImportPhase.STOPPED) &&
         foregroundImportCameraIdle()
 
+internal fun CameraUiState.adoptLiveViewStopWarning(status: CameraStatus): CameraUiState =
+    if (status.liveViewStopUnconfirmed == true) copy(liveViewStopUnconfirmed = true) else this
+
 internal fun CameraUiState.dismissVisibleCameraMessage(): CameraUiState = when {
-    shutterReleaseUnconfirmed -> this
+    shutterReleaseUnconfirmed || needsLiveViewStopRecovery || pendingRecordingCommand != null -> this
     error != null || connectionRecovery != null -> copy(error = null, errorOperation = null, connectionRecovery = null)
+    recordingStartNotConfirmed -> copy(recordingStartNotConfirmed = false)
+    recordingDisconnectWarning -> copy(recordingDisconnectWarning = false)
+    liveViewDisconnectWarning -> copy(liveViewDisconnectWarning = false)
     else -> copy(errorOperation = null, shutterDisconnectWarning = false)
 }
 
@@ -259,12 +295,17 @@ internal fun CameraUiState.showShutterAutofocus(): Boolean = connected && captur
     (capabilities?.shutterAutofocusSupported == true || !shutterAutofocus)
 
 internal fun CameraUiState.canChangeShutterAutofocus(): Boolean = showShutterAutofocus() &&
-    !busy && !isBusy(CameraOperation.CAPTURE) && status?.recording != true
+    !busy && !isBusy(CameraOperation.CAPTURE) && !recordingStopAvailable
 
 internal fun CameraUiState.canStartHeldAutofocus(): Boolean = connected && !previewMode &&
     capabilities?.heldAutofocusSupported == true && uiMode == UiMode.CONTROL && hudVisible &&
     activeSettingPicker == null && autofocusHoldState == AutofocusHoldState.IDLE &&
     !isBusy(CameraOperation.LIVE_VIEW) && HELD_AF_INTERLOCK_OPERATIONS.none { isBusy(it) }
+
+internal fun CameraUiState.needsShutterDisconnectWarning(): Boolean =
+    shutterDisconnectWarning || shutterReleaseUnconfirmed || bulbExposureActive ||
+        autofocusHoldState != AutofocusHoldState.IDLE ||
+        pendingOperations.any { it in setOf(CameraOperation.CAPTURE, CameraOperation.SHUTTER_RELEASE, CameraOperation.FOCUS) }
 
 internal val LIVE_VIEW_INTERLOCK_OPERATIONS = setOf(
     CameraOperation.FOCUS, CameraOperation.CAPTURE, CameraOperation.RECORDING, CameraOperation.MAINTENANCE,
@@ -290,7 +331,7 @@ internal fun CameraUiState.nextLiveViewMagnification(): LiveViewMagnification? {
 internal fun captureModeSwitchEnabled(state: CameraUiState): Boolean =
     !state.shutterReleaseUnconfirmed && state.autofocusHoldState == AutofocusHoldState.IDLE &&
     CameraOperation.FOCUS !in state.pendingOperations &&
-    state.status?.recording != true &&
+    !state.recordingStopAvailable &&
         !state.bulbExposureActive &&
         CameraOperation.SETTING !in state.pendingOperations &&
         CameraOperation.CAPTURE !in state.pendingOperations &&

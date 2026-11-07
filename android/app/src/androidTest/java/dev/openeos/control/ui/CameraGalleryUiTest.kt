@@ -18,6 +18,12 @@ import java.io.ByteArrayOutputStream
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import java.util.TimeZone
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
@@ -34,6 +40,9 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.filters.SdkSuppress
@@ -54,6 +63,46 @@ class CameraGalleryUiTest {
     private fun state() = CameraUiState().withOfflinePreview().copy(
         previewMode = false, uiMode = UiMode.MEDIA, mediaItems = listOf(item),
     )
+
+    @Test fun resumeReprojectsFilterGroupsAndViewerUsingOneZoneSnapshot() {
+        val originalZone = TimeZone.getDefault()
+        val owner = object : LifecycleOwner {
+            val registry = LifecycleRegistry(this)
+            override val lifecycle: Lifecycle get() = registry
+        }
+        val instant = item.copy(id = "instant", captureTime = "2026-08-13T17:30:00Z")
+        val floating = item.copy(id = "floating", name = "FLOAT.JPG", captureTime = "2026-08-14T00:30:00")
+        val date = item.copy(id = "date", name = "DATE.JPG", captureTime = "2026-08-14")
+        val state = mutableStateOf(state().copy(
+            mediaItems = listOf(instant, floating, date), mediaPreviewItem = instant,
+            mediaDateRange = requireNotNull(mediaDateRangeFromInput("2026-08-14", "2026-08-14")),
+        ))
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+            compose.runOnIdle { owner.registry.currentState = Lifecycle.State.RESUMED }
+            compose.setContent {
+                CompositionLocalProvider(LocalLifecycleOwner provides owner) {
+                    MaterialTheme { MediaScreen(state.value, actions()) }
+                }
+            }
+            compose.onNodeWithText("2026-08-13 17:30").assertIsDisplayed()
+            compose.onNodeWithText(compose.activity.getString(R.string.media_viewer_position, 1, 1)).assertIsDisplayed()
+            compose.runOnIdle {
+                owner.registry.currentState = Lifecycle.State.STARTED
+                TimeZone.setDefault(TimeZone.getTimeZone("Asia/Taipei"))
+                owner.registry.currentState = Lifecycle.State.RESUMED
+            }
+            compose.onNodeWithText("2026-08-14 01:30").assertIsDisplayed()
+            compose.onNodeWithText(compose.activity.getString(R.string.media_viewer_position, 1, 3)).assertIsDisplayed()
+            compose.runOnIdle { state.value = state.value.copy(mediaPreviewItem = floating) }
+            compose.onNodeWithText("2026-08-14 00:30 (${compose.activity.getString(R.string.media_time_zone_unknown)})").assertIsDisplayed()
+            compose.runOnIdle { state.value = state.value.copy(mediaPreviewItem = date) }
+            compose.onNode(hasText("2026-08-14") and hasAnyAncestor(isDialog()), useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithText("2026-08-14 00:00").assertDoesNotExist()
+        } finally {
+            TimeZone.setDefault(originalZone)
+        }
+    }
 
     @Test fun viewerDownloadGoesDirectlyToPhoneWithoutDocumentPicker() {
         var saved = emptyList<CameraMediaItem>()
@@ -170,6 +219,7 @@ class CameraGalleryUiTest {
             DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
                 MaterialTheme {
                     if (visible.value) MediaViewerDialog(
+                        displayZone = java.time.ZoneId.of("UTC"),
                         item = item, bytes = null, streamSource = null, loading = false,
                         position = 1, totalCount = 1, canMovePrevious = false, canMoveNext = false,
                         onPrevious = {}, onNext = {}, downloadEnabled = true,
@@ -213,6 +263,7 @@ class CameraGalleryUiTest {
             DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
                 MaterialTheme {
                     if (visible.value) MediaViewerDialog(
+                        displayZone = java.time.ZoneId.of("UTC"),
                         item = media, bytes = bytes, streamSource = null, loading = false,
                         position = 1, totalCount = 2, canMovePrevious = false, canMoveNext = true,
                         onPrevious = {}, onNext = { nextRequests += 1 }, downloadEnabled = true, downloadBusy = true,

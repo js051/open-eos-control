@@ -172,23 +172,28 @@ class CameraRepository(
         disconnectLocked()
     }
 
-    private suspend fun disconnectLocked() {
-        if (!active) return
+    private suspend fun disconnectLocked(): Boolean {
+        if (!active) return false
+        val hadLiveView = liveViewRunning || backend.liveViewStopRequired
+        var liveViewStopUnconfirmed = false
         try {
             runCatching { backend.retryAutofocusStop() }
             try {
                 backend.stopLiveView()
             } catch (_: Exception) {
+                liveViewStopUnconfirmed = hadLiveView
                 // A backend without Live View still needs its session closed.
             }
             backend.close()
         } catch (_: Exception) {
-            // ignore failure to stop live view
+            liveViewStopUnconfirmed = liveViewStopUnconfirmed || hadLiveView
+            // Session retirement cannot prove that an unreachable camera stopped.
         } finally {
             active = false
             liveViewRunning = false
             activeInfo = null
         }
+        return liveViewStopUnconfirmed
     }
 
     suspend fun refreshStatus(): CameraStatus = backend.status()

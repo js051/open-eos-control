@@ -339,6 +339,9 @@ class DesktopBridgeCameraBackend(
 
     override val prefersBitmapLiveViewFrames: Boolean = true
 
+    override val liveViewStopRequired: Boolean
+        get() = client.liveViewStopRequired
+
     override val networkDiagnostics: CameraNetworkDiagnostics
         get() = httpTransport.diagnosticsProvider()
 
@@ -361,6 +364,8 @@ class DesktopBridgeCameraBackend(
     override suspend fun startLiveView(request: LiveViewRequest) = client.startLiveView(request)
 
     override suspend fun stopLiveView() = client.stopLiveView()
+
+    override suspend fun liveViewFocusInfo(): CameraFocusInfo? = client.liveViewFocusInfo()
 
     override suspend fun setExposure(iso: String?, shutter: String?, aperture: String?): CameraStatus =
         client.setExposure(iso = iso, shutter = shutter, aperture = aperture)
@@ -401,6 +406,10 @@ class DesktopBridgeCameraBackend(
 
     override suspend fun autofocus(): CameraStatus = client.autofocus()
 
+    override suspend fun holdAutofocus(whileHeld: suspend () -> Unit) = client.holdAutofocus(whileHeld)
+
+    override suspend fun retryAutofocusStop() = client.retryAutofocusStop()
+
     override suspend fun halfPressShutter(): CameraStatus = client.halfPressShutter()
 
     override suspend fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep): FocusDriveResult =
@@ -413,8 +422,7 @@ class DesktopBridgeCameraBackend(
     override suspend fun listMedia(
         maximumItems: Int?,
         onProgress: (List<CameraMediaItem>) -> Unit,
-    ): List<CameraMediaItem> = client.listMedia(maximumItems)
-        .also(onProgress)
+    ): List<CameraMediaItem> = client.listMedia(maximumItems, onProgress)
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)
 

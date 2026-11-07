@@ -36,6 +36,9 @@ import dev.openeos.control.data.DownloadHistoryEntry
 import dev.openeos.control.data.DownloadHistoryOutcome
 import dev.openeos.control.data.DownloadHistoryState
 import dev.openeos.control.data.DownloadHistoryWarning
+import dev.openeos.control.data.DownloadWorklistOrigin
+import dev.openeos.control.data.DownloadContinuationStatus
+import dev.openeos.control.data.continuationStatus
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.launch
@@ -47,10 +50,15 @@ internal fun DownloadHistoryDialog(
     onClear: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    continuationAvailable: Boolean = false,
+    onContinue: (String) -> Unit = {},
 ) {
     var confirmClear by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    // Schema 3 stores planned receipts inside their rows; entries contains only legacy attempts.
+    val legacyEntries = state.entries
+    val dateFormat = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
     LaunchedEffect(state.warning) {
         if (state.warning != null) listState.scrollToItem(3)
     }
@@ -78,6 +86,7 @@ internal fun DownloadHistoryDialog(
                                     DownloadHistoryWarning.READ_FAILED -> R.string.download_history_warning_read
                                     DownloadHistoryWarning.WRITE_FAILED -> R.string.download_history_warning_write
                                     DownloadHistoryWarning.CLEAR_FAILED -> R.string.download_history_warning_clear
+                                    DownloadHistoryWarning.CAPACITY_REACHED -> R.string.download_history_warning_capacity
                                     DownloadHistoryWarning.STOPPED -> R.string.download_history_warning_stopped
                                 }),
                                 color = MaterialTheme.colorScheme.error,
@@ -87,15 +96,60 @@ internal fun DownloadHistoryDialog(
                     }
                     if (state.loading) {
                         item { Text(stringResource(R.string.download_history_loading)) }
-                    } else if (state.entries.isEmpty()) {
+                    } else if (state.entries.isEmpty() && state.worklists.isEmpty()) {
                         item { Text(stringResource(R.string.download_history_empty)) }
                     }
-                    items(state.entries, key = DownloadHistoryEntry::receiptId) { entry -> DownloadHistoryRow(entry) }
+                    state.worklists.forEach { worklist ->
+                        item(key = "worklist-${worklist.worklistId}") {
+                            Text(
+                                stringResource(R.string.download_history_worklist_created,
+                                    dateFormat.format(Date(worklist.createdAtMillis))),
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.testTag("download-worklist-${worklist.worklistId}"),
+                            )
+                            if (worklist.rows.any {
+                                state.continuationStatus(DownloadWorklistOrigin(worklist.worklistId, it.rowId)) != DownloadContinuationStatus.UNAVAILABLE
+                            }) {
+                                TextButton(
+                                    enabled = continuationAvailable && state.writable &&
+                                        worklist.worklistId !in state.continuationBlockedWorklistIds,
+                                    onClick = { onContinue(worklist.worklistId) },
+                                    modifier = Modifier.testTag("download-worklist-continue-${worklist.worklistId}"),
+                                ) { Text(stringResource(R.string.media_continuation_start)) }
+                                if (!continuationAvailable) Text(stringResource(R.string.media_continuation_load_first),
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        items(worklist.rows, key = { "worklist-row-${it.rowId}" }) { row ->
+                            Column(Modifier.fillMaxWidth().testTag("download-worklist-row-${row.rowId}"),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(stringResource(R.string.download_history_worklist_position,
+                                    worklist.rows.indexOf(row) + 1, worklist.rows.size), style = MaterialTheme.typography.bodySmall)
+                                row.origin?.let { origin ->
+                                    val earlier = state.worklists.find { it.worklistId == origin.worklistId }
+                                    val earlierRow = earlier?.rows?.find { it.rowId == origin.rowId }
+                                    if (earlier != null && earlierRow != null) Text(stringResource(R.string.media_continuation_linked_from,
+                                        earlierRow.filename, earlier.rows.indexOf(earlierRow) + 1,
+                                        dateFormat.format(Date(earlier.createdAtMillis))), style = MaterialTheme.typography.bodySmall)
+                                    Text(stringResource(R.string.media_continuation_link_hint), style = MaterialTheme.typography.bodySmall)
+                                }
+                                row.receipt?.let { DownloadHistoryRow(it) } ?: run {
+                                    HorizontalDivider()
+                                    Text(row.filename, style = MaterialTheme.typography.titleSmall)
+                                    Text(stringResource(R.string.download_history_outcome_queued))
+                                }
+                            }
+                        }
+                    }
+                    if (legacyEntries.isNotEmpty()) {
+                        item { Text(stringResource(R.string.download_history_legacy_attempts), style = MaterialTheme.typography.titleMedium) }
+                    }
+                    items(legacyEntries, key = DownloadHistoryEntry::receiptId) { entry -> DownloadHistoryRow(entry) }
                 }
                 TextButton(
                     onClick = { confirmClear = true },
                     enabled = !state.loading && state.warning != DownloadHistoryWarning.STOPPED &&
-                        (state.entries.isNotEmpty() || state.warning != null),
+                        (state.entries.isNotEmpty() || state.worklists.isNotEmpty() || state.warning != null),
                     modifier = Modifier.fillMaxWidth().testTag("download-history-clear"),
                 ) { Text(stringResource(R.string.download_history_clear)) }
                 TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().testTag("download-history-close")) {

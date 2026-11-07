@@ -94,6 +94,16 @@ class CameraCaptureReviewRecoveryTest {
         assertNull(viewModel.uiState.value.error)
     }
 
+    @Test fun stillReviewChoosesUndatedPhotoEvenWhenFutureVideoAppearsFirst() = runBlocking {
+        connect()
+        peer.publishFutureVideo.set(true)
+        viewModel.captureStill()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewItem?.name == "NEW.JPG" })
+        assertNull(viewModel.uiState.value.captureReviewItem?.captureTime)
+        assertEquals(1, peer.captureWrites.get())
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+    }
+
     @Test fun rejectedCommandDoesNotReviewOrClaimAcknowledgement() = runBlocking {
         connect()
         peer.rejectCapture.set(true)
@@ -206,7 +216,7 @@ class CameraCaptureReviewRecoveryTest {
         assertTrue(peer.pages.isNotEmpty() && peer.pages.all { it == 1 })
     }
 
-    @Test fun aSuccessfulNativeRoundAnywhereInTheCheckMakesNoCandidateNotReady() = runBlocking {
+    @Test fun aSuccessfulNativeRoundRetainsNoCandidateAndFinalReadReliability() = runBlocking {
         connect(native = true)
         peer.publishNew.set(false)
         for (successfulRound in 0..3) {
@@ -216,9 +226,135 @@ class CameraCaptureReviewRecoveryTest {
             assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewStatus == CaptureReviewStatus.NOT_READY })
             assertEquals(reads + 4, peer.reviewReads.get())
             assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+            assertEquals(CaptureReviewObservation.NO_CANDIDATE_OBSERVED, viewModel.uiState.value.captureReviewObservation)
+            assertEquals(CaptureReviewEvidence(1, 3,
+                if (successfulRound == 3) CaptureReviewRead.SUCCESS else CaptureReviewRead.FAILURE),
+                viewModel.uiState.value.captureReviewEvidence)
+            assertEquals(successfulRound != 3, viewModel.uiState.value.captureReviewEvidence.noCandidateWithFinalReadFailure)
             assertNull(viewModel.uiState.value.error)
         }
         assertEquals(4, peer.captureWrites.get())
+    }
+
+    @Test fun allFailedRetryStartsFreshAfterMixedReadEvidenceAndNeverResendsCommands() = runBlocking {
+        connect(native = true)
+        peer.publishNew.set(false)
+        peer.listingFailures.addAll(listOf(false, true, true, true))
+        val old = viewModel.uiState.value.captureReviewItem
+        viewModel.captureStill()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewStatus == CaptureReviewStatus.NOT_READY })
+        val before = viewModel.uiState.value.captureReviewEvidence
+        assertEquals(CaptureReviewEvidence(1, 3, CaptureReviewRead.FAILURE), before)
+        assertSame(old, viewModel.uiState.value.captureReviewItem)
+        val reads = peer.reviewReads.get()
+        val writes = peer.writes.toList()
+        peer.failListing.set(true)
+        viewModel.retryCaptureReview()
+        assertSame(before, viewModel.uiState.value.captureReviewEvidence) // Prior terminal evidence while searching.
+        awaitReadFailed()
+        assertEquals(reads + 4, peer.reviewReads.get())
+        assertEquals(CaptureReviewObservation.UNREAD, viewModel.uiState.value.captureReviewObservation)
+        assertEquals(CaptureReviewEvidence(0, 4, CaptureReviewRead.FAILURE), viewModel.uiState.value.captureReviewEvidence)
+        assertEquals(CaptureReviewEvidence(1, 3, CaptureReviewRead.FAILURE), before) // Immutable prior value.
+        assertSame(old, viewModel.uiState.value.captureReviewItem)
+        assertEquals(writes, peer.writes.toList())
+        assertEquals(1, peer.captureWrites.get())
+    }
+
+    @Test fun zeroCompletedReadCancellationPreservesPriorTerminalOutcomeAndEvidence() = runBlocking {
+        connect(native = true)
+        peer.publishNew.set(false)
+        peer.listingFailures.addAll(listOf(false, true, true, true))
+        viewModel.captureStill()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewStatus == CaptureReviewStatus.NOT_READY })
+        val before = viewModel.uiState.value
+        val reads = peer.reviewReads.get()
+        val writes = peer.writes.toList()
+        // Only cancel this newly created retry, before virtual Main starts it.
+        val scope = requireNotNull(viewModel.viewModelScope.coroutineContext[Job])
+        val existingJobs = scope.children.toSet()
+        viewModel.retryCaptureReview()
+        val retry = scope.children.single { it !in existingJobs }
+        retry.cancel()
+        assertTrue(pumpUntil { retry.isCompleted })
+        assertEquals(before.captureReviewStatus, viewModel.uiState.value.captureReviewStatus)
+        assertEquals(before.captureReviewObservation, viewModel.uiState.value.captureReviewObservation)
+        assertSame(before.captureReviewEvidence, viewModel.uiState.value.captureReviewEvidence)
+        assertSame(before.captureReviewItem, viewModel.uiState.value.captureReviewItem)
+        assertFalse(viewModel.uiState.value.captureReviewLoading)
+        assertEquals(reads, peer.reviewReads.get())
+        assertEquals(writes, peer.writes.toList())
+    }
+
+    @Test fun cancellationDuringRetryBackoffRestoresPriorTerminalPresentationWithoutPartialEvidence() = runBlocking {
+        connect()
+        peer.failListing.set(true)
+        peer.publishNew.set(false)
+        viewModel.captureStill()
+        awaitReadFailed()
+        val before = viewModel.uiState.value
+        val reads = peer.reviewReads.get()
+        val writes = peer.writes.toList()
+        val scope = requireNotNull(viewModel.viewModelScope.coroutineContext[Job])
+        val existingJobs = scope.children.toSet()
+        peer.failListing.set(false)
+        viewModel.retryCaptureReview()
+        val retry = scope.children.single { it !in existingJobs }
+        assertTrue(pumpUntil { peer.reviewReads.get() == reads + 1 && http.dispatcher.runningCallsCount() == 0 })
+        settle() // Drain the successful simulator response onto Main without advancing its 250 ms retry delay.
+        main.scheduler.advanceTimeBy(249)
+        assertEquals(reads + 1, peer.reviewReads.get())
+        assertEquals(CaptureReviewStatus.SEARCHING, viewModel.uiState.value.captureReviewStatus)
+        retry.cancel()
+        assertTrue(pumpUntil { retry.isCompleted })
+        assertEquals(before.captureReviewStatus, viewModel.uiState.value.captureReviewStatus)
+        assertEquals(before.captureReviewObservation, viewModel.uiState.value.captureReviewObservation)
+        assertSame(before.captureReviewEvidence, viewModel.uiState.value.captureReviewEvidence)
+        assertSame(before.captureReviewItem, viewModel.uiState.value.captureReviewItem)
+        assertFalse(viewModel.uiState.value.captureReviewLoading)
+        main.scheduler.advanceTimeBy(5_000)
+        settle()
+        assertEquals(reads + 1, peer.reviewReads.get())
+        assertEquals(writes, peer.writes.toList())
+    }
+
+    @Test fun malformedSimulatorListingsRemainUnreadAndValidEmptyListingIsSuccessful() = runBlocking {
+        assertMalformedListingEvidence(false, listOf(
+            "{}", "{\"items\":null}", "{\"items\":{}}", "{\"items\":[null]}",
+            "{\"items\":[{\"id\":\"\",\"name\":\"NEW.JPG\"}]}",
+            "{\"items\":[{\"id\":3,\"name\":\"NEW.JPG\"}]}",
+        ), "{\"items\":[]}")
+    }
+
+    @Test fun malformedNativePathListingsRemainUnreadAndValidEmptyListingIsSuccessful() = runBlocking {
+        assertMalformedListingEvidence(true, listOf(
+            "{}", "{\"path\":null}", "{\"path\":{}}", "{\"path\":[null]}",
+            "{\"path\":[\"\"]}", "{\"path\":[3]}",
+        ), "{\"path\":[]}")
+    }
+
+    private suspend fun assertMalformedListingEvidence(native: Boolean, invalid: List<String>, empty: String) {
+        connect(native)
+        val old = viewModel.uiState.value.captureReviewItem
+        for ((index, body) in invalid.withIndex()) {
+            peer.malformedListing.set(body)
+            val reads = peer.reviewReads.get()
+            if (index == 0) viewModel.captureStill() else viewModel.retryCaptureReview()
+            awaitReadFailed()
+            assertEquals(reads + 4, peer.reviewReads.get())
+            assertEquals(CaptureReviewObservation.UNREAD, viewModel.uiState.value.captureReviewObservation)
+            assertEquals(CaptureReviewEvidence(0, 4, CaptureReviewRead.FAILURE), viewModel.uiState.value.captureReviewEvidence)
+            assertSame(old, viewModel.uiState.value.captureReviewItem)
+        }
+        val writes = peer.writes.toList()
+        peer.malformedListing.set(empty)
+        viewModel.retryCaptureReview()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewStatus == CaptureReviewStatus.NOT_READY })
+        assertEquals(CaptureReviewObservation.NO_CANDIDATE_OBSERVED, viewModel.uiState.value.captureReviewObservation)
+        assertEquals(CaptureReviewEvidence(4, 0, CaptureReviewRead.SUCCESS), viewModel.uiState.value.captureReviewEvidence)
+        assertSame(old, viewModel.uiState.value.captureReviewItem)
+        assertEquals(writes, peer.writes.toList())
+        assertEquals(1, peer.captureWrites.get())
     }
 
     @Test fun aNewNativeCandidateAfterFailedRoundsStillResolvesTheSameCapture() = runBlocking {
@@ -488,6 +624,8 @@ class CameraCaptureReviewRecoveryTest {
         settle()
         assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
         assertEquals("NEW.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertEquals(CaptureReviewObservation.FOUND, viewModel.uiState.value.captureReviewObservation)
+        assertEquals(CaptureReviewEvidence(1, 0, CaptureReviewRead.SUCCESS), viewModel.uiState.value.captureReviewEvidence)
         assertEquals(2, peer.captureWrites.get())
         assertNull(viewModel.uiState.value.error)
     }
@@ -561,6 +699,8 @@ class CameraCaptureReviewRecoveryTest {
             assertEquals(reads, peer.reviewReads.get())
             assertEquals(CaptureReviewStatus.READ_FAILED, viewModel.uiState.value.captureReviewStatus)
             assertFalse(viewModel.uiState.value.captureReviewLoading)
+            assertEquals(CaptureReviewObservation.UNREAD, viewModel.uiState.value.captureReviewObservation)
+            assertEquals(CaptureReviewEvidence(0, 4, CaptureReviewRead.FAILURE), viewModel.uiState.value.captureReviewEvidence)
         } finally { gate.release.countDown() }
         assertTrue(pumpUntil { CameraOperation.MEDIA !in viewModel.uiState.value.pendingOperations })
         peer.failListing.set(false)
@@ -776,9 +916,11 @@ private class CaptureReviewPeer {
     val failStatus = AtomicBoolean(false)
     val failListing = AtomicBoolean(false)
     val listingFailures = ConcurrentLinkedQueue<Boolean>()
+    val malformedListing = AtomicReference<String?>(null)
     private val nativeListingFailed = AtomicBoolean(false)
     val rejectCapture = AtomicBoolean(false)
     val publishNew = AtomicBoolean(true)
+    val publishFutureVideo = AtomicBoolean(false)
     val captureWrites = AtomicInteger()
     val writes = CopyOnWriteArrayList<String>()
     val failedStatusReads = AtomicInteger()
@@ -844,8 +986,13 @@ private class CaptureReviewPeer {
                             check(gate.release.await(5, TimeUnit.SECONDS)) { "Simulator listing gate was not released" }
                         }
                         if (failed) return MockResponse().setResponseCode(503).setBody("Synthetic private failure detail")
-                        json(JSONObject().put("items", JSONArray().put(JSONObject().put("id", latest)
-                            .put("name", latest).put("kind", "jpeg"))).toString())
+                        malformedListing.get()?.let { return json(it) }
+                        val rows = JSONArray()
+                        if (latest == "NEW.JPG" && publishFutureVideo.get()) rows.put(JSONObject()
+                            .put("id", "NEW.MP4").put("name", "NEW.MP4").put("kind", "video")
+                            .put("capture_time", "2030-01-01T00:00:00Z"))
+                        rows.put(JSONObject().put("id", latest).put("name", latest).put("kind", "jpeg"))
+                        json(JSONObject().put("items", rows).toString())
                     }
                     path.endsWith("/contents") && url.queryParameter("kind") == "number" -> {
                         reviewReads.incrementAndGet()
@@ -866,6 +1013,7 @@ private class CaptureReviewPeer {
                             check(gate.release.await(5, TimeUnit.SECONDS)) { "Listing gate was not released" }
                         }
                         if (failed) return MockResponse().setResponseCode(503).setBody("Synthetic private failure detail")
+                        malformedListing.get()?.let { return json(it) }
                         json(JSONObject().put("path", JSONArray(paths.map { "/ccapi/ver110/contents/$it" })).toString())
                     }
                     path.endsWith("/contents") -> json("{}")

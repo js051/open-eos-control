@@ -33,35 +33,38 @@ class CameraFocusOverlayTest {
     @Test fun cameraFramesStayInsideImageAndUseSparseCornersAcrossViewports() {
         val dimensions = mutableStateOf(DpSize(360.dp, 800.dp))
         val sample = mutableStateOf(System.currentTimeMillis())
+        val desqueeze = mutableStateOf(1f)
         compose.mainClock.autoAdvance = false
         compose.setContent {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(dimensions.value)) {
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
-                    CameraReportedFocusOverlay(info(CameraFocusStatus.FOCUSED), sample.value, 4f / 3f)
+                    CameraReportedFocusOverlay(info(CameraFocusStatus.FOCUSED), sample.value, 4f / 3f, 4f / 3f * desqueeze.value)
                 }
             }
         }
         for ((name, viewport) in listOf("portrait" to DpSize(360.dp, 800.dp), "landscape" to DpSize(800.dp, 360.dp), "tablet" to DpSize(800.dp, 1280.dp))) {
-            compose.runOnIdle { dimensions.value = viewport; sample.value = System.currentTimeMillis() }
-            compose.mainClock.advanceTimeByFrame()
-            val frame = compose.onNodeWithTag("camera-focus-frames").captureToImage().asAndroidBitmap()
-            val content = fittedLiveViewRect(frame.width.toFloat(), frame.height.toFloat(), 4f / 3f)
-            var greenPixels = 0
-            for (y in 0 until frame.height) for (x in 0 until frame.width) {
-                val pixel = frame.getPixel(x, y)
-                if (android.graphics.Color.green(pixel) > android.graphics.Color.red(pixel) + 50 &&
-                    android.graphics.Color.green(pixel) > android.graphics.Color.blue(pixel) + 50) {
-                    greenPixels++
-                    assertTrue(x >= content.left && x < content.left + content.width)
-                    assertTrue(y >= content.top && y < content.top + content.height)
+            for (factor in listOf(1f, 1.33f, 2f)) {
+                compose.runOnIdle { dimensions.value = viewport; desqueeze.value = factor; sample.value = System.currentTimeMillis() }
+                compose.mainClock.advanceTimeByFrame()
+                val frame = compose.onNodeWithTag("camera-focus-frames").captureToImage().asAndroidBitmap()
+                val content = fittedLiveViewRect(frame.width.toFloat(), frame.height.toFloat(), 4f / 3f * factor)
+                var greenPixels = 0
+                for (y in 0 until frame.height) for (x in 0 until frame.width) {
+                    val pixel = frame.getPixel(x, y)
+                    if (android.graphics.Color.green(pixel) > android.graphics.Color.red(pixel) + 50 &&
+                        android.graphics.Color.green(pixel) > android.graphics.Color.blue(pixel) + 50) {
+                        greenPixels++
+                        assertTrue(x >= content.left && x < content.left + content.width)
+                        assertTrue(y >= content.top && y < content.top + content.height)
+                    }
                 }
-            }
-            assertTrue("Visible but sparse camera frame", greenPixels in 20..(frame.width * frame.height / 50))
-            val centerX = (content.left + content.width * 0.5f).toInt()
-            val centerY = (content.top + content.height * 0.5f).toInt()
-            assertEquals("Subject center stays unobstructed", android.graphics.Color.BLACK, frame.getPixel(centerX, centerY))
-            java.io.File(compose.activity.cacheDir, "camera-af-$name.png").outputStream().use {
-                assertTrue(frame.compress(Bitmap.CompressFormat.PNG, 100, it))
+                assertTrue("Visible but sparse camera frame", greenPixels in 20..(frame.width * frame.height / 50))
+                val centerX = (content.left + content.width * 0.5f).toInt()
+                val centerY = (content.top + content.height * 0.5f).toInt()
+                assertEquals("Subject center stays unobstructed", android.graphics.Color.BLACK, frame.getPixel(centerX, centerY))
+                java.io.File(compose.activity.cacheDir, "camera-af-$name-$factor.png").outputStream().use {
+                    assertTrue(frame.compress(Bitmap.CompressFormat.PNG, 100, it))
+                }
             }
         }
     }

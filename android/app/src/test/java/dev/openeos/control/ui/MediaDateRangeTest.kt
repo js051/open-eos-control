@@ -29,7 +29,8 @@ class MediaDateRangeTest {
             "2024-02-29T12:34:56Z[UTC]", " 2024-02-29T12:34:56Z ")
             .forEach { value ->
                 assertEquals(value, LocalDate.parse("2024-02-29"), value.toMediaDisplayDate(utc))
-                assertEquals(value, "2024-02-29 12:34", mediaCaptureTimeLabel(value, utc))
+                val suffix = if (value in setOf("2024-02-29T12:34:56", "2024-02-29 12:34:56", "20240229T123456")) " (Time zone unknown)" else ""
+                assertEquals(value, "2024-02-29 12:34$suffix", mediaCaptureTimeLabel(value, utc))
             }
     }
 
@@ -55,12 +56,12 @@ class MediaDateRangeTest {
         }
     }
 
-    @Test fun noOffsetUsesExistingDeviceLocalSemanticsIncludingDstGap() {
+    @Test fun noOffsetKeepsLiteralCameraCalendarEvenAcrossSkippedDays() {
         val zone = ZoneId.of("Pacific/Apia")
-        // The device-local interpretation normalizes a skipped local day exactly as existing details did.
+        // Camera-local calendar values have no zone and must not normalize a skipped day.
         val timestamp = "2011-12-30T12:00:00"
-        assertEquals("2011-12-31", timestamp.toMediaDisplayDate(zone)?.toString())
-        assertEquals("2011-12-31 12:00", mediaCaptureTimeLabel(timestamp, zone))
+        assertEquals("2011-12-30", timestamp.toMediaDisplayDate(zone)?.toString())
+        assertEquals("2011-12-30 12:00 (Time zone unknown)", mediaCaptureTimeLabel(timestamp, zone))
         assertEquals("2026-08-14", "20260814T003000".toMediaDisplayDate(taipei)?.toString())
     }
 
@@ -97,7 +98,7 @@ class MediaDateRangeTest {
         val items = listOf(
             media("raw", "2026-08-14T10:00:00Z", "PAIR.CR3"),
             media("jpeg", "2026-08-14T10:00:00Z", "PAIR.JPG"),
-            media("video", "2026-08-14T11:00:00Z", "VIDEO.MP4"),
+            media("video", "2026-08-14T11:00:00Z", "VIDEO.MP4").copy(kind = "video"),
             media("outside", "2026-08-15T10:00:00Z"),
         )
         val range = requireNotNull(mediaDateRangeFromInput("2026-08-14", "2026-08-14"))

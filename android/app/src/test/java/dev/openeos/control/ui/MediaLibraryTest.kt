@@ -21,13 +21,13 @@ class MediaLibraryTest {
     }
 
     @Test
-    fun captureReviewSelectsNewestKnownCaptureTime() {
+    fun captureReviewPreservesCameraOrderEvenWhenDatesDisagree() {
         val items = listOf(
             media("old", "IMG_0001.JPG", "2026-08-13T10:00:00Z"),
             media("new", "IMG_0002.JPG", "2026-08-14T10:00:00Z"),
         )
 
-        assertEquals("new", selectCaptureReviewItem(items)?.id)
+        assertEquals("old", selectCaptureReviewItem(items)?.id)
     }
 
     @Test
@@ -52,7 +52,7 @@ class MediaLibraryTest {
             if (calls < 3) listOf(old) else listOf(new, old)
         }
 
-        assertEquals(CaptureReviewResult.Found(new), selected)
+        assertEquals(CaptureReviewResult.Found(new, CaptureReviewEvidence(3, 0, CaptureReviewRead.SUCCESS)), selected)
         assertEquals(3, calls)
     }
 
@@ -66,7 +66,12 @@ class MediaLibraryTest {
                     if (calls++ != successfulRound) throw IOException("Synthetic private detail")
                     items
                 }
-                assertEquals(if (successfulRound < 0) CaptureReviewResult.ReadFailed else CaptureReviewResult.NotReady, result)
+                val evidence = CaptureReviewEvidence(
+                    if (successfulRound < 0) 0 else 1, if (successfulRound < 0) 4 else 3,
+                    if (successfulRound == 3) CaptureReviewRead.SUCCESS else CaptureReviewRead.FAILURE,
+                )
+                assertEquals(if (successfulRound < 0) CaptureReviewResult.ReadFailed(evidence)
+                    else CaptureReviewResult.NotReady(evidence), result)
                 assertEquals(4, calls)
             }
         }
@@ -77,14 +82,14 @@ class MediaLibraryTest {
         val photo = media("new-photo", "NEW.JPG")
         val video = media("new-video", "NEW.MP4", kind = "video")
         var calls = 0
-        val result = awaitCaptureReviewItem(emptySet(), longArrayOf(0, 0, 0), videosOnly = true) {
+        val result = awaitCaptureReviewItem(emptySet(), longArrayOf(0, 0, 0), intent = MediaReviewIntent.VIDEO) {
             when (calls++) {
                 0 -> throw IOException("Synthetic failure")
                 1 -> listOf(photo)
                 else -> listOf(photo, video)
             }
         }
-        assertEquals(CaptureReviewResult.Found(video), result)
+        assertEquals(CaptureReviewResult.Found(video, CaptureReviewEvidence(2, 1, CaptureReviewRead.SUCCESS)), result)
         assertEquals(3, calls)
     }
 
@@ -143,7 +148,7 @@ class MediaLibraryTest {
             mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.NEWEST).map { it.id },
         )
         assertEquals(
-            listOf("old", "new", "photo-10", "photo-9"),
+            listOf("old", "new", "photo-9", "photo-10"),
             mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.OLDEST).map { it.id },
         )
     }
@@ -161,7 +166,7 @@ class MediaLibraryTest {
             mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.NEWEST),
         )
         assertEquals(
-            items.reversed(),
+            items,
             mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.OLDEST),
         )
     }
@@ -284,7 +289,7 @@ class MediaLibraryTest {
 
     @Test
     fun viewerLabelsNormalizeLocalCaptureTimeAndBinarySize() {
-        assertEquals("2026-08-14 10:05", mediaCaptureTimeLabel("2026-08-14T10:05:59"))
+        assertEquals("2026-08-14 10:05 (Time zone unknown)", mediaCaptureTimeLabel("2026-08-14T10:05:59"))
         assertEquals(null, mediaCaptureTimeLabel("not-a-date"))
         assertEquals("0 B", mediaByteSizeLabel(0))
         assertEquals("1.5 KB", mediaByteSizeLabel(1536))

@@ -1,0 +1,15 @@
+# Android Bridge progressive media browsing
+
+Implementation status: source and focused fixtures prepared. Native Kotlin/Gradle build, JVM tests, instrumentation tests and physical-camera checks are **NOT_RUN** in the local preparation environment; Kotlin and Gradle executables are unavailable. This is not a PR-ready or release claim.
+
+The existing media GET opts into `application/vnd.open-eos.media-list.v1+ndjson`. Old Bridges and unsupported engines can return ordinary JSON on the same response. The listing-only HTTP client disables redirects and automatic connection retry. There is no capability probe, second-request fallback or traversal replay.
+
+The streaming body is read with a fixed 8 KiB transfer buffer. Only complete ordered snapshot revisions reach `onProgress`; the backend adapter forwards that callback instead of publishing only the final array. UTF-8, strict JSON grammar/decoded duplicate keys, exact binding/scope, safe integer sequence/revision/offset/count, terminal and EOF are validated. Records are bounded to 65,536 bytes including LF, revisions to 100,000 items and 64 MiB of raw frames, and chunks to 128 items. Resource failures preserve prior published partials and never silently truncate a full-card result. Opaque identities are preserved exactly.
+
+Cancellation retires the exact owner and cancels its OkHttp call. A new listing or session replacement prevents old callbacks or completion from publishing, even if a test source ignores cancellation. The UI retains its generation and partial/error/cancel states. Bridge-only media-demand epochs stop a queued old contents hint from restarting cancelled or failed work after an unrelated state read finishes. A new poll/event or explicit Refresh remains possible.
+
+Automatic Bridge gallery thumbnails wait for genuine selected-scope completion; cancelled/failed partials do not schedule more thumbnail reads. The existing visible-card effect resumes after the owned completion. Explicit preview retires an active Bridge listing first. Direct CCAPI thumbnail behavior is unchanged.
+
+Fixture coverage: fragmented UTF-8/JSON, more than 1,000 full-scope items, opaque Unicode identities, malformed binding/numbers/terminal, missing LF/EOF, oversize records, error inside an unfinished revision, progress before terminal, cancellation and same-ID replacement with a deliberately uncooperative source, one-response legacy compatibility/no fallback, real loopback legacy authentication, and Bridge-only thumbnail admission states. Run the focused `BridgeMediaListingTest`, existing `DesktopBridgeClientTest`, `CameraUiStateTest`, direct CCAPI/foreground suites, and the app instrumentation event/owner suites on a supported Android toolchain.
+
+These ordinary browsing snapshots never supply strict inventory evidence or enable Bridge foreground import. Scope completion is neither an atomic card snapshot nor proof of a full inventory when Recent is selected. Server cancellation stops later scheduling cooperatively after an active camera read returns; it does not promise instantaneous camera I/O interruption. Physical-camera/USB behavior remains unverified.

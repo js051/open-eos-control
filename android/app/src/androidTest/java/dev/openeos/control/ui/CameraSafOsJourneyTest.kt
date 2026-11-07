@@ -14,12 +14,14 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
@@ -207,6 +209,7 @@ class CameraSafOsJourneyTest {
         }
         assertTrue(camera.originalReads.isEmpty())
         assertTrue(history.state.value.entries.isEmpty())
+        assertTrue(history.state.value.worklists.isEmpty())
         assertNoGrant(destination)
 
         singleDocuments += destination
@@ -232,6 +235,8 @@ class CameraSafOsJourneyTest {
         val saved = snapshot(tree)
         assertEquals(items.map { it.name }.sorted(), saved.files.map { it.name }.sorted())
         saved.files.forEach { assertArrayEquals(originalBytes, read(documentUri(tree, it.id))) }
+        assertWorklist(items)
+        assertEquals(items.size, history.state.value.actualReceipts().size)
         items.forEach { assertReceipt(it, DownloadHistoryDestination.FOLDER, DownloadHistoryOutcome.COMPLETED) }
         assertEquals(items.map { "/ccapi/media/${it.id}" }, camera.originalReads.toList())
         assertEquals(2, saved.created.size)
@@ -246,7 +251,8 @@ class CameraSafOsJourneyTest {
         val item = model.uiState.value.mediaItems.first()
         val tree = launchTree(listOf(item))
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { snapshot(tree).files.singleOrNull()?.size?.let { it > 0 } == true }
-        assertEquals(DownloadHistoryOutcome.IN_PROGRESS, history.state.value.entries.single().outcome)
+        assertWorklist(listOf(item))
+        assertEquals(DownloadHistoryOutcome.IN_PROGRESS, history.state.value.actualReceipts().single().outcome)
         assertSentinel(tree)
         compose.onNodeWithContentDescription(text(R.string.cancel_media_download)).performClick()
         compose.waitUntil(5_000) {
@@ -279,6 +285,7 @@ class CameraSafOsJourneyTest {
         assertTrue(cleaned.files.isEmpty())
         assertTrue(cleaned.refused.isEmpty())
         assertTrue(model.uiState.value.mediaSaveFeedback[item.id] is MediaSaveFeedback.Failed)
+        assertWorklist(listOf(item))
         assertReceipt(item, DownloadHistoryDestination.FOLDER, DownloadHistoryOutcome.FAILED)
         assertSentinel(tree)
     }
@@ -291,6 +298,10 @@ class CameraSafOsJourneyTest {
         val tree = launchTree(items, refusing = true)
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { snapshot(tree).files.singleOrNull()?.size?.let { it > 0 } == true }
         assertEquals(MediaSaveFeedback.Queued, model.uiState.value.mediaSaveFeedback[items.last().id])
+        assertWorklist(items)
+        val pendingRows = history.state.value.worklists.single().rows
+        assertEquals(DownloadHistoryOutcome.IN_PROGRESS, pendingRows.first().receipt?.outcome)
+        assertNull(pendingRows.last().receipt)
         compose.onNodeWithContentDescription(text(R.string.cancel_media_download)).performClick()
         awaitTransferFinished(items.last())
 
@@ -302,7 +313,9 @@ class CameraSafOsJourneyTest {
         assertEquals(residual.created, residual.refused)
         assertTrue(residual.deleted.isEmpty())
         assertEquals(listOf("/ccapi/media/${items.first().id}"), camera.originalReads.toList())
-        assertEquals(1, history.state.value.entries.size)
+        assertWorklist(items)
+        assertEquals(1, history.state.value.actualReceipts().size)
+        assertNull(history.state.value.worklists.single().rows.last().receipt)
         assertReceipt(items.first(), DownloadHistoryDestination.FOLDER, DownloadHistoryOutcome.CANCELLED,
             cleanupUnconfirmed = true)
         assertSentinel(tree)
@@ -324,16 +337,21 @@ class CameraSafOsJourneyTest {
         assertEquals(residual.created, residual.refused)
         assertTrue(residual.deleted.isEmpty())
         assertEquals(listOf("/ccapi/media/${item.id}"), camera.originalReads.toList())
+        assertWorklist(listOf(item))
         assertReceipt(item, DownloadHistoryDestination.FOLDER, DownloadHistoryOutcome.FAILED, cleanupUnconfirmed = true)
         assertSentinel(tree)
-        val receipt = history.state.value.entries.single()
+        val receipt = history.state.value.actualReceipts().single()
         compose.onNodeWithTag("download-history-open").performClick()
+        compose.onNodeWithTag("download-history-list")
+            .performScrollToNode(hasTestTag("download-history-cleanup-${receipt.receiptId}"))
         compose.onNodeWithTag("download-history-cleanup-${receipt.receiptId}").assertIsDisplayed()
         val restored = DownloadHistoryStore(DownloadHistoryFileStorage(historyDirectory), historyScope,
             Dispatchers.IO, System::currentTimeMillis)
         runBlocking { withTimeout(SESSION_TEST_TIMEOUT_MILLIS) { restored.state.first { !it.loading } } }
-        assertEquals(receipt, restored.state.value.entries.single())
-        assertTrue(restored.state.value.entries.single().cleanupUnconfirmed)
+        assertTrue(restored.state.value.entries.isEmpty())
+        assertEquals(history.state.value.worklists.single(), restored.state.value.worklists.single())
+        assertEquals(receipt, restored.state.value.actualReceipts().single())
+        assertTrue(restored.state.value.actualReceipts().single().cleanupUnconfirmed)
     }
 
     private fun installAppAndOpenAlbum() {
@@ -388,6 +406,7 @@ class CameraSafOsJourneyTest {
         assertEquals(MediaSaveFeedback.SelectingDestination, model.uiState.value.mediaSaveFeedback[item.id])
         assertTrue(camera.originalReads.isEmpty())
         assertTrue(history.state.value.entries.isEmpty())
+        assertTrue(history.state.value.worklists.isEmpty())
     }
 
     private fun awaitTransferFinished(item: CameraMediaItem) {
@@ -405,12 +424,29 @@ class CameraSafOsJourneyTest {
         cleanupUnconfirmed: Boolean = false,
     ) {
         runBlocking { withTimeout(SESSION_TEST_TIMEOUT_MILLIS) { history.awaitIdle() } }
-        val receipt = history.state.value.entries.single { it.filename == item.name }
+        val state = history.state.value
+        if (destination == DownloadHistoryDestination.DOCUMENT) {
+            assertTrue(state.worklists.isEmpty())
+            assertEquals(1, state.entries.size)
+        } else {
+            assertTrue(state.entries.isEmpty())
+            assertEquals(1, state.worklists.size)
+        }
+        val receipt = state.actualReceipts().single { it.filename == item.name }
         assertEquals(destination, receipt.destination)
         assertEquals(outcome, receipt.outcome)
         assertEquals(cleanupUnconfirmed, receipt.cleanupUnconfirmed)
         assertTrue(receipt.finishedAtMillis != null)
         assertNull(history.state.value.warning)
+    }
+
+    private fun assertWorklist(items: List<CameraMediaItem>) {
+        val state = history.state.value
+        assertTrue(state.entries.isEmpty())
+        val plan = state.worklists.single()
+        assertEquals(DownloadHistoryDestination.FOLDER, plan.destination)
+        assertEquals(items.map { it.name }, plan.rows.map { it.filename })
+        assertEquals(items.size, plan.rows.map { it.rowId }.toSet().size)
     }
 
     private fun mediaListing(): JSONObject = JSONObject(camera.mediaJson()).apply {

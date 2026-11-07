@@ -371,6 +371,7 @@ class DesktopBridgeShutterRecoveryTest {
                         path.endsWith("/bulb/stop") -> stop()
                         path.endsWith("/capture/still") -> capture()
                         path.endsWith("/settings/iso") -> setting()
+                        path.endsWith("/liveview/stop") -> json("""{"active":false,"liveViewStopUnconfirmed":false}""")
                         request.method == "DELETE" -> MockResponse().setResponseCode(204)
                         else -> status(false, false)
                     }

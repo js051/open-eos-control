@@ -55,6 +55,7 @@ fun OpenEosControlApp(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val downloadHistory by viewModel.downloadHistoryState.collectAsStateWithLifecycle()
+    val downloadContinuation by viewModel.downloadContinuation.collectAsStateWithLifecycle()
     var showDownloadHistory by rememberSaveable { mutableStateOf(false) }
     var showSavedJpegs by rememberSaveable { mutableStateOf(false) }
     val savedJpegs by viewModel.savedJpegState.collectAsStateWithLifecycle()
@@ -260,7 +261,7 @@ fun OpenEosControlApp(
                                 ) FOREGROUND_IMPORT_BAR_HEIGHT else 0.dp,
                             ),
                     ) {
-                        CameraErrorPresentation(state, actions.clearError)
+                        CameraErrorPresentation(state, actions.clearError, actions.refresh)
                     }
                 }
             }
@@ -284,6 +285,22 @@ fun OpenEosControlApp(
                     state = downloadHistory,
                     onClear = viewModel::clearDownloadHistory,
                     onDismiss = { showDownloadHistory = false },
+                    continuationAvailable = state.connected && !state.previewMode && state.mediaItems.isNotEmpty() &&
+                        state.supports(CameraFeature.MEDIA_DOWNLOAD) && !state.isBusy(CameraOperation.MEDIA) &&
+                        !state.foregroundImportOwnerActive,
+                    onContinue = { worklistId ->
+                        if (viewModel.beginDownloadContinuation(worklistId)) showDownloadHistory = false
+                    },
+                )
+            }
+            downloadContinuation?.let { draft ->
+                DownloadContinuationDialog(
+                    draft = draft,
+                    onMap = { rowId, sourceId -> viewModel.mapDownloadContinuation(draft.id, rowId, sourceId) },
+                    onConfirmUnknown = { viewModel.confirmDownloadContinuationUnknown(draft.id, it) },
+                    onGallery = { viewModel.continueDownloadToGallery(context, draft.id) },
+                    onFolder = { mediaPickers.continueFolder(draft.id) },
+                    onDismiss = viewModel::cancelDownloadContinuation,
                 )
             }
         }
@@ -291,19 +308,35 @@ fun OpenEosControlApp(
 }
 
 @Composable
-internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit) {
+internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit, onRefresh: () -> Unit = {}) {
+    if (state.pendingRecordingCommand != null && !state.shutterReleaseUnconfirmed) {
+        PersistentCameraWarning(
+            stringResource(when {
+                state.recordingCommandUnconfirmed -> R.string.recording_command_unconfirmed
+                state.pendingRecordingCommand == dev.openeos.control.data.RecordingCommand.START -> R.string.recording_start_pending
+                else -> R.string.recording_stop_pending
+            }),
+            onRefresh = onRefresh,
+            refreshEnabled = state.connected && !state.isBusy(CameraOperation.STATUS) && !state.isBusy(CameraOperation.RECORDING),
+        )
+        return
+    }
     ErrorBanner(
         when {
             state.shutterReleaseUnconfirmed -> stringResource(
                 if (state.transport == CameraTransport.DESKTOP_BRIDGE) R.string.bridge_shutter_release_unconfirmed
                 else R.string.shutter_release_unconfirmed,
             )
+            state.needsLiveViewStopRecovery -> stringResource(R.string.live_view_stop_unconfirmed)
             state.error != null && (state.connected || state.connectionRecovery == null) -> state.error
+            state.recordingStartNotConfirmed -> stringResource(R.string.recording_start_not_confirmed)
+            state.recordingDisconnectWarning -> stringResource(R.string.recording_disconnect_warning)
             state.shutterDisconnectWarning -> stringResource(R.string.shutter_disconnect_warning)
+            state.liveViewDisconnectWarning -> stringResource(R.string.live_view_disconnect_warning)
             else -> null
         },
         onDismiss,
-        dismissible = !state.shutterReleaseUnconfirmed,
+        dismissible = !state.shutterReleaseUnconfirmed && !state.needsLiveViewStopRecovery,
     )
 }
 

@@ -7,8 +7,15 @@ import android.os.Build
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import androidx.annotation.RequiresApi
+import dev.openeos.control.data.AutomaticJpegEnvelope
+import dev.openeos.control.data.InvalidAutomaticJpegException
+import dev.openeos.control.data.automaticJpegResponseMimeAdmitted
+import dev.openeos.control.data.isAutomaticJpegEligible
+import dev.openeos.control.data.requireAutomaticJpegLength
 import dev.openeos.control.data.CameraMediaDownloadResult
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.isPhotoMedia
+import dev.openeos.control.data.isVideoMedia
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -39,6 +46,8 @@ internal fun galleryMimeType(item: CameraMediaItem): String? = when (item.name.s
     "avi" -> "video/x-msvideo"
     "mkv" -> "video/x-matroska"
     else -> null
+}?.takeIf { mime ->
+    (mime.startsWith("image/") && item.isPhotoMedia) || (mime.startsWith("video/") && item.isVideoMedia)
 }
 
 internal fun canSaveMediaToGallery(item: CameraMediaItem): Boolean =
@@ -51,6 +60,9 @@ internal class CameraMediaGalleryStore(
     private val resolver: ContentResolver,
     private val openOutput: (Uri) -> OutputStream? = { resolver.openOutputStream(it, "w") },
     private val publishOutput: (Uri, ContentValues) -> Int = { uri, values -> resolver.update(uri, values, null, null) },
+    private val validateAutomaticOriginal: (Uri, Long, String, () -> Unit) -> Unit = { uri, bytes, digest, active ->
+        validateAutomaticJpegPendingOriginal(resolver, uri, bytes, digest, active)
+    },
 ) {
     /**
      * [onPublished] is JPEG-only, synchronous, and restricted to bounded in-memory bookkeeping.
@@ -64,6 +76,7 @@ internal class CameraMediaGalleryStore(
         onCleanupFailure: () -> Unit = {},
         onPublished: ((PublishedGalleryOriginal) -> Unit)? = null,
         onPublicationObserverFailure: () -> Unit = {},
+        requireAutomaticJpeg: Boolean = false,
         download: suspend (OutputStream) -> CameraMediaDownloadResult,
     ): Uri {
         var created: Uri? = null
@@ -83,7 +96,7 @@ internal class CameraMediaGalleryStore(
             withContext(Dispatchers.IO) {
                 savePending(
                     cameraModel, item, { created = it }, finalization, onFinalized,
-                    onPublished, onPublicationObserverFailure, download,
+                    onPublished, onPublicationObserverFailure, requireAutomaticJpeg, download,
                 )
             }
         }
@@ -97,10 +110,15 @@ internal class CameraMediaGalleryStore(
         onFinalized: () -> Unit,
         onPublished: ((PublishedGalleryOriginal) -> Unit)?,
         onPublicationObserverFailure: () -> Unit,
+        requireAutomaticJpeg: Boolean,
         download: suspend (OutputStream) -> CameraMediaDownloadResult,
     ): Uri {
         val mimeType = requireNotNull(galleryMimeType(item)) { "Choose a folder for this file format." }
         require(canSaveMediaToGallery(item)) { "Choose a folder for this file format." }
+        if (requireAutomaticJpeg) {
+            require(item.isAutomaticJpegEligible) { "Automatic delivery requires an eligible JPEG item." }
+            requireAutomaticJpegLength(requireNotNull(item.sizeBytes) { "Automatic JPEG requires a fresh original size." })
+        }
         val collection = if (mimeType.startsWith("video/")) {
             MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         } else {
@@ -115,11 +133,12 @@ internal class CameraMediaGalleryStore(
         val destination = resolver.insert(collection, values)
             ?: error("Android could not create the gallery destination.")
         onCreated(destination)
-        // An absent observer and unrelated RAW/video saves keep their existing streaming cost.
-        val digest = if (mimeType == "image/jpeg" && onPublished != null) MessageDigest.getInstance("SHA-256") else null
+        // Manual saves without an observer and unrelated RAW/video keep their streaming cost.
+        val digest = if (mimeType == "image/jpeg" && (onPublished != null || requireAutomaticJpeg)) MessageDigest.getInstance("SHA-256") else null
         val raw = openOutput(destination)
             ?: error("Android could not open the gallery destination.")
-        val counted = CountingMediaOutput(BufferedOutputStream(raw), digest)
+        val counted = CountingMediaOutput(BufferedOutputStream(raw), digest,
+            if (requireAutomaticJpeg) AutomaticJpegEnvelope.MAX_BYTES else Long.MAX_VALUE)
         val result = counted.use { download(it) }
         check(counted.bytes > 0 && result.bytesTransferred == counted.bytes) { "Incomplete media download." }
         listOfNotNull(item.sizeBytes, result.item.sizeBytes).forEach { expected ->
@@ -134,6 +153,21 @@ internal class CameraMediaGalleryStore(
                 sha256 = it.digest().joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') },
                 mimeType = mimeType,
             )
+        }
+        if (requireAutomaticJpeg) {
+            check(automaticJpegResponseMimeAdmitted(result.contentType)) { "Camera returned a conflicting JPEG content type." }
+            check(result.item.id == item.id && result.item.name == item.name && result.item.isAutomaticJpegEligible) {
+                "Camera changed the automatic JPEG original identity."
+            }
+            val evidence = requireNotNull(original)
+            val context = coroutineContext
+            try {
+                validateAutomaticOriginal(destination, evidence.byteLength, evidence.sha256) { context.ensureActive() }
+            } catch (memory: OutOfMemoryError) {
+                // Only this bounded decoder/validation stage translates allocation failure.
+                // It must retire the pending row and write FAILED, never strand a receipt.
+                throw InvalidAutomaticJpegException("phone memory unavailable for validation").apply { initCause(memory) }
+            }
         }
         coroutineContext.ensureActive()
         val published = ContentValues().apply {
@@ -165,17 +199,20 @@ internal class CameraMediaGalleryStore(
 private class CountingMediaOutput(
     output: OutputStream,
     private val digest: MessageDigest? = null,
+    private val maximumBytes: Long = Long.MAX_VALUE,
 ) : FilterOutputStream(output) {
     var bytes = 0L
         private set
 
     override fun write(value: Int) {
+        check(bytes < maximumBytes) { "Media original exceeds the automatic encoded-size limit." }
         out.write(value)
         digest?.update(value.toByte())
         bytes += 1
     }
 
     override fun write(buffer: ByteArray, offset: Int, length: Int) {
+        check(length.toLong() <= maximumBytes - bytes) { "Media original exceeds the automatic encoded-size limit." }
         out.write(buffer, offset, length)
         digest?.update(buffer, offset, length)
         bytes += length

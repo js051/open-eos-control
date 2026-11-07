@@ -206,6 +206,76 @@ class CameraConnectionRecoveryUiTest {
         compose.runOnIdle { assertEquals(0, retries) }
     }
 
+    @Test fun localizedCameraViaBridgeGuidanceWrapsAndDismissNeverEditsCredentialsOrRetries() {
+        val state = mutableStateOf(CameraUiState(
+            connectionTarget = ConnectionTarget.DESKTOP_BRIDGE,
+            bridgeToken = "synthetic-phone-token",
+        ))
+        val locale = mutableStateOf(LocaleList("en"))
+        val size = mutableStateOf(DpSize(320.dp, 480.dp))
+        var connects = 0
+        var scans = 0
+        var tokenEdits = 0
+        var dismissals = 0
+        val actions = connectionRecoveryTestActions().copy(
+            connectBridge = { connects++ }, scanDesktopBridge = { scans++ },
+            setBridgeToken = { tokenEdits++ },
+            clearError = {
+                dismissals++
+                state.value = state.value.copy(connectionRecovery = null, error = null)
+            },
+        )
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(size.value)) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
+                    DeviceConfigurationOverride(DeviceConfigurationOverride.Locales(locale.value)) {
+                        ConnectionRecoveryTestContent(state.value, actions)
+                    }
+                }
+            }
+        }
+        val cases = listOf(
+            ConnectionFailureReason.AUTHENTICATION_REJECTED to R.string.connection_recovery_camera_via_bridge_auth,
+            ConnectionFailureReason.TLS_ERROR to R.string.connection_recovery_camera_via_bridge_tls,
+            ConnectionFailureReason.HOST_NOT_FOUND to R.string.connection_recovery_camera_via_bridge_host_not_found,
+            ConnectionFailureReason.TIMEOUT to R.string.connection_recovery_camera_via_bridge_timeout,
+            ConnectionFailureReason.UNREACHABLE to R.string.connection_recovery_camera_via_bridge_unreachable,
+            ConnectionFailureReason.HTTP_ERROR to R.string.connection_recovery_camera_via_bridge_http,
+            ConnectionFailureReason.DISCOVERY_FAILED to R.string.connection_recovery_camera_via_bridge_discovery,
+            ConnectionFailureReason.ENDPOINT_NOT_FOUND to R.string.connection_recovery_camera_via_bridge_endpoint,
+        )
+        for (language in listOf("en", "zh-TW")) {
+            for ((reason, expected) in cases) {
+                layoutScenario = "camera-via-Bridge language=$language reason=$reason"
+                compose.runOnIdle {
+                    locale.value = LocaleList(language)
+                    size.value = if (language == "en") DpSize(320.dp, 480.dp) else DpSize(480.dp, 320.dp)
+                    state.value = state.value.copy(connectionRecovery = ConnectionRecovery(
+                        ConnectionAttemptTarget.DESKTOP_BRIDGE, reason, cameraViaBridge = true,
+                    ))
+                }
+                compose.onNodeWithText(resourceText(expected, language)).performScrollTo().assertIsDisplayed()
+                assertTextFits("connection-recovery-message")
+                compose.onNodeWithText(resourceText(R.string.connection_recovery_bridge_auth, language)).assertDoesNotExist()
+                compose.onNodeWithText(resourceText(R.string.connection_recovery_camera_auth, language)).assertDoesNotExist()
+                compose.onNodeWithTag("connection-username").assertDoesNotExist()
+                compose.onNodeWithTag("connection-password").assertDoesNotExist()
+                compose.onNodeWithTag("connection-recovery-dismiss").performScrollTo().assertIsDisplayed()
+                    .assertHeightIsAtLeast(48.dp).performTouchInput { click(center) }
+                compose.onNodeWithTag("connection-recovery").assertDoesNotExist()
+                compose.onNodeWithTag("connection-bridge-scan").performScrollTo().assertIsEnabled()
+                assertTextFits("connection-bridge-scan")
+            }
+        }
+        compose.runOnIdle {
+            assertEquals(16, dismissals)
+            assertEquals(0, connects)
+            assertEquals(0, scans)
+            assertEquals(0, tokenEdits)
+            assertEquals("synthetic-phone-token", state.value.bridgeToken)
+        }
+    }
+
     @Test fun bridgeEmptyResultAppearsOnlyAfterACompletedScan() {
         val state = mutableStateOf(CameraUiState(connectionTarget = ConnectionTarget.DESKTOP_BRIDGE))
         var scans = 0
