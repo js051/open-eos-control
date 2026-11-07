@@ -83,7 +83,7 @@ function context({ reuseSessionId = false, confirmed = true } = {}) {
     releaseObjectUrl: url => { if (url) released.push(url); },
     renderMedia: () => renders.push("media"), renderDiagnostics: () => renders.push("diagnostics"),
   });
-  for (const name of ["clearConnectionError", "syncLiveMagnificationFromCapabilities", "startEventLoop",
+  for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "clearConnectionError", "syncLiveMagnificationFromCapabilities", "startEventLoop",
     "refreshLatestMedia", "renderHealth", "cancelMediaDownload", "stopLiveLoop", "stopLocalVideo",
     "stopEventLoop", "cancelEventLoop", "cancelMediaUpload", "clearScheduledMediaTransferRender",
     "cancelLatestMediaRefresh", "clearBulbTimer", "renderLiveMagnification", "renderMediaTransfer",
@@ -92,9 +92,9 @@ function context({ reuseSessionId = false, confirmed = true } = {}) {
     sandbox[name] = (...args) => feedback.push([name, ...args]);
   }
   sandbox.renderSession = () => sandbox.renderAvailability();
-  const names = ["connectCamera", "disconnectCamera", "resetSession", "refreshSession",
+  const names = ["adoptCameraStatus", "recordingRecoveryActive", "connectCamera", "disconnectCamera", "resetSession", "refreshSession",
     "featureSupported", "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
-    "renderAvailability", "deleteMedia", "captureError", "clearMediaThumbnails",
+    "liveViewStopRequired", "renderAvailability", "deleteMedia", "captureError", "clearMediaThumbnails",
     "closeMediaPreview", "clearMediaPreview", "resetMediaPreviewTransform",
     "closeMediaDetails", "clearMediaDetails"];
   vm.runInContext(names.map(productionFunction).join("\n"), sandbox);

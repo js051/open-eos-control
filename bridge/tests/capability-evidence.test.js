@@ -85,7 +85,7 @@ function context({ reuseSessionId = false } = {}) {
     canChangeShutterAF: () => false, localPreviewSelected: () => false,
     shutterReleaseUnconfirmed: () => false, effectiveTapAction: () => null,
   });
-  for (const name of ["clearConnectionError", "syncLiveMagnificationFromCapabilities",
+  for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "clearConnectionError", "syncLiveMagnificationFromCapabilities",
     "startEventLoop", "refreshLatestMedia", "renderHealth",
     "cancelMediaDownload", "stopLiveLoop", "stopLocalVideo", "stopEventLoop", "cancelEventLoop",
     "cancelMediaUpload", "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh",
@@ -98,9 +98,9 @@ function context({ reuseSessionId = false } = {}) {
   sandbox.renderDiagnostics = () => renderedDiagnostics.push({
     session: state.session?.id || null, capabilities: sandbox.diagnosticCapabilities(),
   });
-  const names = ["connectCamera", "refreshCapabilityEvidence", "disconnectCamera", "resetSession",
+  const names = ["adoptCameraStatus", "connectCamera", "refreshCapabilityEvidence", "disconnectCamera", "resetSession",
     "featureSupported", "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
-    "renderAvailability", "selectView", "diagnosticCapabilities"];
+    "recordingRecoveryActive", "liveViewStopRequired", "renderAvailability", "selectView", "diagnosticCapabilities"];
   vm.runInContext(names.map(productionFunction).join("\n"), sandbox);
   return sandbox;
 }
@@ -213,4 +213,20 @@ test("no connection makes no capability request and leaves evidence empty", asyn
   assert.deepEqual(subject.requests, []);
   assert.deepEqual(subject.feedback, []);
   assert.equal(subject.state.capabilities, null);
+});
+
+test('final availability keeps recovery cleaning and sleep controls disabled', () => {
+  const s = context();
+  s.state.session = {id:'same'};
+  s.state.status = {recording:false};
+  s.state.capabilities = {supported:['CAMERA_SLEEP','SENSOR_CLEANING'],liveView:{}};
+  const buttons = ['sleep','sensor-cleaning'].map(cameraCommand => ({...element(),dataset:{cameraCommand}}));
+  const originalQuery = s.document.querySelectorAll;
+  s.document.querySelectorAll = selector => selector === '#advanced-settings .settings-command button'
+    ? buttons : originalQuery(selector);
+  s.renderAvailability();
+  for (const button of buttons) assert.equal(button.disabled, false);
+  s.state.recordingRecovery = {session:s.state.session,direction:'start'};
+  s.renderAvailability();
+  for (const button of buttons) assert.equal(button.disabled, true);
 });

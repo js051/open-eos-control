@@ -10,6 +10,7 @@ const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const { chromium } = require("playwright");
+const { datedListingResponse } = require("./media-listing-browser-fixture.js");
 
 const BRIDGE_ROOT = path.resolve(__dirname, "..");
 const SIMULATOR_ROOT = path.resolve(BRIDGE_ROOT, "../simulator");
@@ -107,6 +108,36 @@ async function openPreview(page) {
   });
 }
 
+async function startForegroundImportAfterGallerySettles(page) {
+  // The fixture starts with exactly two old JPEGs. Finish their real gallery
+  // reads before the single Start gesture; lazy thumbnail admission can otherwise
+  // change the button's availability while that gesture is being delivered.
+  await page.waitForFunction(() => document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE" &&
+    document.querySelectorAll("#media-list .media-thumbnail").length === 2);
+  assert.deepEqual((await page.locator("#media-list .media-copy strong").allTextContents()).sort(),
+    ["SYNTHETIC_OLD_A.JPG", "SYNTHETIC_OLD_B.JPG"]);
+  for (let index = 0; index < 2; index += 1) {
+    // Both cards need their own observation at the narrow 200% layout.
+    await page.locator("#media-list .media-thumbnail").nth(index).scrollIntoViewIfNeeded();
+    await page.waitForFunction((position) => {
+      const thumbnail = document.querySelectorAll("#media-list .media-thumbnail")[position];
+      const image = thumbnail?.querySelector("img");
+      return !thumbnail?.classList.contains("loading") && image?.complete &&
+        image.naturalWidth === 32 && image.naturalHeight === 24;
+    }, index);
+  }
+  await page.waitForFunction(() => {
+    const image = document.querySelector("#latest-media-thumbnail img");
+    return document.querySelector("#latest-media-label")?.textContent === "SYNTHETIC_OLD_A.JPG" &&
+      image?.complete && image.naturalWidth === 32 && image.naturalHeight === 24;
+  });
+  await page.locator("#media-auto-start").scrollIntoViewIfNeeded();
+  await page.waitForFunction(() => document.querySelector("#media-auto-start")?.disabled === false);
+  assert.equal(await page.evaluate(() => window.__batchPickerCalls), 0);
+  await page.click("#media-auto-start");
+  await page.waitForFunction(() => window.__batchPickerCalls === 1);
+}
+
 function filePlatform({ mode, delayWritable, pauseSecondWrite }) {
   if (mode === "blob") {
     Object.defineProperty(window, "showSaveFilePicker", { configurable: true, value: undefined });
@@ -162,6 +193,62 @@ function filePlatform({ mode, delayWritable, pauseSecondWrite }) {
   };
 }
 
+// Only the browser's directory/writer surface is synthetic. Production DOM,
+// selection, queue, Bridge HTTP and Canon-shaped original bytes remain real.
+function batchFilePlatform({ pauseFirstWrite = false, unsupported = false }) {
+  if (unsupported) {
+    Object.defineProperty(window, "showDirectoryPicker", { configurable: true, value: undefined });
+    return;
+  }
+  window.__batchFiles = [];
+  window.__batchPickerCalls = 0;
+  const directories = new Map();
+  const missing = () => new DOMException("Synthetic entry absent", "NotFoundError");
+  window.showDirectoryPicker = async (options) => {
+    if (options?.mode !== "readwrite") throw new Error("Expected explicit readwrite directory picker");
+    window.__batchPickerCalls += 1;
+    return {
+      kind: "directory",
+      name: "Synthetic destination",
+      async getDirectoryHandle(name, { create = false } = {}) {
+        if (directories.has(name)) return directories.get(name);
+        if (!create) throw missing();
+        const files = new Map();
+        const directory = {
+          kind: "directory",
+          name,
+          async getFileHandle(filename, { create: createFile = false } = {}) {
+            if (files.has(filename)) return files.get(filename);
+            if (!createFile) throw missing();
+            const output = { name: filename, directory: name, bytes: [], closed: false, aborted: false };
+            window.__batchFiles.push(output);
+            const handle = { kind: "file", name: filename, async createWritable() {
+              return {
+                async write(chunk) {
+                  if (pauseFirstWrite && window.__batchFiles[0] === output && !output.writeStarted) {
+                    output.writeStarted = true;
+                    await new Promise((resolve, reject) => {
+                      const timer = setTimeout(() => reject(new Error("Batch synthetic write gate timed out")), 20_000);
+                      window.__releaseBatchWrite = () => { clearTimeout(timer); resolve(); };
+                    });
+                  }
+                  for (const byte of new Uint8Array(chunk)) output.bytes.push(byte);
+                },
+                async close() { output.closed = true; },
+                async abort() { output.aborted = true; },
+              };
+            } };
+            files.set(filename, handle);
+            return handle;
+          },
+        };
+        directories.set(name, directory);
+        return directory;
+      },
+    };
+  };
+}
+
 async function applyMediaDateRange(page, start, end) {
   await page.click("#media-date-button");
   await page.waitForSelector("#media-date-dialog[open]");
@@ -174,11 +261,8 @@ async function applyMediaDateRange(page, start, end) {
 async function installDatedListing(page, dateForName) {
   await page.route(/\/v1\/session\/[^/]+\/media(?:\?.*)?$/, async (route) => {
     const response = await route.fetch();
-    const payload = await response.json();
-    await route.fulfill({ response, json: {
-      ...payload,
-      items: payload.items.map((item) => ({ ...item, captureTime: dateForName(item.name) })),
-    } });
+    const decorated = datedListingResponse(await response.text(), response.headers(), dateForName);
+    await route.fulfill({ response, ...decorated });
   });
 }
 
@@ -603,6 +687,375 @@ const cases = [
   },
 ];
 
+for (const language of ["en", "zh-TW"]) {
+  cases.push({
+    name: `batch originals preserve hidden selection and confirm closed bytes ${language}`,
+    batch: {},
+    run: async ({ page, simulatorOrigin, originalRequests, infoRequests, listingRequests, cameraWrites }) => {
+      await page.locator("#control-view .language-select").selectOption(language);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+      const before = { info: infoRequests.length, listing: listingRequests.length, writes: cameraWrites.length };
+      await page.click("#media-select-filtered");
+      await page.click('[data-media-filter="video"]');
+      assert.equal(await page.locator(".media-select-checkbox").count(), 0);
+      assert.equal(await page.isDisabled("#media-batch-start"), false, "Hidden selection remains transferable");
+      await page.click("#media-batch-start");
+      await page.waitForFunction(() => document.querySelectorAll('#media-batch-list [data-status="completed"]').length === 2);
+      const files = await page.evaluate(() => window.__batchFiles);
+      const expected = Buffer.from(await (await fetch(`${simulatorOrigin}/__test/representation/original`)).arrayBuffer());
+      assert.equal(files.length, 2);
+      for (const file of files) {
+        assert.equal(file.closed, true); assert.equal(file.aborted, false);
+        assert.deepEqual(Buffer.from(file.bytes), expected, "Saved bytes are the original representation");
+      }
+      assert.equal(new Set(files.map(file => file.directory)).size, 1);
+      assert.equal(new Set(files.map(file => file.name)).size, 2);
+      assert.deepEqual(files.map(file => file.name).sort(), ["SYNTHETIC_OLD_A.JPG", "SYNTHETIC_OLD_B.JPG"]);
+      assert.equal(originalRequests.length, 2);
+      const requestedIds = originalRequests.map(url => decodeURIComponent(new URL(url).pathname.split("/").at(-1)));
+      assert.equal(new Set(requestedIds).size, 2, "Each selected raw media ID is requested once");
+      assert.equal(await page.evaluate(() => window.__batchPickerCalls), 1);
+      assert.deepEqual({ info: infoRequests.length, listing: listingRequests.length, writes: cameraWrites.length }, before,
+        "Batch selection and delivery add no metadata, listing or camera mutation requests");
+      assert.equal((await peerState(simulatorOrigin)).capture_count, 0);
+      await page.locator("#media-batch-panel").scrollIntoViewIfNeeded();
+      const width = await page.evaluate(() => ({ viewport: innerWidth, page: document.documentElement.scrollWidth }));
+      assert.ok(width.page <= width.viewport + 1, "Batch summary fits narrow 200% layout");
+      fs.mkdirSync(RESULTS_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-batch-${language}.png`), fullPage: true });
+      await page.locator('#control-view [data-open-media-history]').click();
+      await page.waitForFunction(() => document.querySelectorAll('#media-history-list [data-outcome="completed"]').length === 2);
+      await page.keyboard.press("Escape");
+      await page.reload({ waitUntil: "networkidle" });
+      await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+      await page.locator('#connection-view [data-open-media-history]').click();
+      await page.waitForFunction(() => document.querySelectorAll('#media-history-list [data-outcome="completed"]').length === 2);
+      assert.equal(originalRequests.length, 2, "Opening persisted history must not replay original requests");
+      assert.equal(await page.locator('#media-history-dialog').evaluate(dialog => dialog.contains(document.activeElement)), true);
+      const historyWidth = await page.locator('#media-history-dialog').evaluate(dialog => ({width: dialog.clientWidth, content: dialog.scrollWidth}));
+      assert.ok(historyWidth.content <= historyWidth.width + 1, "History fits narrow 200% layout");
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-batch-history-${language}.png`) });
+      await page.click('#media-history-clear');
+      await page.click('#media-history-confirm-no');
+      assert.equal(await page.locator('#media-history-list li').count(), 2);
+      await page.click('#media-history-clear');
+      await page.click('#media-history-confirm-yes');
+      await page.waitForFunction(() => document.querySelector('#media-history-confirm').hidden && document.querySelectorAll('#media-history-list li').length === 0);
+      await page.keyboard.press("Escape");
+      await page.locator('#connection-view [data-open-media-history]').click();
+      await page.waitForFunction(() => document.querySelector('#media-history-clear').disabled);
+      assert.equal(await page.locator('#media-history-list li').count(), 0);
+      await page.keyboard.press("Escape");
+      assert.equal(await page.locator('#connection-view [data-open-media-history]').evaluate(button => document.activeElement === button), true);
+
+    },
+  });
+}
+cases.push({
+  name: "unsupported directory API keeps single-file controls without batch requests",
+  batch: { unsupported: true },
+  run: async ({ page, originalRequests }) => {
+    await page.click('.tab[data-view="media"]');
+    await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+    await page.click("#media-select-filtered");
+    assert.equal(await page.isVisible("#media-batch-unavailable"), true);
+    assert.equal(await page.isDisabled("#media-batch-start"), true);
+    assert.deepEqual(originalRequests, []);
+    await page.locator(".media-actions button").first().click();
+    await page.waitForSelector("#media-details-dialog[open]");
+    await page.waitForSelector("#media-details-download:not([disabled])");
+    assert.equal(await page.isDisabled("#media-details-download"), false);
+    await page.keyboard.press("Escape");
+  },
+});
+cases.push({
+  name: "batch cancellation stops later originals and preserves uncertain current output",
+  batch: { pauseFirstWrite: true },
+  run: async ({ page, originalRequests }) => {
+    await page.click('.tab[data-view="media"]');
+    await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+    await page.click("#media-select-filtered");
+    await page.click("#media-batch-start");
+    await page.waitForFunction(() => typeof window.__releaseBatchWrite === "function");
+    await page.click("#media-batch-cancel");
+    await page.evaluate(() => window.__releaseBatchWrite());
+    await page.waitForFunction(() => window.__batchFiles[0]?.aborted);
+    await page.waitForFunction(() => document.querySelector('#media-batch-list [data-status="not-started"]'));
+    assert.equal(originalRequests.length, 1, "Cancellation prevents the second camera original request");
+    assert.equal(await page.evaluate(() => window.__batchFiles.some(file => file.closed)), false);
+    assert.equal(await page.locator('#media-batch-list [data-status="completed"]').count(), 0);
+  },
+});
+
+
+cases.push({
+  name: "complete batch worklist survives reload with uncertain attempt and queued row without automatic requests",
+  batch: { pauseFirstWrite: true },
+  run: async ({ page, originalRequests }) => {
+    await page.click('.tab[data-view="media"]');
+    await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+    await page.click("#media-select-filtered");
+    await page.click("#media-batch-start");
+    await page.waitForFunction(() => typeof window.__releaseBatchWrite === "function");
+    assert.equal(originalRequests.length, 1);
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator('#connection-view [data-open-media-history]').click();
+    await page.waitForFunction(() => document.querySelectorAll('#media-history-list [data-outcome="cancelled-or-unknown"]').length === 1);
+    assert.equal(await page.locator('#media-history-list [data-outcome="completed"]').count(), 0);
+    assert.equal(originalRequests.length, 1, "Reload only displays history; it cannot resume camera commands");
+    const stored = await page.evaluate(async () => {
+      const store = OpenEOSMediaTransferHistory.createHistoryStore();
+      const result = await store.list(); store.close(); return result;
+    });
+    assert.equal(stored.ok, true);
+    assert.equal(stored.entries[0].unconfirmed, true);
+    assert.equal(stored.plans.length, 1);
+    assert.equal(stored.plans[0].rows.length, 2, "The complete selected roster survives reload");
+    assert.deepEqual(stored.plans[0].rows.map(row => row.outcome), ["cancelled-or-unknown", "queued"]);
+    assert.equal(stored.plans[0].rows[0].receipt.receiptId, stored.plans[0].rows[0].rowId);
+    assert.equal(stored.plans[0].rows[1].receipt, null);
+    assert.equal(await page.locator('#media-history-list [data-outcome="queued"]').count(), 1);
+    assert.equal(await page.locator('#media-history-list li').count(), 2, "The first receipt is not duplicated outside its worklist");
+    assert.equal(JSON.stringify(stored).includes('/ccapi/'), false);
+    assert.equal(JSON.stringify(stored).includes('synthetic-session'), false);
+    await page.keyboard.press("Escape");
+  },
+});
+for (const language of ["en", "zh-TW"]) {
+  cases.push({
+    name: `manual unfinished worklist continuation requires binding and saves a linked new result ${language}`,
+    batch: { pauseFirstWrite: true },
+    run: async ({ page, simulatorOrigin, originalRequests, infoRequests, listingRequests }) => {
+      await page.locator("#control-view .language-select").selectOption(language);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+      await page.click("#media-select-filtered");
+      await page.click("#media-batch-start");
+      await page.waitForFunction(() => typeof window.__releaseBatchWrite === "function");
+      await page.click("#media-batch-cancel");
+      await page.evaluate(() => window.__releaseBatchWrite());
+      await page.waitForFunction(() => !document.querySelector("#media-batch-start").disabled);
+      await page.locator('#control-view [data-open-media-history]').click();
+      await page.waitForFunction(() => document.querySelectorAll('#media-history-list select').length === 2);
+      const readHistory = () => page.evaluate(async () => {
+        const store = OpenEOSMediaTransferHistory.createHistoryStore();
+        const result = await store.list(); store.close(); return result;
+      });
+      const geometry = await page.locator("#media-history-dialog").evaluate(dialog => ({ width: dialog.clientWidth, content: dialog.scrollWidth }));
+      assert.ok(geometry.content <= geometry.width + 1, "Source context must fit the narrow large-font dialog");
+      const listGeometry = await page.locator("#media-history-list").evaluate(list => ({ width: list.clientWidth, content: list.scrollWidth }));
+      assert.ok(listGeometry.content <= listGeometry.width + 1, "Source controls must not hide overflow inside the history list");
+      const before = await readHistory();
+      const traffic = { info: infoRequests.length, listing: listingRequests.length, original: originalRequests.length };
+      assert.equal(await page.isDisabled("#media-continuation-start"), true);
+      const queued = page.locator('#media-history-list [data-outcome="queued"] select');
+      await queued.selectOption("1");
+      assert.equal(await page.isDisabled("#media-continuation-start"), true, "Even queued rows may still be owned by another tab");
+      await page.check("#media-continuation-acknowledge");
+      assert.equal(await page.isDisabled("#media-continuation-start"), false);
+      assert.deepEqual({ info: infoRequests.length, listing: listingRequests.length, original: originalRequests.length }, traffic,
+        "Mapping and confirmation do not request any camera bytes");
+      await page.click("#media-continuation-start");
+      await page.waitForFunction(() => document.querySelectorAll('#media-batch-list [data-status="completed"]').length === 1);
+      assert.equal(originalRequests.length, traffic.original + 1);
+      assert.equal(await page.evaluate(() => window.__batchPickerCalls), 2);
+      const files = await page.evaluate(() => window.__batchFiles.filter(file => file.closed));
+      assert.equal(files.length, 1);
+      const expected = Buffer.from(await (await fetch(`${simulatorOrigin}/__test/representation/original`)).arrayBuffer());
+      assert.deepEqual(Buffer.from(files[0].bytes), expected);
+      const after = await readHistory();
+      assert.equal(after.plans.length, 2);
+      assert.deepEqual(after.plans[1], before.plans[0], "The old worklist is preserved exactly");
+      assert.equal(after.plans[0].rows[0].outcome, "completed");
+      assert.equal(after.plans[0].rows[0].origin.batchId, before.plans[0].batchId);
+      assert.equal(after.plans[0].rows[0].origin.rowId, before.plans[0].rows[1].rowId);
+    },
+  });
+}
+
+cases.push({
+  name: "clearing history from a second tab prevents late batch records without stopping files",
+  batch: { pauseFirstWrite: true },
+  run: async ({ page, originalRequests }) => {
+    await page.click('.tab[data-view="media"]');
+    await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+    await page.click("#media-select-filtered");
+    await page.click("#media-batch-start");
+    await page.waitForFunction(() => typeof window.__releaseBatchWrite === "function");
+    const observer = await page.context().newPage();
+    try {
+      await observer.goto(page.url(), { waitUntil: "networkidle" });
+      await observer.locator('#connection-view [data-open-media-history]').click();
+      await observer.waitForFunction(() => document.querySelectorAll('#media-history-list li').length === 2);
+      assert.equal(await observer.locator('#media-history-list [data-outcome="cancelled-or-unknown"]').count(), 1);
+      assert.equal(await observer.locator('#media-history-list [data-outcome="queued"]').count(), 1);
+      await observer.click('#media-history-clear');
+      await observer.click('#media-history-confirm-yes');
+      await observer.waitForFunction(() => document.querySelector('#media-history-confirm').hidden && document.querySelectorAll('#media-history-list li').length === 0);
+      await page.evaluate(() => window.__releaseBatchWrite());
+      await page.waitForFunction(() => document.querySelectorAll('#media-batch-list [data-status="completed"]').length === 2);
+      assert.equal(originalRequests.length, 2);
+      assert.equal(await page.evaluate(() => window.__batchFiles.filter(file => file.closed).length), 2);
+      await observer.keyboard.press("Escape");
+      await observer.locator('#connection-view [data-open-media-history]').click();
+      await observer.waitForFunction(() => document.querySelector('#media-history-clear').disabled);
+      assert.equal(await observer.locator('#media-history-list li').count(), 0, "Old epoch finish and later attempts cannot rebuild cleared history");
+    } finally { await observer.close(); }
+  },
+});
+
+for (const language of ["en", "zh-TW"]) {
+  cases.push({
+    name: `foreground JPEG import establishes baseline and saves only a new original ${language}`,
+    batch: {},
+    run: async ({ page, simulatorOrigin, originalRequests, infoRequests }) => {
+      await page.locator("#control-view .language-select").selectOption(language);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+      await page.click('.tab[data-view="media"]');
+      assert.equal(await page.evaluate(() => window.__batchPickerCalls), 0);
+      await startForegroundImportAfterGallerySettles(page);
+      await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "watching");
+      assert.deepEqual(originalRequests, [], "Baseline files are never imported");
+      assert.equal(await page.evaluate(() => window.__batchFiles.length), 0);
+      await configure(simulatorOrigin, { mode: "new-first" });
+      await page.click('.tab[data-view="live"]');
+      await capture(page, simulatorOrigin);
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelectorAll('#media-auto-list [data-status="completed"]').length === 1,
+        null, { timeout: 20_000 });
+      await page.click("#media-auto-stop");
+      await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "stopped");
+      const files = await page.evaluate(() => window.__batchFiles);
+      const expected = Buffer.from(await (await fetch(`${simulatorOrigin}/__test/representation/original`)).arrayBuffer());
+      assert.equal(files.length, 1); assert.equal(files[0].name, "SIM_0003.JPG");
+      assert.equal(files[0].closed, true); assert.equal(files[0].aborted, false);
+      assert.deepEqual(Buffer.from(files[0].bytes), expected);
+      assert.equal(originalRequests.length, 1);
+      assert.equal(new URL(originalRequests[0]).searchParams.get("attempt"), "single");
+      assert.equal(new URL(originalRequests[0]).searchParams.get("validation"), "jpeg-v1");
+      const fresh = infoRequests.filter((url) => new URL(url).searchParams.get("fresh") === "true");
+      assert.equal(fresh.length, 2, "Only the new JPEG receives two current size observations");
+      assert.equal(new Set(fresh.map((url) => new URL(url).pathname)).size, 1);
+      await assertOneCapture(simulatorOrigin);
+      const width = await page.evaluate(() => ({ viewport: innerWidth, content: document.documentElement.scrollWidth }));
+      assert.ok(width.content <= width.viewport + 1, "Foreground status fits narrow 200% layout");
+      await page.locator("#media-auto-panel").scrollIntoViewIfNeeded();
+      fs.mkdirSync(RESULTS_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-foreground-import-${language}.png`), fullPage: true });
+      await page.reload({ waitUntil: "networkidle" });
+      assert.equal(originalRequests.length, 1, "Reload cannot restart the foreground import");
+      assert.equal(await page.evaluate(() => window.__batchPickerCalls), 0, "No restored handle or permission request");
+    },
+  });
+}
+cases.push({
+  name: "foreground import refuses a legacy response without complete inventory evidence",
+  batch: {},
+  run: async ({ page, originalRequests, infoRequests, simulatorOrigin, routeCleanups }) => {
+    const pattern = /\/v1\/session\/[^/]+\/media\?.*inventory=strict/;
+    const handler = async (route) => {
+      const response = await route.fetch();
+      const headers = response.headers(); delete headers["x-open-eos-inventory"];
+      await route.fulfill({ response, headers });
+    };
+    await page.route(pattern, handler);
+    routeCleanups.push(() => page.unroute(pattern, handler));
+    await page.click('.tab[data-view="media"]');
+    await startForegroundImportAfterGallerySettles(page);
+    await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "stopped");
+    assert.deepEqual(originalRequests, []);
+    assert.equal(infoRequests.filter((url) => new URL(url).searchParams.has("fresh")).length, 0);
+    assert.equal(await page.evaluate(() => window.__batchFiles.length), 0);
+    assert.equal((await peerState(simulatorOrigin)).capture_count, 0);
+    assert.equal(await page.isDisabled("#media-auto-start"), false, "A later attempt needs a new explicit gesture");
+  },
+});
+cases.push({
+  name: "foreground import cancellation preserves uncertain output and prevents later reads",
+  batch: { pauseFirstWrite: true },
+  run: async ({ page, simulatorOrigin, originalRequests }) => {
+    await page.click('.tab[data-view="media"]');
+    await startForegroundImportAfterGallerySettles(page);
+    await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "watching");
+    await configure(simulatorOrigin, { mode: "new-first" });
+    await page.click('.tab[data-view="live"]');
+    await capture(page, simulatorOrigin);
+    await page.click('.tab[data-view="media"]');
+    await page.waitForFunction(() => typeof window.__releaseBatchWrite === "function", null, { timeout: 20_000 });
+    await page.click("#media-auto-stop");
+    await page.evaluate(() => window.__releaseBatchWrite());
+    await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "stopped");
+    assert.equal(originalRequests.length, 1);
+    assert.equal(await page.evaluate(() => window.__batchFiles[0]?.closed), false);
+    assert.equal(await page.evaluate(() => window.__batchFiles[0]?.aborted), true);
+    assert.equal(await page.locator('#media-auto-list [data-status="completed"]').count(), 0);
+    assert.equal(await page.locator('#media-auto-list [data-status="cancelled-or-unknown"]').count(), 1);
+    await assertOneCapture(simulatorOrigin);
+  },
+});
+
+for (const fault of ["missing-proof", "premature-entropy"]) {
+  cases.push({
+    name: `automatic JPEG validation rejects ${fault} and explicit recovery skips the failed ID`,
+    batch: {},
+    run: async ({ page, simulatorOrigin, originalRequests, routeCleanups }) => {
+      const pattern = /\/v1\/session\/[^/]+\/media\/[^/?]+\?attempt=single&validation=jpeg-v1/;
+      const handler = async (route) => {
+        const response = await route.fetch();
+        const headers = response.headers(); delete headers["x-open-eos-original-validation"];
+        await route.fulfill({ response, headers });
+      };
+      if (fault === "missing-proof") {
+        await page.route(pattern, handler);
+        routeCleanups.push(() => page.unroute(pattern, handler));
+      }
+      await page.click('.tab[data-view="media"]');
+      await startForegroundImportAfterGallerySettles(page);
+      await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "watching");
+      await configure(simulatorOrigin, { mode: "new-first", invalid_original: fault === "premature-entropy" });
+      await page.click('.tab[data-view="live"]');
+      await capture(page, simulatorOrigin);
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "stopped",
+        null, { timeout: 20_000 });
+      assert.equal(originalRequests.length, 1);
+      assert.equal(await page.locator('#media-auto-list [data-status="failed"]').count(), 1);
+      const files = await page.evaluate(() => window.__batchFiles);
+      assert.equal(files.length, 1);
+      assert.equal(files[0].closed, false);
+      assert.equal(files[0].aborted, true);
+      assert.equal(files[0].bytes.length, 0);
+      await assertOneCapture(simulatorOrigin);
+      if (fault === "missing-proof") await page.unroute(pattern, handler);
+      await configure(simulatorOrigin, { invalid_original: false });
+      await startForegroundImportAfterGallerySettles(page);
+      await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "watching");
+      assert.equal(originalRequests.length, 1, "explicit re-enable establishes fresh baselines, never retries old IDs");
+      assert.equal((await peerState(simulatorOrigin)).capture_count, 1, "recovery never resends the shutter");
+      await page.click('.tab[data-view="live"]');
+      await capture(page, simulatorOrigin);
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelectorAll('#media-auto-list [data-status="completed"]').length === 1,
+        null, { timeout: 20_000 });
+      await page.click("#media-auto-stop");
+      assert.equal(originalRequests.length, 2);
+      const records = await page.evaluate(async () => {
+        const store = OpenEOSMediaTransferHistory.createHistoryStore();
+        const result = await store.list(); store.close(); return result;
+      });
+      assert.equal(records.entries.some(row => row.outcome === "failed"), true);
+      assert.equal(records.entries.some(row => row.outcome === "completed"), true);
+      assert.equal(await page.evaluate(() => window.__batchFiles.filter(file => file.closed).length), 1);
+    },
+  });
+}
+
 async function run() {
   const [simulatorPort, bridgePort] = await Promise.all([freePort(), freePort()]);
   const simulatorOrigin = `http://127.0.0.1:${simulatorPort}`;
@@ -630,6 +1083,7 @@ async function run() {
         mode: scenario.mode || "blob", delayWritable: Boolean(scenario.delayWritable),
         pauseSecondWrite: Boolean(scenario.pauseSecondWrite),
       });
+      if (scenario.batch) await context.addInitScript(batchFilePlatform, scenario.batch);
       const page = await context.newPage();
       page.setDefaultTimeout(12_000);
       const listingRequests = [];
@@ -674,6 +1128,20 @@ async function run() {
               unavailableHidden: document.querySelector("#media-preview-unavailable")?.hidden,
               image: image && { hidden: image.hidden, complete: image.complete,
                 width: image.naturalWidth, height: image.naturalHeight, hasSource: Boolean(image.getAttribute("src")) },
+              foregroundImport: {
+                phase: document.querySelector("#media-auto-panel")?.dataset.phase,
+                operation: document.querySelector("#media-auto-panel")?.dataset.operation,
+                status: document.querySelector("#media-auto-status")?.textContent,
+                reason: document.querySelector("#media-auto-import-reason")?.textContent,
+                startDisabled: document.querySelector("#media-auto-start")?.disabled,
+                pickerCalls: window.__batchPickerCalls,
+                galleryLoadStatus: document.querySelector("#media-summary")?.dataset.loadStatus,
+                thumbnails: Array.from(document.querySelectorAll("#media-list .media-thumbnail"), (thumbnail) => {
+                  const image = thumbnail.querySelector("img");
+                  return { id: thumbnail.dataset.mediaId, loading: thumbnail.classList.contains("loading"),
+                    image: image && { complete: image.complete, width: image.naturalWidth, height: image.naturalHeight } };
+                }),
+              },
             };
           });
           fs.writeFileSync(path.join(RESULTS_DIR, `capture-review-failure-${label}.json`),
@@ -693,7 +1161,9 @@ async function run() {
         try {
           if (await page.locator("#media-date-dialog[open]").count()) await page.keyboard.press("Escape");
           if (await page.locator("#media-preview-dialog[open]").count()) await page.click("#media-preview-close");
+          if (await page.locator("#media-details-dialog[open]").count()) await page.click("#media-details-close");
           await page.evaluate(() => window.__releaseSyntheticWrite?.());
+          await page.evaluate(() => window.__releaseBatchWrite?.());
           if (await page.locator("#control-view:not([hidden])").count()) {
             await page.click("#disconnect-button");
             await page.waitForSelector("#connection-view:not([hidden])");

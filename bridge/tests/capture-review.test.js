@@ -60,6 +60,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
   const saved = [];
   const sandbox = vm.createContext({
     state, requests, feedback, delays, saved, AbortController, Blob, Response,
+    ui: { focusReticle: { hidden: true } },
     URL, Set, Map, mediaLibrary, mediaTransfer,
     mediaIsVideo: mediaLibrary.isVideo,
     FEATURES: {
@@ -85,8 +86,9 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
     resumeLivePolling: () => feedback.push("resume"),
     setOperationState: (message) => feedback.push(message),
     showToast: (message) => feedback.push(message),
-    captureError: (error) => ({ code: error.code, message: error.message }),
+    captureError: (error) => ({ code: error.code, message: error.message, status: error.status, feature: error.feature, engine: error.engine }),
     window: {},
+    mediaHistoryCall: async () => ({ ok: true, ticket: {}, receipt: {}, updated: true }),
     saveMediaBlob: (blob, name) => saved.push({ blob, name }),
     api: async (url, options = {}) => {
       requests.push({ url, method: options.method || "GET", json: options.json, signal: options.signal });
@@ -96,16 +98,17 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
     },
     listing: [OLD_A, OLD_B],
   });
-  const functionNames = [
+  const functionNames = ["adoptCameraStatus",
     "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
     "shutterReleaseUnconfirmed", "bulbControlLocked", "operateShutter", "autofocus", "halfPressShutter",
     "cancelLatestMediaRefresh", "latestMediaFrom", "refreshLatestMedia",
-    "publishLatestMedia", "loadLatestMediaThumbnail", "chooseMediaWritable", "downloadMedia", "cancelMediaDownload",
+    "publishLatestMedia", "loadLatestMediaThumbnail", "chooseMediaWritable", "downloadMedia", "cancelMediaDownload", "cancelMediaBatch",
   ];
   // Load a future recovery entry point only when present. Assertions first prove the
   // observable missing NOT_READY result on the unchanged baseline, not an import error.
   if (/^  function visibleMediaIds\(/m.test(source)) functionNames.push("visibleMediaIds");
   if (/^  function retryLatestMedia\(/m.test(source)) functionNames.push("retryLatestMedia");
+  if (/^  function recordingRecoveryActive\(/m.test(source)) functionNames.push("recordingRecoveryActive");
   vm.runInContext(functionNames.map(productionFunction).join("\n"), sandbox);
   return sandbox;
 }
@@ -674,21 +677,23 @@ test("download owner preserves a newer pending destination when the old picker c
   const newDestination = deferred();
   const writers = [syntheticWriter(), syntheticWriter()];
   let pickerCalls = 0;
+  let writerCalls = 0;
   let clearedRenders = 0;
   subject.clearScheduledMediaTransferRender = () => { clearedRenders += 1; };
   subject.window.showSaveFilePicker = async () => {
     const index = pickerCalls++;
     return { createWritable: async () => {
+      writerCalls += 1;
       await [oldDestination, newDestination][index].promise;
       return writers[index];
     } };
   };
   subject.api = async (url) => { subject.requests.push({ url, method: "GET" }); return originalResponse(); };
   const oldDownload = subject.downloadMedia({ ...OLD_A, sizeBytes: 0 });
-  await eventually(() => pickerCalls === 1, "the old picker");
+  await eventually(() => writerCalls === 1, "the old destination creation");
   replaceDownloadSession(subject);
   const newDownload = subject.downloadMedia({ ...NEW_C, sizeBytes: 0 });
-  await eventually(() => pickerCalls === 2, "the replacement picker");
+  await eventually(() => writerCalls === 2, "the replacement destination creation");
   const newOwner = subject.state.mediaDownloadOwner;
   const feedback = subject.feedback.slice();
   oldDestination.resolve();
@@ -819,3 +824,1142 @@ test("download owner retains normal active-transfer cancellation and discards pa
   assert.equal(subject.state.mediaDownload, null);
   assert.equal(subject.state.mediaDownloadOwner, null);
 });
+
+// Recording review uses only observations already loaded before STOP.
+const OLD_VIDEO = { id: "old-video", name: "OLD.MP4", kind: "VIDEO", date: "2099-01-01" };
+const NEW_VIDEO = { id: "new-video", name: "NEW.MP4", kind: "VIDEO", date: "2026-01-01" };
+function recordingSubject({ stop = { recording: false } } = {}) {
+  const s = context({ loaded: [OLD_A, OLD_VIDEO], latest: OLD_A });
+  s.state.captureMode = "video"; s.state.status.recording = true;
+  const originalApi = s.api;
+  s.api = async (url, options = {}) => {
+    if (url.endsWith("/recording/stop")) {
+      s.requests.push({ url, method: "POST" });
+      if (stop instanceof Error) throw stop;
+      return stop;
+    }
+    return originalApi(url, options);
+  };
+  return s;
+}
+test("confirmed recording stop reviews only a newly visible video", async () => {
+  const s = recordingSubject(); s.listing = [NEW_C, OLD_VIDEO, NEW_VIDEO];
+  await captureAndReview(s);
+  assert.equal(s.state.latestMediaItem?.id, NEW_VIDEO.id);
+  assert.equal(s.state.latestMediaReviewStatus, "READY");
+  assert.equal(writes(s).length, 1); assert.match(writes(s)[0].url, /recording\/stop$/);
+});
+test("recording retry excludes old video and does not replay REC", async () => {
+  const s = recordingSubject(); s.listing = [NEW_C, OLD_VIDEO]; await captureAndReview(s);
+  assert.equal(s.state.latestMediaReviewStatus, "NOT_READY");
+  assert.equal(listingRequests(s).length, 4);
+  s.listing = [NEW_C, OLD_VIDEO, NEW_VIDEO]; await s.retryLatestMedia();
+  assert.equal(s.state.latestMediaItem?.id, NEW_VIDEO.id); assert.equal(writes(s).length, 1);
+});
+for (const stop of [{}, { recording: null }, { recording: true }, new Error("STOP response lost")]) {
+  test(`unconfirmed recording stop does not read new media: ${JSON.stringify(stop)}`, async () => {
+    const s = recordingSubject({ stop }); s.listing = [NEW_VIDEO]; await captureAndReview(s);
+    assert.equal(listingRequests(s).length, 0); assert.equal(writes(s).length, 1);
+    assert.notEqual(s.state.latestMediaReviewStatus, "READY");
+  });
+}
+
+test("recording start does not start a post-stop listing", async () => {
+  const s = recordingSubject(); s.state.status.recording = false;
+  s.api = async (url) => { s.requests.push({url, method: "POST"}); assert.match(url, /recording\/start$/); return {recording:true}; };
+  await captureAndReview(s); assert.equal(writes(s).length, 1); assert.equal(listingRequests(s).length, 0);
+});
+test("lost STOP cannot be mistaken for acknowledged still-capture readback recovery", async () => {
+  const error = new Error("ambiguous STOP"); error.code = "CAPTURE_STATUS_READBACK_FAILED";
+  const s = recordingSubject({stop:error}); await captureAndReview(s);
+  assert.equal(listingRequests(s).length, 0); assert.equal(writes(s).length, 1);
+});
+test("confirmed STOP without media capability sends no listing", async () => {
+  const s = recordingSubject(); s.featureSupported = feature => feature !== "MEDIA_BROWSER";
+  await captureAndReview(s); assert.equal(listingRequests(s).length, 0); assert.equal(writes(s).length, 1);
+});
+test("video retry while media is busy sends neither listing nor REC", async () => {
+  const s = recordingSubject(); s.listing = [OLD_VIDEO]; await captureAndReview(s);
+  const reads = listingRequests(s).length; s.state.mediaDownloadPreparing = true;
+  await s.retryLatestMedia(); assert.equal(listingRequests(s).length, reads); assert.equal(writes(s).length, 1);
+});
+test("video review excludes previously observed candidates outside the current gallery", async () => {
+  const s = recordingSubject(); s.state.latestMediaCandidates = {sessionId:s.state.session.id, ids:new Set([NEW_VIDEO.id])};
+  s.listing = [NEW_VIDEO, NEW_C]; await captureAndReview(s);
+  assert.equal(s.state.latestMediaReviewStatus, "NOT_READY"); assert.equal(s.state.latestMediaItem.id, OLD_A.id);
+});
+test("new still capture retires a pending video review and restores photo selection", async () => {
+  const s = recordingSubject(); const held = deferred(); const api = s.api; let heldOnce = false;
+  s.api = async (url, options) => {
+    if (url.endsWith("/media?limit=8") && !heldOnce) { heldOnce=true; return held.promise; }
+    return api(url,options);
+  };
+  await s.operateShutter(); const oldReview = s.state.latestMediaRefreshPromise;
+  s.state.captureMode = "photo"; s.listing = [NEW_VIDEO, NEW_C]; await captureAndReview(s);
+  assert.equal(s.state.latestMediaItem.id, NEW_C.id); assert.equal(s.state.latestMediaReviewKind, "photo");
+  held.resolve({items:[NEW_VIDEO]}); await oldReview;
+  assert.equal(s.state.latestMediaItem.id, NEW_C.id); assert.equal(writes(s).length, 2);
+});
+test("recording STOP retires an old pending still review before the stop response", async () => {
+  const s = context(); const held = deferred(); const api = s.api; let first=true;
+  s.api = async (url,options) => {
+    if (url.endsWith("/recording/stop")) { s.requests.push({url,method:"POST"}); return {recording:false}; }
+    if (url.endsWith("/media?limit=8") && first) { first=false; return held.promise; }
+    return api(url,options);
+  };
+  await s.operateShutter(); const oldReview=s.state.latestMediaRefreshPromise;
+  s.state.captureMode="video";s.state.status.recording=true;s.listing=[NEW_C,NEW_VIDEO];
+  await captureAndReview(s); held.resolve({items:[NEW_C]});await oldReview;
+  assert.equal(s.state.latestMediaItem.id,NEW_VIDEO.id);assert.equal(s.state.latestMediaReviewKind,"video");
+});
+for (const failure of [false,true]) {
+  test(`retired STOP ${failure ? "failure" : "success"} cannot replace reused-ID session state`, async () => {
+    const s=recordingSubject(); const held=deferred(); s.api=async url=>{s.requests.push({url,method:"POST"});return held.promise;};
+    const run=s.operateShutter();s.state.session={id:s.state.session.id};s.state.status={owner:"B"};s.state.busy=true;
+    if(failure) held.reject(new Error("old STOP"));else held.resolve({recording:false});await run;
+    assert.equal(s.state.status.owner,"B");assert.equal(s.state.busy,true);assert.equal(listingRequests(s).length,0);
+  });
+}
+test("video review uses video-specific retry and result messages", async () => {
+  const s=recordingSubject(); installLatestMediaRenderer(s);s.listing=[OLD_VIDEO];await captureAndReview(s);
+  assert.equal(s.ui.latestMediaReviewStatus.textContent,"latestVideoNotReady");
+  s.listing=[NEW_VIDEO];await s.retryLatestMedia();
+  assert.equal(s.ui.latestMediaReviewStatus.textContent,"latestVideoFound");
+});
+
+for (const status of [{recording:false}, {recording:null}, {}]) {
+  test(`Start does not claim recording when returned status is not true: ${JSON.stringify(status)}`, async () => {
+    const s=recordingSubject();s.state.status.recording=false;
+    s.api=async url=>{s.requests.push({url,method:'POST'});return status;};
+    await s.operateShutter();
+    assert.equal(s.feedback.includes('recordingStarted'),false);
+  });
+}
+for (const wasRecording of [false,true]) {
+  test(`acknowledged ${wasRecording?'Stop':'Start'} with failed status keeps only deliberate Stop available`, async () => {
+    const s=recordingSubject();s.state.status.recording=wasRecording;
+    const error=new Error('status unavailable after ACK');error.code='RECORDING_STATUS_READBACK_FAILED';error.status=502;
+    let first=true;s.api=async url=>{s.requests.push({url,method:'POST'});if(first){first=false;throw error;}return {recording:false};};
+    await s.operateShutter();
+    assert.equal(s.state.status.recording,wasRecording,'ACK evidence must not rewrite camera status');
+    assert.equal(writes(s).length,1,'No automatic replay');
+    await s.operateShutter();
+    assert.match(writes(s)[1].url,/recording\/stop$/);
+    assert.equal(s.state.recordingRecovery,null);
+  });
+}
+
+function installRecordingRefresh(s) {
+  s.clampFps=value=>value;s.syncLiveMagnificationFromCapabilities=()=>{};
+  vm.runInContext(productionFunction('refreshSession'),s);
+}
+for (const direction of ['start','stop']) {
+  test(`read-only current status resolves acknowledged ${direction} without replay`,async()=>{
+    const s=recordingSubject();installRecordingRefresh(s);s.state.status.recording=direction==='stop';
+    const error=new Error('status after ACK');error.code='RECORDING_STATUS_READBACK_FAILED';error.status=502;
+    const original=s.api;
+    s.api=async(url,options={})=>{
+      if(url.includes('/recording/')){s.requests.push({url,method:'POST'});throw error;}
+      if(url.endsWith('/status')){s.requests.push({url,method:'GET'});return {recording:direction==='start'};}
+      if(url.endsWith('/info')||url.endsWith('/capabilities')){s.requests.push({url,method:'GET'});return {};}
+      return original(url,options);
+    };
+    await s.operateShutter();assert.ok(s.state.recordingRecovery);
+    s.listing=[NEW_VIDEO];await s.refreshSession();if(s.state.latestMediaRefreshPromise)await s.state.latestMediaRefreshPromise;
+    assert.equal(s.state.recordingRecovery,null);assert.equal(writes(s).length,1);
+    assert.equal(s.state.status.recording,direction==='start');
+    if(direction==='stop')assert.equal(s.state.latestMediaItem.id,NEW_VIDEO.id);
+  });
+}
+test('unknown read-only recording status retains recovery and warning',async()=>{
+  const s=recordingSubject();installRecordingRefresh(s);
+  const owner={session:s.state.session,direction:'start'};s.state.recordingRecovery=owner;
+  s.api=async url=>{s.requests.push({url,method:'GET'});return {recording:null};};
+  await s.refreshSession();assert.equal(s.state.recordingRecovery,owner);assert.equal(writes(s).length,0);
+  assert.equal(s.feedback.at(-1),'recordingStatusUnconfirmed');
+});
+for(const replacement of [false,true]){
+  test(`old refresh cannot clear newer recovery (${replacement?'new session':'same session new command'})`,async()=>{
+    const s=recordingSubject();installRecordingRefresh(s);const held=deferred();
+    s.state.recordingRecovery={session:s.state.session,direction:'start'};
+    s.api=async url=>url.endsWith('/status')?held.promise:{};
+    const pending=s.refreshSession();
+    if(replacement)s.state.session={id:s.state.session.id};else s.state.refreshGeneration++;
+    const newer={session:s.state.session,direction:'stop'};s.state.recordingRecovery=newer;s.state.status={owner:'new'};
+    held.resolve({recording:false});await pending;
+    assert.equal(s.state.recordingRecovery,newer);assert.equal(s.state.status.owner,'new');
+  });
+}
+for(const code of ['CCAPI_UNREACHABLE','CCAPI_REQUEST_FAILED']){
+ test(`unacknowledged REC error is not classified as ACK: ${code}`,async()=>{
+  const s=recordingSubject();s.state.status.recording=false;const e=new Error('command failed');e.code=code;
+  s.api=async url=>{s.requests.push({url,method:'POST'});throw e;};await s.operateShutter();
+  assert.equal(s.state.recordingRecovery, undefined);
+  assert.equal(s.state.status.recording,false);assert.equal(writes(s).length,1);
+ });
+}
+
+test('pending acknowledged recording keeps Stop admitted after capability disappears',async()=>{
+ const s=recordingSubject();s.state.status.recording=false;s.state.recordingRecovery={session:s.state.session,direction:'start'};
+ s.featureSupported=()=>false;
+ await s.operateShutter();assert.equal(writes(s).length,1);assert.match(writes(s)[0].url,/recording\/stop$/);
+});
+test('a previous-session recovery token never changes a new session Start direction',async()=>{
+ const s=recordingSubject();s.state.status.recording=false;s.state.recordingRecovery={session:{id:s.state.session.id},direction:'start'};
+ s.api=async url=>{s.requests.push({url,method:'POST'});return {recording:true};};
+ await s.operateShutter();assert.match(writes(s)[0].url,/recording\/start$/);assert.equal(s.state.recordingRecovery,null);
+});
+test('failed read-only refresh retains the exact pending recording owner',async()=>{
+ const s=recordingSubject();installRecordingRefresh(s);const pending={session:s.state.session,direction:'stop'};s.state.recordingRecovery=pending;
+ s.api=async()=>{throw new Error('still unavailable');};await s.refreshSession();assert.equal(s.state.recordingRecovery,pending);
+});
+
+for (const wasRecording of [false, true]) {
+  for (const outcome of ['success', 'ack-readback-failure']) {
+    test(`Refresh during ${wasRecording ? 'Stop' : 'Start'} ${outcome} sends no premature status read`, async () => {
+      const s = recordingSubject(); installRecordingRefresh(s);
+      s.state.status.recording = wasRecording;
+      const held = deferred();
+      s.api = async (url, options = {}) => {
+        s.requests.push({url, method: options.method || 'GET'});
+        if (url.includes('/recording/')) return held.promise;
+        if (url.endsWith('/status')) return {recording: wasRecording};
+        return {};
+      };
+      const command = s.operateShutter();
+      assert.equal(s.state.busy, true);
+      assert.equal(await s.refreshSession(), false);
+      assert.equal(s.requests.length, 1, 'Refresh must not observe a command in flight');
+      if (outcome === 'success') held.resolve({recording: !wasRecording});
+      else {
+        const error = new Error('ACK readback failed'); error.code = 'RECORDING_STATUS_READBACK_FAILED'; error.status = 502;
+        held.reject(error);
+      }
+      await command;
+      if (outcome === 'success') assert.equal(s.state.status.recording, !wasRecording);
+      else assert.equal(s.state.recordingRecovery.direction, wasRecording ? 'stop' : 'start');
+      assert.equal(writes(s).length, 1);
+    });
+  }
+}
+
+test('repeated pending Stop retains its original seen-ID boundary after gallery changes', async () => {
+  const s = recordingSubject(); installRecordingRefresh(s);
+  const original = s.api;
+  const error = new Error('ACK readback failed'); error.code = 'RECORDING_STATUS_READBACK_FAILED'; error.status = 502;
+  s.api = async (url, options = {}) => {
+    if (url.includes('/recording/')) { s.requests.push({url, method:'POST'}); throw error; }
+    if (url.endsWith('/status')) return {recording:false};
+    if (url.endsWith('/info') || url.endsWith('/capabilities')) return {};
+    return original(url, options);
+  };
+  await s.operateShutter();
+  const attempt = s.state.recordingRecovery.reviewAttempt;
+  s.state.media = [NEW_VIDEO]; s.listing = [NEW_VIDEO];
+  await s.operateShutter();
+  assert.equal(s.state.recordingRecovery.reviewAttempt, attempt);
+  await s.refreshSession();
+  if (s.state.latestMediaRefreshPromise) await s.state.latestMediaRefreshPromise;
+  assert.equal(s.state.latestMediaItem.id, NEW_VIDEO.id);
+  assert.equal(writes(s).length, 2);
+});
+
+test('Start recovery returning false reports not-confirmed instead of Ready', async () => {
+  const s = recordingSubject(); installRecordingRefresh(s);
+  s.state.recordingRecovery = {session:s.state.session, direction:'start'};
+  s.api = async () => ({recording:false});
+  await s.refreshSession();
+  assert.equal(s.state.recordingRecovery, null);
+  assert.equal(s.feedback.at(-1), 'recordingStartUnconfirmed');
+});
+
+for (const newerRecording of [true, false, null]) {
+  test(`latest concurrent Refresh owns ${newerRecording} even without a new command`, async () => {
+    const s = recordingSubject(); installRecordingRefresh(s);
+    s.state.recordingRecovery = {session:s.state.session, direction:'start'};
+    const held = deferred(); let statusReads = 0;
+    s.api = async url => url.endsWith('/status')
+      ? (++statusReads === 1 ? held.promise : {recording:newerRecording, owner:'new'}) : {};
+    const old = s.refreshSession();
+    await s.refreshSession();
+    const recovery = s.state.recordingRecovery;
+    held.resolve({recording:!newerRecording, owner:'old'}); await old;
+    assert.equal(s.state.status.owner, 'new');
+    assert.equal(s.state.recordingRecovery, recovery);
+  });
+}
+
+for (const code of ['RECORDING_COMMAND_UNCONFIRMED', 'NETWORK_ERROR']) {
+  test(`applied REC Start with lost response retains deliberate Stop after stale refresh: ${code}`, async () => {
+    const s = recordingSubject(); installRecordingRefresh(s);
+    s.state.status.recording = false;
+    // This control state is deliberately separate from the App/Bridge's last ACK cache.
+    let peerRecording = false;
+    s.api = async (url, options = {}) => {
+      s.requests.push({ url, method: options.method || 'GET' });
+      if (url.endsWith('/recording/start')) {
+        peerRecording = true;
+        const error = new Error('Synthetic response lost after application'); error.code = code; error.status = code === 'NETWORK_ERROR' ? 0 : 502;
+        error.feature = 'VIDEO_RECORDING'; error.engine = 'ccapi';
+        throw error;
+      }
+      if (url.endsWith('/recording/stop')) { peerRecording = false; return { recording: false }; }
+      if (url.endsWith('/status')) return { recording: false };
+      return {};
+    };
+    await s.operateShutter();
+    assert.equal(peerRecording, true, 'The independent synthetic peer applied Start before response loss');
+    assert.equal(writes(s).length, 1, 'No automatic command replay');
+    await s.refreshSession();
+    assert.equal(peerRecording, true, 'A stale ACK cache cannot prove the peer stopped');
+    assert.equal(writes(s).length, 1, 'Refresh remains read-only');
+    await s.operateShutter();
+    assert.deepEqual(writes(s).map(request => request.url.split('/').at(-1)), ['start', 'stop']);
+    assert.equal(peerRecording, false, 'The next deliberate operation must Stop, never repeat Start');
+  });
+}
+
+for (const status of [401, 403, 503]) {
+  test(`explicit REC HTTP rejection ${status} does not create unknown-command evidence`, async () => {
+    const s = recordingSubject(); s.state.status.recording = false;
+    const error = new Error('Synthetic explicit rejection'); error.code = 'HTTP_ERROR'; error.status = status;
+    s.api = async url => { s.requests.push({url, method:'POST'}); throw error; };
+    await s.operateShutter();
+    assert.equal(s.state.recordingRecovery, undefined);
+    assert.equal(s.state.status.recording, false);
+    assert.equal(writes(s).length, 1);
+  });
+}
+for (const recording of [false, true, null]) {
+  test(`unknown REC result survives cached status ${recording} until explicit Stop ACK`, async () => {
+    const s = recordingSubject(); installRecordingRefresh(s);
+    const recovery = {session:s.state.session, direction:'start', acknowledged:false};
+    s.state.recordingRecovery = recovery;
+    s.api = async (url, options = {}) => {
+      s.requests.push({url, method:options.method || 'GET'});
+      if (url.endsWith('/recording/stop')) return {recording:false};
+      if (url.endsWith('/status')) return {recording};
+      return {};
+    };
+    await s.refreshSession();
+    assert.equal(s.state.recordingRecovery, recovery);
+    assert.equal(writes(s).length, 0);
+    await s.operateShutter();
+    assert.equal(s.state.recordingRecovery, null);
+    assert.equal(writes(s).length, 1);
+    assert.match(writes(s)[0].url, /recording\/stop$/);
+  });
+}
+
+for (const reason of ['unknown', 'in-flight', 'confirmed-active', 'idle', 'retired-owner']) {
+  test(`connection retirement preserves only previous-camera warning: ${reason}`, () => {
+    const s = recordingSubject(); s.state.status.recording = reason === 'confirmed-active';
+    if (reason === 'unknown') s.state.recordingRecovery = {session:s.state.session, acknowledged:false};
+    if (reason === 'in-flight') s.state.recordingCommandOwner = {session:s.state.session};
+    if (reason === 'retired-owner') s.state.recordingRecovery = {session:{id:s.state.session.id}, acknowledged:false};
+    s.state.operatorConfirmedFeatures = new Set();
+    for (const name of ['stopLiveLoop','stopLocalVideo','cancelEventLoop','cancelMediaDownload','cancelMediaUpload',
+      'clearScheduledMediaTransferRender','clearMediaThumbnails','cancelLatestMediaRefresh','closeMediaPreview',
+      'closeMediaDetails','releaseObjectUrl','clearBulbTimer','renderAvailability','renderHealth']) s[name] = () => {};
+    for (const name of ['connectionView','controlView','tokenInput','ccapiPasswordInput']) s.ui[name] = {};
+    vm.runInContext(productionFunction('resetSession'), s);
+    s.resetSession();
+    assert.equal(Boolean(s.state.shutterDisconnectWarning), ['unknown','in-flight','confirmed-active'].includes(reason));
+    assert.equal(s.state.recordingRecovery, null);
+    assert.equal(s.state.recordingCommandOwner, null);
+    assert.equal(s.state.session, null);
+    assert.equal(writes(s).length, 0, 'Retirement never emits an automatic Stop');
+    s.state.session = {id:'replacement'}; s.state.status = {recording:false};
+    assert.equal(s.recordingRecoveryActive(), false, 'Old Stop responsibility cannot target the replacement camera');
+  });
+}
+
+test('rejected explicit Stop retains the prior unknown-command owner and original review baseline', async () => {
+  const s = recordingSubject();
+  const attempt = {session:s.state.session, sessionId:s.state.session.id, kind:'video', knownIds:new Set(['original'])};
+  const recovery = {session:s.state.session, direction:'stop', acknowledged:false, reviewAttempt:attempt};
+  s.state.recordingRecovery = recovery;
+  const error = new Error('Synthetic Stop rejection'); error.code = 'CCAPI_HTTP_ERROR'; error.status = 502;
+  s.api = async url => {s.requests.push({url, method:'POST'}); throw error;};
+  await s.operateShutter();
+  assert.equal(s.state.recordingRecovery, recovery);
+  assert.equal(s.state.recordingRecovery.reviewAttempt, attempt);
+  assert.deepEqual(writes(s).map(request => request.url.split('/').at(-1)), ['stop']);
+});
+for (const response of ['lost', 'acknowledged']) {
+  test(`old Start ${response} cannot publish uncertainty into reused-ID replacement session`, async () => {
+    const s = recordingSubject(); s.state.status.recording = false;
+    const held = deferred(); s.api = async url => {s.requests.push({url, method:'POST'}); return held.promise;};
+    const pending = s.operateShutter();
+    const replacement = {id:s.state.session.id};
+    s.state.session = replacement;
+    const current = {session:replacement, direction:'stop', acknowledged:false};
+    s.state.recordingRecovery = current; s.state.status = {owner:'replacement'}; s.state.busy = true;
+    if (response === 'lost') {const error = new Error('old response lost'); error.code = 'NETWORK_ERROR'; held.reject(error);}
+    else held.resolve({recording:true});
+    await pending;
+    assert.equal(s.state.recordingRecovery, current);
+    assert.equal(s.state.status.owner, 'replacement');
+    assert.equal(s.state.busy, true);
+    assert.equal(writes(s).length, 1);
+  });
+}
+
+function installProductionApi(s) {
+  s.Headers = Headers;
+  const start = source.indexOf("  class ApiError extends Error {");
+  const end = source.indexOf("  function resolvedLanguage", start);
+  s.renderDiagnostics = () => {};
+  vm.runInContext(source.slice(start, end) + productionFunction('api') + productionFunction('captureError'), s);
+}
+for (const bodyFailure of ['interrupted', 'malformed', 'missing-envelope', 'code-only', 'wrong-message', 'empty-message', 'wrong-code', 'empty-code']) {
+  test(`Bridge 502 ${bodyFailure} body preserves uncertain REC through the production API`, async () => {
+    const s = recordingSubject(); installProductionApi(s); installRecordingRefresh(s);
+    s.state.status.recording = false; let peerRecording = false;
+    s.fetch = async (url, options) => {
+      s.requests.push({url, method:options.method});
+      if (url.endsWith('/recording/start')) {
+        peerRecording = true;
+        return {ok:false, status:502, statusText:'Bad Gateway', json:async () => {
+          if (bodyFailure === 'missing-envelope') return {};
+          if (bodyFailure === 'code-only') return {error:{code:'CCAPI_HTTP_ERROR'}};
+          if (bodyFailure === 'wrong-message') return {error:{code:'CCAPI_HTTP_ERROR',message:7}};
+          if (bodyFailure === 'empty-message') return {error:{code:'CCAPI_HTTP_ERROR',message:'  '}};
+          if (bodyFailure === 'wrong-code') return {error:{code:7,message:'Rejected'}};
+          if (bodyFailure === 'empty-code') return {error:{code:'  ',message:'Rejected'}};
+          throw bodyFailure === 'interrupted' ? new TypeError('stream interrupted') : new SyntaxError('incomplete JSON');
+        }};
+      }
+      if (url.endsWith('/recording/stop')) {peerRecording = false; return Response.json({recording:false});}
+      if (url.endsWith('/status')) return Response.json({recording:false});
+      return Response.json({});
+    };
+    await s.operateShutter();
+    assert.equal(peerRecording, true);
+    assert.equal(s.state.recordingRecovery?.acknowledged, false);
+    await s.refreshSession(); await s.operateShutter();
+    assert.deepEqual(writes(s).map(r => r.url.split('/').at(-1)), ['start','stop']);
+    assert.equal(peerRecording, false);
+  });
+}
+for (const fields of [
+  {code:'CCAPI_UNREACHABLE',status:502,feature:'VIDEO_RECORDING',engine:'ccapi'},
+  {code:'CCAPI_RESPONSE_TOO_LARGE',status:502,feature:'VIDEO_RECORDING',engine:'ccapi'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:400,feature:'VIDEO_RECORDING',engine:'ccapi'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:502,feature:'STILL_CAPTURE',engine:'ccapi'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:502,feature:'VIDEO_RECORDING',engine:'simulator'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:502},
+  {code:' RECORDING_COMMAND_UNCONFIRMED ',status:502,feature:'VIDEO_RECORDING',engine:'ccapi'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:502,feature:' VIDEO_RECORDING ',engine:'ccapi'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:502,feature:'VIDEO_RECORDING',engine:' ccapi '},
+  {code:' RECORDING_STATUS_READBACK_FAILED ',status:502},
+]) {
+  test(`preflight or near-match error does not claim an attempted REC: ${JSON.stringify(fields)}`, async () => {
+    const s = recordingSubject(); installProductionApi(s); s.state.status.recording = false;
+    s.fetch = async (url, options) => {
+      s.requests.push({url,method:options.method});
+      // This Bridge error is returned before forwarding any camera mutation.
+      return Response.json({error:{message:'Complete synthetic preflight/rejection',...fields}}, {status:fields.status});
+    };
+    await s.operateShutter();
+    assert.equal(s.state.recordingRecovery, undefined);
+    assert.equal(s.state.status.recording, false);
+  });
+}
+
+for (const status of [401, 403, 503]) {
+  test(`received HTTP ${status} rejection survives its unreadable body`, async () => {
+    const s = recordingSubject(); installProductionApi(s); s.state.status.recording = false;
+    s.fetch = async (url, options) => {
+      s.requests.push({url,method:options.method});
+      return {ok:false,status,statusText:'Rejected',json:async () => {throw new TypeError('body interrupted');}};
+    };
+    await s.operateShutter();
+    assert.equal(s.state.recordingRecovery, undefined);
+    assert.equal(s.state.status.recording, false);
+    assert.equal(writes(s).length, 1);
+  });
+}
+test('complete Bridge camera HTTP rejection retains known rejection through production API', async () => {
+  const s = recordingSubject(); installProductionApi(s); s.state.status.recording = false;
+  s.fetch = async (url, options) => {
+    s.requests.push({url,method:options.method});
+    return Response.json({error:{code:'CCAPI_HTTP_ERROR',message:'Camera explicitly rejected REC',engine:'ccapi'}},{status:502});
+  };
+  await s.operateShutter();
+  assert.equal(s.state.recordingRecovery, undefined);
+  assert.equal(s.state.status.recording, false);
+  assert.equal(writes(s).length, 1);
+});
+
+for (const status of [401, 403, 503]) {
+  for (const recording of [false, true]) {
+    test(`non-502 ACK-like error stays rejected: HTTP ${status}, recording=${recording}`, async () => {
+      const s = recordingSubject(); installProductionApi(s); s.state.status.recording = recording;
+      s.fetch = async (url, options) => {
+        s.requests.push({url,method:options.method});
+        return Response.json({error:{code:'RECORDING_STATUS_READBACK_FAILED',message:'Explicit rejection'}},{status});
+      };
+      await s.operateShutter();
+      assert.equal(s.state.recordingRecovery, undefined);
+      assert.equal(s.state.status.recording, recording);
+      assert.equal(writes(s).length, 1);
+      assert.equal(listingRequests(s).length, 0);
+      assert.equal(s.feedback.includes('recordingStatusUnconfirmed'), false);
+    });
+  }
+}
+
+for (const body of [[], true, false, 42, 'invalid', null,
+  {recording:0}, {recording:1}, {recording:2}, {recording:'false'}, {recording:'true'},
+  {recording:[]}, {recording:{}}]) {
+  for (const recording of [false,true]) {
+  test(`malformed successful REC shape preserves explicit Stop (prior=${recording}): ${JSON.stringify(body)}`, async () => {
+    const s = recordingSubject(); installProductionApi(s); installRecordingRefresh(s);
+    s.state.status.recording = recording; let peerRecording = recording; let commands = 0;
+    s.fetch = async (url, options) => {
+      s.requests.push({url,method:options.method});
+      if (url.includes('/recording/')) {
+        commands++; peerRecording=url.endsWith('/start');
+        return Response.json(commands === 1 ? body : {recording:false});
+      }
+      if (url.endsWith('/status')) return Response.json({recording:false});
+      return Response.json({});
+    };
+    await s.operateShutter();
+    assert.equal(peerRecording,!recording);
+    assert.equal(s.state.recordingRecovery?.acknowledged,false);
+    await s.refreshSession();
+    assert.equal(s.state.recordingRecovery?.acknowledged,false);
+    assert.equal(writes(s).length,1);
+    await s.operateShutter();
+    assert.deepEqual(writes(s).map(r=>r.url.split('/').at(-1)),[recording?'stop':'start','stop']);
+    assert.equal(peerRecording,false);
+  });
+}
+}
+
+test('ACK-like REC error during an active Bulb stop cannot acquire a recording owner', async () => {
+  const s = recordingSubject(); installProductionApi(s);
+  s.bulbControlLocked = () => true;
+  s.fetch = async (url, options) => {
+    s.requests.push({url,method:options.method});
+    if (url.endsWith('/bulb/stop')) return Response.json({error:{
+      code:'RECORDING_STATUS_READBACK_FAILED',message:'Unrelated ACK-like error',
+    }},{status:502});
+    return Response.json({shutterReleaseUnconfirmed:true,bulbExposureActive:true});
+  };
+  await s.operateShutter();
+  assert.equal(s.state.recordingRecovery, undefined);
+  assert.equal(s.state.shutterReleaseUnconfirmed, true);
+  assert.equal(writes(s).length, 1);
+  assert.match(writes(s)[0].url, /bulb\/stop$/);
+});
+
+for (const body of [{}, {recording:null}, {recording:true}, {recording:false}]) {
+  test(`valid nullable REC object keeps the existing ACK contract: ${JSON.stringify(body)}`, async () => {
+    const s = recordingSubject(); installProductionApi(s); s.state.status.recording = false;
+    s.fetch = async (url, options) => {s.requests.push({url,method:options.method}); return Response.json(body);};
+    await s.operateShutter();
+    if (typeof body.recording === 'boolean') assert.equal(s.state.recordingRecovery,null);
+    else {
+      assert.ok(s.state.recordingRecovery, 'Nullable success still retains ACK/readback recovery');
+      assert.equal(s.state.recordingRecovery.session,s.state.session);
+      assert.equal(s.state.recordingRecovery.direction,'start');
+      assert.notEqual(s.state.recordingRecovery.acknowledged,false);
+    }
+    assert.equal(writes(s).length,1);
+    assert.equal(listingRequests(s).length,0);
+  });
+}
+
+for (const recording of [0,1,'false',[],{}]) {
+  for (const acknowledged of [false,true]) {
+    test(`invalid status recording cannot retire recovery (${acknowledged}): ${JSON.stringify(recording)}`, async () => {
+      const s=recordingSubject(); installRecordingRefresh(s);
+      const recovery={session:s.state.session,direction:'start',...(acknowledged?{}:{acknowledged:false})};
+      s.state.recordingRecovery=recovery;
+      s.api=async(url,options={})=>{
+        s.requests.push({url,method:options.method||'GET'});
+        if(url.endsWith('/recording/stop'))return {recording:false};
+        if(url.endsWith('/status'))return {recording};
+        return {};
+      };
+      await s.refreshSession();
+      assert.equal(s.state.recordingRecovery,recovery);
+      assert.equal(writes(s).length,0);
+      await s.operateShutter();
+      assert.deepEqual(writes(s).map(r=>r.url.split('/').at(-1)),['stop']);
+      assert.equal(s.state.recordingRecovery,null);
+    });
+  }
+}
+
+test("accepted shutter status admitted before Live View Stop revokes its legacy proof", async () => {
+  const s = context();
+  s.state.liveActive = true;
+  s.state.liveViewStopRevision = 1;
+  s.state.liveViewStopOwner = { session: s.state.session, confirmedStart: true };
+  s.featureSupported = feature => feature !== "MEDIA_BROWSER" && feature !== "MEDIA_THUMBNAIL";
+  s.stopLiveLoop = () => { s.state.liveActive = false; };
+  s.renderLiveState = () => {};
+  vm.runInContext(["stopLiveView", "liveViewStopRequired"].map(productionFunction).join("\n"), s);
+  const captureReply = deferred(), stopReply = deferred();
+  s.api = async (url, options) => {
+    s.requests.push({ url, method: options?.method || "GET" });
+    if (url.endsWith("/capture/still")) return captureReply.promise;
+    if (url.endsWith("/liveview/stop")) return stopReply.promise;
+    assert.fail(`Unexpected request ${url}`);
+  };
+  const capture = s.operateShutter();
+  const stop = s.stopLiveView();
+  captureReply.resolve({ mode: "Manual", recording: false, liveViewStopUnconfirmed: true });
+  await capture;
+  assert.equal(s.state.liveViewStopOwner.stopUnconfirmed, true,
+    "The real shutter response remains accepted across Stop's interaction generation");
+  stopReply.resolve({ active: false });
+  assert.equal(await stop, false);
+  assert.equal(s.liveViewStopRequired(), true);
+  assert.deepEqual(s.requests.map(request => request.url.split("/").slice(-2).join("/")),
+    ["capture/still", "liveview/stop"]);
+});
+
+// Cross-platform vectors compare evidence, never force native enum spellings.
+const deliveryContractBytes = fs.readFileSync(path.join(__dirname, "../../contracts/media-delivery/v1/outcome-vectors.json"));
+const deliveryContract = JSON.parse(deliveryContractBytes);
+const deliveryVector = (id) => {
+  const vector = deliveryContract.vectors.find((entry) => entry.id === id);
+  assert.ok(vector, `Missing delivery vector ${id}`);
+  return vector.expected;
+};
+
+test("shared delivery vectors remain bounded, synthetic and explicit about evidence", () => {
+  assert.equal(deliveryContract.version, 1);
+  assert.equal(deliveryContract.limits.maximumVectors, 32);
+  assert.equal(deliveryContract.limits.maximumEventsPerVector, 12);
+  assert.equal(deliveryContract.limits.maximumRows, 100);
+  assert.equal(deliveryContract.limits.maximumJSONBytes, 32768);
+  assert.ok(deliveryContractBytes.length <= deliveryContract.limits.maximumJSONBytes);
+  assert.ok(deliveryContract.vectors.length <= deliveryContract.limits.maximumVectors);
+  assert.equal(new Set(deliveryContract.vectors.map((entry) => entry.id)).size, deliveryContract.vectors.length);
+  for (const vector of deliveryContract.vectors) {
+    assert.match(vector.id, /^[a-z0-9_]{1,64}$/);
+    assert.ok(vector.events.length > 0 && vector.events.length <= deliveryContract.limits.maximumEventsPerVector);
+    assert.equal(typeof vector.expected.observation, "string");
+    assert.equal(typeof vector.expected.checkpoint, "string");
+    assert.equal(typeof vector.expected.continuation, "string");
+  }
+  assert.equal(deliveryContract.invariants.cloudSyncConfirmed, false);
+  assert.equal(deliveryContract.invariants.automaticResumeOnRead, false);
+  assert.equal(deliveryContract.invariants.persistDestinationLocator, false);
+  assert.equal(deliveryVector("ios_picker_full").perFileMappingConfirmed, false);
+  assert.equal(deliveryVector("ios_picker_full").saveConfirmed, false);
+});
+
+for (const route of ["blob", "writer"]) {
+  test(`delivery contract: ${route} reports only its observed handoff or close checkpoint`, async () => {
+    const expected = deliveryVector(route === "blob" ? "pc_blob_handoff" : "pc_writer_close");
+    const subject = context();
+    const writer = syntheticWriter();
+    if (route === "writer") subject.window.showSaveFilePicker = async () => ({ createWritable: async () => writer });
+    subject.api = async (url) => { subject.requests.push({ url, method: "GET" }); return originalResponse(); };
+    await subject.downloadMedia({ ...NEW_C, sizeBytes: route === "writer" ? null : 18 });
+    assert.equal(subject.requests.length, 1);
+    assert.equal(subject.feedback.includes("downloaded"), expected.saveConfirmed);
+    assert.equal(subject.feedback.includes("downloadHandedOff"), expected.checkpoint === "browser_handoff");
+    assert.equal(writer.output.closed, expected.checkpoint === "stream_close");
+    assert.equal(writer.output.aborted, false);
+    assert.equal(subject.saved.length, route === "blob" ? 1 : 0);
+  });
+}
+
+for (const silent of [false, true]) {
+  test(`delivery contract: confirmed close survives ${silent ? "silent retirement" : "user cancellation"}`, async () => {
+    const expected = deliveryVector("close_after_cancel");
+    const subject = context();
+    const writer = syntheticWriter();
+    const close = deferred();
+    let closing = false;
+    writer.close = async () => { closing = true; await close.promise; writer.output.closed = true; };
+    subject.window.showSaveFilePicker = async () => ({ createWritable: async () => writer });
+    subject.api = async (url) => { subject.requests.push({ url, method: "GET" }); return originalResponse(); };
+    const download = subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+    await eventually(() => closing, "single-file close pending");
+    subject.cancelMediaDownload({ silent });
+    const feedback = subject.feedback.slice();
+    close.resolve();
+    await download;
+    assert.equal(writer.output.closed, expected.saveConfirmed);
+    assert.equal(writer.output.aborted, expected.deleteCompletedOutput);
+    assert.equal(subject.requests.length, 1, "Cancellation must not create another attempt");
+    assert.equal(subject.feedback.includes("downloadCancelled"), false);
+    if (silent) assert.deepEqual(subject.feedback, feedback, "Late commit cannot overwrite another operation's feedback");
+    else assert.equal(subject.feedback.includes("downloaded"), true);
+  });
+}
+
+test("delivery contract: rejected close stays unconfirmed even when abort succeeds", async () => {
+  const expected = deliveryVector("pc_close_rejected_abort_succeeded");
+  const subject = context();
+  const writer = syntheticWriter();
+  writer.close = async () => { throw new Error("Synthetic close response lost"); };
+  subject.window.showSaveFilePicker = async () => ({ createWritable: async () => writer });
+  subject.api = async (url) => { subject.requests.push({ url, method: "GET" }); return originalResponse(); };
+  await subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  assert.equal(subject.feedback.includes("downloadUnconfirmed"), expected.inspectDestination);
+  assert.equal(subject.feedback.includes("downloaded"), expected.saveConfirmed);
+  assert.equal(subject.feedback.includes("downloadHandedOff"), false);
+  assert.equal(writer.output.aborted, true);
+  assert.equal(subject.requests.length, 1);
+});
+
+test("delivery contract: failed cleanup keeps a visible unconfirmed result and never retries", async () => {
+  const expected = deliveryVector("cleanup_failed");
+  const subject = context();
+  const writer = syntheticWriter();
+  let aborts = 0;
+  writer.write = async () => { throw new Error("Synthetic writer stopped"); };
+  writer.abort = async () => { aborts++; throw new Error("Synthetic abort refused"); };
+  subject.window.showSaveFilePicker = async () => ({ createWritable: async () => writer });
+  subject.api = async (url) => { subject.requests.push({ url, method: "GET" }); return originalResponse(); };
+  await subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  assert.equal(subject.feedback.includes("downloadUnconfirmed"), expected.inspectDestination);
+  assert.equal(subject.feedback.includes("downloaded"), expected.saveConfirmed);
+  assert.equal(writer.output.closed, false);
+  assert.equal(aborts, 1);
+  assert.equal(subject.requests.length, 1);
+});
+
+function installSingleFileHistory(subject, overrides = {}) {
+  const calls = [];
+  const warnings = [{ hidden: true, textContent: "" }];
+  const ticket = { batchId: "synthetic-batch", epoch: 0 };
+  const receipt = { receiptId: "synthetic-observation", batchId: ticket.batchId, epoch: 0 };
+  subject.document = { querySelectorAll: () => warnings };
+  subject.mediaHistoryWarning = false;
+  subject.mediaHistoryStore = Object.fromEntries(Object.entries({
+    createBatchTicket: async () => ({ ok: true, ticket }),
+    startAttempt: async () => ({ ok: true, receipt }),
+    finishAttempt: async () => ({ ok: true, updated: true }),
+    ...overrides,
+  }).map(([name, operation]) => [name, async (...args) => {
+    calls.push({ name, args });
+    return operation(...args);
+  }]));
+  vm.runInContext(productionFunction("mediaHistoryCall"), subject);
+  return { calls, warnings, ticket, receipt };
+}
+
+for (const route of ["blob", "writer"]) {
+  test(`single-file ${route} observation is admitted before I/O and records only its real checkpoint`, async () => {
+    const subject = context();
+    const order = [];
+    const admission = deferred();
+    const writer = syntheticWriter();
+    const history = installSingleFileHistory(subject, {
+      createBatchTicket: async () => { order.push("ticket"); return { ok: true, ticket: {} }; },
+      startAttempt: async () => { order.push("admission"); await admission.promise; return { ok: true, receipt: {} }; },
+    });
+    if (route === "writer") subject.window.showSaveFilePicker = () => {
+      order.push("picker");
+      return Promise.resolve({ createWritable: async () => { order.push("writer"); return writer; } });
+    };
+    subject.api = async (url) => { order.push("GET"); subject.requests.push({ url }); return originalResponse(); };
+    const download = subject.downloadMedia({ ...NEW_C, sizeBytes: route === "writer" ? null : 18 });
+    assert.deepEqual(order, route === "writer" ? ["picker"] : [], "The user-gesture picker is invoked synchronously before history");
+    await eventually(() => order.includes("admission"), "single-file admission");
+    assert.deepEqual(order, route === "writer" ? ["picker", "ticket", "admission"] : ["ticket", "admission"]);
+    admission.resolve();
+    await download;
+    assert.deepEqual(order.slice(-2), route === "writer" ? ["writer", "GET"] : ["admission", "GET"]);
+    assert.deepEqual(history.calls.map(call => call.name), ["createBatchTicket", "startAttempt", "finishAttempt"]);
+    const start = history.calls[1].args[1];
+    assert.equal(start.destination, route === "writer" ? "browser-file" : "browser-download");
+    assert.deepEqual(Object.keys(start).sort(), ["destination", "filename"], "No handles, camera IDs or URLs cross the history boundary");
+    const finish = history.calls[2].args[1];
+    assert.equal(finish.outcome, route === "writer" ? "close-confirmed" : "handoff-requested");
+    assert.equal(finish.outcomeUnknown, route === "blob");
+    assert.equal(finish.bytesTransferred, 18);
+    assert.equal(subject.requests.length, 1);
+  });
+}
+
+test("single-file cancelled picker creates no history, destination writer or original request", async () => {
+  const subject = context();
+  const history = installSingleFileHistory(subject);
+  subject.window.showSaveFilePicker = async () => { throw mediaTransfer.cancellationError(); };
+  await subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  assert.deepEqual(history.calls, []);
+  assert.deepEqual(subject.requests, []);
+});
+
+test("single-file retired picker discards a late handle without opening or admitting it", async () => {
+  const subject = context();
+  const history = installSingleFileHistory(subject);
+  const picker = deferred();
+  let opened = 0;
+  subject.window.showSaveFilePicker = () => picker.promise;
+  const download = subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  replaceDownloadSession(subject);
+  picker.resolve({ createWritable: async () => { opened++; return syntheticWriter(); } });
+  await download;
+  assert.equal(opened, 0);
+  assert.deepEqual(history.calls, []);
+  assert.deepEqual(subject.requests, []);
+});
+
+test("single-file cancellation while admission waits records cancellation without writer or GET", async () => {
+  const subject = context();
+  const gate = deferred();
+  let opened = 0;
+  const history = installSingleFileHistory(subject, { startAttempt: async () => {
+    await gate.promise; return { ok: true, receipt: {} };
+  } });
+  subject.window.showSaveFilePicker = async () => ({ createWritable: async () => { opened++; return syntheticWriter(); } });
+  const download = subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  await eventually(() => history.calls.length === 2, "admission to wait");
+  subject.cancelMediaDownload({ silent: true });
+  gate.resolve();
+  await download;
+  assert.equal(opened, 0);
+  assert.deepEqual(subject.requests, []);
+  assert.equal(history.calls[2].args[1].outcome, "cancelled-or-unknown");
+  assert.equal(history.calls[2].args[1].outcomeUnknown, false);
+});
+
+for (const route of ["blob", "writer"]) {
+  for (const failedOperation of ["createBatchTicket", "startAttempt", "finishAttempt"]) {
+    test(`single-file ${route} ${failedOperation} failure stops before I/O or preserves the real terminal result`, async () => {
+      const subject = context();
+      const writer = syntheticWriter();
+      let opens = 0;
+      const history = installSingleFileHistory(subject, { [failedOperation]: async () => { throw new Error("Synthetic unavailable history"); } });
+      if (route === "writer") subject.window.showSaveFilePicker = async () => ({ createWritable: async () => { opens++; return writer; } });
+      subject.api = async (url) => { subject.requests.push({ url }); return originalResponse(); };
+      await subject.downloadMedia({ ...NEW_C, sizeBytes: route === "writer" ? null : 18 });
+      const terminal = failedOperation === "finishAttempt";
+      assert.equal(subject.requests.length, terminal ? 1 : 0);
+      assert.equal(opens, terminal && route === "writer" ? 1 : 0);
+      assert.equal(subject.saved.length, terminal && route === "blob" ? 1 : 0);
+      assert.equal(subject.feedback.includes(route === "writer" ? "downloaded" : "downloadHandedOff"), terminal);
+      assert.equal(subject.feedback.includes("mediaSingleAdmissionFailed"), !terminal);
+      assert.equal(writer.output.aborted, false);
+      assert.equal(history.warnings[0].hidden, false);
+      assert.equal(history.calls.filter(call => call.name === failedOperation).length, 1);
+      assert.equal(history.calls.filter(call => call.name === "finishAttempt").length, terminal ? 1 : 0);
+    });
+  }
+}
+
+for (const route of ["blob", "writer"]) {
+  for (const [operation, code] of [["createBatchTicket", "unavailable"], ["startAttempt", "capacity-exceeded"],
+    ["startAttempt", "transaction-failed"], ["startAttempt", "transaction-unconfirmed"], ["startAttempt", "stale-ticket"]]) {
+    test(`single-file ${route} ${code} admission opens no writer and requests no original`, async () => {
+      const subject = context();
+      let opens = 0, pickers = 0;
+      const history = installSingleFileHistory(subject, { [operation]: async () => ({ ok: false, code }) });
+      if (route === "writer") subject.window.showSaveFilePicker = async () => {
+        pickers++;
+        return { createWritable: async () => { opens++; return syntheticWriter(); } };
+      };
+      await subject.downloadMedia({ ...NEW_C, sizeBytes: route === "writer" ? null : 18 });
+      assert.equal(pickers, route === "writer" ? 1 : 0);
+      assert.equal(opens, 0);
+      assert.deepEqual(subject.requests, []);
+      assert.deepEqual(subject.saved, []);
+      assert.equal(subject.feedback.includes("mediaSingleAdmissionFailed"), true);
+      assert.equal(history.calls.filter(call => call.name === operation).length, 1);
+      assert.equal(history.calls.some(call => call.name === "finishAttempt"), false);
+      for (const call of history.calls.filter(call => call.name === "startAttempt")) {
+        assert.deepEqual(Object.keys(call.args[1]).sort(), ["destination", "filename"]);
+      }
+    });
+  }
+}
+
+test("single-file late close records close-confirmed after silent session replacement", async () => {
+  const subject = context();
+  const close = deferred();
+  let closing = false;
+  const writer = syntheticWriter();
+  writer.close = async () => { closing = true; await close.promise; writer.output.closed = true; };
+  const history = installSingleFileHistory(subject);
+  subject.window.showSaveFilePicker = async () => ({ createWritable: async () => writer });
+  subject.api = async (url) => { subject.requests.push({ url }); return originalResponse(); };
+  const download = subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  await eventually(() => closing, "close to wait");
+  replaceDownloadSession(subject);
+  const feedback = subject.feedback.slice();
+  close.resolve();
+  await download;
+  assert.equal(history.calls.at(-1).args[1].outcome, "close-confirmed");
+  assert.equal(history.calls.at(-1).args[1].outcomeUnknown, false);
+  assert.equal(writer.output.aborted, false);
+  assert.deepEqual(subject.feedback, feedback);
+});
+
+test("single-file cleared observation is not recreated by a late successful close", async () => {
+  const subject = context();
+  const history = installSingleFileHistory(subject, { finishAttempt: async () => ({ ok: false, code: "stale-ticket" }) });
+  subject.window.showSaveFilePicker = async () => ({ createWritable: async () => syntheticWriter() });
+  subject.api = async () => originalResponse();
+  await subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  assert.deepEqual(history.calls.map(call => call.name), ["createBatchTicket", "startAttempt", "finishAttempt"]);
+  assert.equal(history.calls.at(-1).args[1].outcome, "close-confirmed");
+  assert.equal(subject.feedback.includes("downloaded"), true);
+  assert.equal(history.warnings[0].hidden, true);
+});
+
+for (const stage of ["creation", "close", "cleanup"]) {
+  test(`single-file ${stage} uncertainty is persisted without a false save or automatic retry`, async () => {
+    const subject = context();
+    const history = installSingleFileHistory(subject);
+    const writer = syntheticWriter();
+    if (stage === "close") writer.close = async () => { throw new Error("Synthetic close lost"); };
+    if (stage === "cleanup") {
+      writer.write = async () => { throw new Error("Synthetic write failed"); };
+      writer.abort = async () => { throw new Error("Synthetic cleanup unknown"); };
+    }
+    subject.window.showSaveFilePicker = async () => ({ createWritable: async () => {
+      if (stage === "creation") throw new Error("Synthetic creation result lost");
+      return writer;
+    } });
+    subject.api = async (url) => { subject.requests.push({ url }); return originalResponse(); };
+    await subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+    const terminal = history.calls.at(-1).args[1];
+    assert.equal(terminal.outcome, "failed");
+    assert.equal(terminal.outcomeUnknown, true);
+    assert.equal(terminal.mayRemain, true);
+    assert.equal(subject.feedback.includes("downloadUnconfirmed"), true);
+    assert.equal(subject.requests.length, stage === "creation" ? 0 : 1);
+  });
+}
+
+// Fixed two-axis contract shared byte-for-byte with iOS and Android. The adapter
+// below supplies synthetic transport observations, never expected production results.
+const reviewEvidenceVectors = JSON.parse(fs.readFileSync(path.join(__dirname,
+  "../../contracts/capture-review-evidence/v1/review-evidence-vectors.json"), "utf8"));
+const evidenceOld = [item("OLD_A"), item("OLD_B")];
+const evidencePhoto = item("NEW_PHOTO", "2020-01-01T00:00:00Z");
+const evidenceVideo = { ...item("NEW_VIDEO"), name: "NEW_VIDEO.MP4", kind: "video", contentType: "video/mp4" };
+const evidenceFound = [evidenceOld[0], evidencePhoto, evidenceVideo,
+  { ...evidencePhoto, id: "NEW_PHOTO_2" }, { ...evidenceVideo, id: "NEW_VIDEO_2" }];
+
+function installEvidenceReads(subject, reads, intent = "photo") {
+  let next = 0;
+  const previousApi = subject.api;
+  subject.api = async (url, options = {}) => {
+    if (url.endsWith("/recording/stop")) {
+      subject.requests.push({ url, method: options.method || "GET", json: options.json });
+      return { mode: "Movie", recording: false };
+    }
+    if (!url.endsWith("/media?limit=8")) return previousApi(url, options);
+    subject.requests.push({ url, method: options.method || "GET", signal: options.signal });
+    assert.ok(next < reads.length, "Bounded review exceeded the fixture read budget");
+    const read = reads[next++];
+    if (read === "failure") throw new Error("Synthetic list read failure");
+    if (read === "malformed") return { items: null };
+    const items = read === "empty" ? [] : read === "known-only" ? evidenceOld :
+      read === "wrong-kind" ? [intent === "photo" ? evidenceVideo : evidencePhoto] : evidenceFound;
+    return { items };
+  };
+}
+
+for (const vector of reviewEvidenceVectors.cases) {
+  test(`shared review evidence: ${vector.id}`, async () => {
+    const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+    installLatestMediaRenderer(subject);
+    if (vector.intent === "video") {
+      subject.state.captureMode = "video";
+      subject.state.status = { mode: "Movie", recording: true };
+    }
+    installEvidenceReads(subject, vector.reads, vector.intent);
+    await captureAndReview(subject);
+    assert.deepEqual(JSON.parse(JSON.stringify(subject.state.latestMediaReviewEvidence)), vector.expected);
+    assert.equal(Object.isFrozen(subject.state.latestMediaReviewEvidence), true);
+    assert.equal(subject.state.latestMediaItem?.id, vector.expected.candidateId || evidenceOld[0].id);
+    assert.equal(subject.state.latestMediaReviewStatus, vector.expected.candidateId ? "READY" : "NOT_READY");
+    assert.equal(listingRequests(subject).length, vector.reads.length);
+    assert.deepEqual(subject.delays, reviewEvidenceVectors.retryDelaysMillis.slice(0, vector.reads.length - 1));
+    assert.equal(writes(subject).length, 1, "Only the original acknowledged capture/stop may write");
+    assert.equal(subject.state.latestMediaController, null);
+    assert.equal(subject.state.latestMediaRefreshPromise, null);
+    if (!vector.expected.candidateId) {
+      const prefix = vector.intent === "video" ? "latestVideo" : "latestMedia";
+      const suffix = vector.expected.successfulReads && vector.expected.lastCompletedRead === "failure" ?
+        "MixedReadFailed" : vector.expected.successfulReads ? "NotReady" : "ReadFailed";
+      assert.equal(subject.ui.latestMediaReviewStatus.textContent, prefix + suffix);
+    }
+  });
+}
+
+for (const vector of reviewEvidenceVectors.retryCases) {
+  test(`shared review retry evidence: ${vector.id}`, async () => {
+    const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+    installEvidenceReads(subject, vector.first);
+    await captureAndReview(subject);
+    const previous = subject.state.latestMediaReviewEvidence;
+    installEvidenceReads(subject, vector.second);
+    await subject.retryLatestMedia();
+    assert.deepEqual(JSON.parse(JSON.stringify(subject.state.latestMediaReviewEvidence)), vector.expected);
+    assert.notEqual(subject.state.latestMediaReviewEvidence, previous);
+    assert.equal(Object.isFrozen(previous), true);
+    assert.equal(listingRequests(subject).length, 8);
+    assert.equal(writes(subject).length, 1, "A retry must not resend shutter/REC/AF");
+  });
+}
+
+for (const retirement of ["zero-completed", "in-delay", "same-id-session", "new-attempt"]) {
+  test(`retired review preserves terminal evidence: ${retirement}`, async () => {
+    const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+    installEvidenceReads(subject, ["failure", "failure", "failure", "failure"]);
+    await captureAndReview(subject);
+    const previous = subject.state.latestMediaReviewEvidence;
+    const previousAttempt = subject.state.latestMediaReviewAttempt;
+    const gate = deferred();
+    const originalApi = subject.api;
+    subject.api = async (url, options = {}) => {
+      if (!url.endsWith("/media?limit=8")) return originalApi(url, options);
+      subject.requests.push({ url, method: "GET", signal: options.signal });
+      if (retirement === "in-delay") return { items: [] };
+      await gate.promise;
+      if (retirement === "same-id-session") throw new Error("Retired owner failure");
+      return { items: evidenceFound };
+    };
+    if (retirement === "in-delay") subject.sleep = () => gate.promise;
+    const pending = subject.retryLatestMedia();
+    await eventually(() => listingRequests(subject).length === 5, "new invocation read admission");
+    if (retirement === "in-delay") await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(subject.state.latestMediaReviewEvidence, previous, "Partial progress is not terminal publication");
+    subject.cancelLatestMediaRefresh();
+    assert.equal(subject.state.latestMediaReviewEvidence, previous);
+    assert.equal(subject.state.latestMediaReviewStatus, "NOT_READY");
+    if (retirement === "same-id-session") subject.state.session = { id: subject.state.session.id };
+    if (retirement === "new-attempt") subject.state.latestMediaReviewAttempt = { ...previousAttempt };
+    gate.resolve();
+    await pending;
+    assert.equal(subject.state.latestMediaReviewEvidence, previous, "A late success/failure cannot overwrite prior evidence");
+    assert.equal(subject.state.latestMediaItem, evidenceOld[0]);
+    assert.equal(listingRequests(subject).length, 5);
+    assert.equal(writes(subject).length, 1);
+    assert.equal(subject.state.latestMediaController, null);
+  });
+}
+
+test("new capture cancelled before a completed list check never fabricates failure evidence", async () => {
+  const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+  const gate = deferred();
+  const originalApi = subject.api;
+  subject.api = async (url, options = {}) => {
+    if (!url.endsWith("/media?limit=8")) return originalApi(url, options);
+    subject.requests.push({ url, method: "GET", signal: options.signal });
+    await gate.promise;
+    return { items: [] };
+  };
+  await subject.operateShutter();
+  const pending = subject.state.latestMediaRefreshPromise;
+  subject.cancelLatestMediaRefresh();
+  gate.resolve();
+  await pending;
+  assert.equal(subject.state.latestMediaReviewEvidence, null);
+  assert.equal(subject.state.latestMediaReviewReadFailed, false);
+  assert.equal(subject.state.latestMediaReviewStatus, "IDLE");
+  assert.equal(writes(subject).length, 1);
+});
+
+for (const response of [null, {}, { items: {} }, { items: [null] }, { items: [{ id: "" }] },
+  { items: [{ id: "NEW" }] }, { items: [{ id: "NEW", name: "" }] }, { items: [{ id: "NEW", name: 42 }] }]) {
+  test(`invalid list shape cannot masquerade as observed empty: ${JSON.stringify(response)}`, async () => {
+    const subject = context();
+    const originalApi = subject.api;
+    subject.api = async (url, options = {}) => {
+      if (!url.endsWith("/media?limit=8")) return originalApi(url, options);
+      subject.requests.push({ url, method: "GET" });
+      return response;
+    };
+    await captureAndReview(subject);
+    assert.equal(subject.state.latestMediaReviewEvidence.observation, "unread");
+    assert.equal(subject.state.latestMediaReviewEvidence.successfulReads, 0);
+    assert.equal(subject.state.latestMediaReviewEvidence.failedReads, 4);
+    assert.equal(subject.state.latestMediaItem, OLD_A);
+    assert.equal(writes(subject).length, 1);
+  });
+}
+
+for (const replacement of ["same-id-session", "attempt"]) {
+  test(`identity fencing rejects late result without explicit cancellation: ${replacement}`, async () => {
+    const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+    installEvidenceReads(subject, ["empty", "failure", "failure", "failure"]);
+    await captureAndReview(subject);
+    const previous = subject.state.latestMediaReviewEvidence;
+    const gate = deferred();
+    subject.api = async (url, options = {}) => {
+      assert.ok(url.endsWith("/media?limit=8"));
+      subject.requests.push({ url, method: "GET", signal: options.signal });
+      await gate.promise;
+      return { items: evidenceFound };
+    };
+    const pending = subject.retryLatestMedia();
+    await eventually(() => listingRequests(subject).length === 5, "held retry read");
+    if (replacement === "same-id-session") subject.state.session = { id: subject.state.session.id };
+    else subject.state.latestMediaReviewAttempt = { ...subject.state.latestMediaReviewAttempt };
+    gate.resolve();
+    await pending;
+    assert.equal(subject.state.latestMediaReviewEvidence, previous);
+    assert.equal(subject.state.latestMediaItem, evidenceOld[0]);
+    assert.notEqual(subject.state.latestMediaReviewStatus, "READY");
+    assert.equal(listingRequests(subject).length, 5);
+    assert.equal(writes(subject).length, 1);
+  });
+}
+
+for (const language of ["en", "zh-TW"]) {
+  for (const intent of ["photo", "video"]) {
+    test(`mixed last-read failure is explicit in ${language} ${intent} UI`, async () => {
+      const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+      installLatestMediaRenderer(subject);
+      const dictionarySource = source.slice(source.indexOf("  const messages = {"),
+        source.indexOf("  const commonSettingValueKeys = {"));
+      const dictionaries = vm.runInNewContext(`${dictionarySource}\nmessages;`);
+      subject.t = (key) => dictionaries[language][key];
+      if (intent === "video") {
+        subject.state.captureMode = "video";
+        subject.state.status = { mode: "Movie", recording: true };
+      }
+      installEvidenceReads(subject, ["empty", "failure", "failure", "failure"], intent);
+      await captureAndReview(subject);
+      const label = subject.ui.latestMediaReviewStatus.textContent;
+      assert.match(label, language === "en" ? /No new .* observed/ : /尚未觀察到/);
+      assert.match(label, language === "en" ? /latest list read failed; current visibility is unconfirmed/ : /最後一次清單讀取失敗，目前可見情況未確認/);
+      assert.match(label, language === "en" ? /without/ : /不會再次/);
+      assert.equal(writes(subject).length, 1);
+    });
+  }
+}
+
+for (const completedBeforeAbort of [0, 1]) {
+  test(`current-owner abort restores terminal evidence after ${completedBeforeAbort} reads`, async () => {
+    const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+    installEvidenceReads(subject, ["empty", "failure", "failure", "failure"]);
+    await captureAndReview(subject);
+    const previous = subject.state.latestMediaReviewEvidence;
+    let read = 0;
+    subject.api = async (url, options = {}) => {
+      assert.ok(url.endsWith("/media?limit=8"));
+      subject.requests.push({ url, method: "GET", signal: options.signal });
+      if (read++ < completedBeforeAbort) return { items: [] };
+      const error = new Error("Synthetic retired listing");
+      error.name = "AbortError";
+      throw error;
+    };
+    await subject.retryLatestMedia();
+    assert.equal(subject.state.latestMediaReviewEvidence, previous);
+    assert.equal(subject.state.latestMediaReviewStatus, "NOT_READY");
+    assert.equal(subject.state.latestMediaReviewReadFailed, true);
+    assert.equal(subject.state.latestMediaThumbnailLoading, false);
+    assert.equal(subject.state.latestMediaController, null);
+    assert.equal(subject.state.latestMediaRefreshPromise, null);
+    assert.equal(listingRequests(subject).length, 5 + completedBeforeAbort);
+    assert.equal(writes(subject).length, 1);
+  });
+}

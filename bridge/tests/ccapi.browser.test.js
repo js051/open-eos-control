@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
+const { createHash } = require("node:crypto");
 const fs = require("node:fs");
 const net = require("node:net");
 const os = require("node:os");
@@ -297,6 +298,12 @@ function syntheticDatedMedia() {
   return entries.map(([name, captureTime]) => ({
     id: name, name, captureTime, kind: name.endsWith(".MP4") ? "video" : "image",
     sizeBytes: 2048, previewAvailable: true,
+    ...(["DATE_ONLY.JPG", "START.JPG", "END.JPG"].includes(name)
+      ? { folderId: name === "END.JPG" ? "synthetic:B" : "synthetic:A", folderLabel: "card1/DCIM/SAME" }
+      : name.startsWith("EARLIER_") ? { folderId: `synthetic:folder-${Number(name.match(/\d+/)[0]) % 40}`,
+        folderLabel: `long-camera-path/${"folder-name-".repeat(12)}${Number(name.match(/\d+/)[0]) % 40}` } : {}),
+    ...({ "DATE_ONLY.JPG": 0, "START.JPG": 5, "END.JPG": 3 }[name] === undefined ? {}
+      : { rating: { "DATE_ONLY.JPG": 0, "START.JPG": 5, "END.JPG": 3 }[name] }),
   }));
 }
 
@@ -375,6 +382,133 @@ async function verifyDateDialogLayout(page, language) {
   await page.setViewportSize({ width: 1440, height: 900 });
 }
 
+async function verifyLoadedFolderJourney(page, language, snapshot) {
+  const names = () => page.locator(".media-card .media-copy strong").allTextContents();
+  const before = snapshot();
+  await page.click("#media-folder-button");
+  const choices = await page.locator("#media-folder-filter-select option").evaluateAll(options =>
+    options.map(option => ({ value: option.value, label: option.textContent })));
+  const sameLabel = choices.filter(option => option.label.startsWith("card1/DCIM/SAME"));
+  assert.equal(sameLabel.length, 2);
+  assert.notEqual(sameLabel[0].label, sameLabel[1].label);
+  assert.ok(choices.length >= 42, "Long loaded folder list remains available");
+  await page.selectOption("#media-folder-filter-select", sameLabel[0].value);
+  await page.click("#media-folder-apply");
+  assert.deepEqual(await names(), ["DATE_ONLY.JPG", "START.JPG"]);
+  await page.click("#media-rating-button");
+  await page.selectOption("#media-rating-filter-select", "5");
+  await page.click("#media-rating-apply");
+  await applyDateRange(page, "2026-10-07", "2026-10-07");
+  assert.deepEqual(await names(), ["START.JPG"], "Folder/date/rating intersect");
+  await page.click("#media-folder-clear");
+  assert.deepEqual(await names(), ["START.JPG"], "Clearing folder retains rating and date");
+  await page.click("#media-rating-clear");
+  await page.click("#media-date-clear");
+  await page.click("#media-folder-button");
+  await page.selectOption("#media-folder-filter-select", "1");
+  await page.click("#media-folder-apply");
+  assert.equal((await names()).length, 7, "Unknown provenance is explicit");
+  await page.click("#media-folder-clear");
+  assert.equal((await names()).length, 60);
+  assert.deepEqual(snapshot(), before, "Folder operations add no listing/info/write requests");
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
+    await page.locator("html").evaluate(element => { element.style.fontSize = "32px"; });
+    await page.locator("#media-folder-button").focus(); await page.keyboard.press("Enter");
+    await page.waitForSelector("#media-folder-dialog[open]");
+    assert.equal(await page.locator("#media-folder-filter-select").evaluate(element => document.activeElement === element), true);
+    const visited = new Set();
+    for (let step = 0; step < 16; step += 1) {
+      await page.keyboard.press("Tab");
+      const focus = await page.evaluate(() => ({ id: document.activeElement?.id,
+        background: document.activeElement && document.activeElement !== document.body &&
+          !document.querySelector("#media-folder-dialog").contains(document.activeElement) }));
+      assert.equal(Boolean(focus.background), false); visited.add(focus.id);
+    }
+    for (const id of ["media-folder-filter-select", "media-folder-close", "media-folder-dialog-clear", "media-folder-cancel", "media-folder-apply"]) {
+      assert.equal(visited.has(id), true, `Keyboard reaches ${id}`);
+      const control = page.locator(`#${id}`); await control.scrollIntoViewIfNeeded(); await control.click({ trial: true });
+      const bounds = await control.boundingBox();
+      assert.ok(bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width + 1 &&
+        bounds.y + bounds.height <= viewport.height + 1, `${id} fits after scrolling`);
+    }
+    await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-media-folder-${language}-${viewport.width}x${viewport.height}-text200.png`) });
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#media-folder-dialog").open);
+    assert.equal(await page.locator("#media-folder-button").evaluate(element => document.activeElement === element), true);
+    await page.locator("html").evaluate(element => element.style.removeProperty("font-size"));
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  assert.equal((await names()).length, 60, "Escape preserves current folder filter");
+}
+
+async function verifyLoadedRatingJourney(page, language, snapshot) {
+  const apply = async (value) => {
+    await page.click("#media-rating-button");
+    await page.waitForSelector("#media-rating-dialog[open]");
+    await page.selectOption("#media-rating-filter-select", value);
+    await page.click("#media-rating-apply");
+    await page.waitForFunction(() => !document.querySelector("#media-rating-dialog").open);
+  };
+  const names = () => page.locator(".media-card .media-copy strong").allTextContents();
+  const before = snapshot();
+  await apply("unrated");
+  assert.deepEqual(await names(), ["DATE_ONLY.JPG"]);
+  await apply("unknown");
+  assert.equal((await names()).length, 57);
+  assert.equal((await names()).includes("DATE_ONLY.JPG"), false);
+  await apply("3-plus");
+  assert.deepEqual(await names(), ["START.JPG", "END.JPG"]);
+  await applyDateRange(page, "2026-10-07", "2026-10-07");
+  assert.deepEqual(await names(), ["START.JPG", "END.JPG"]);
+  await page.click("#media-date-clear");
+  await page.selectOption("#media-sort-select", "rating-highest");
+  assert.deepEqual(await names(), ["START.JPG", "END.JPG"]);
+  assert.equal(await page.locator(".media-date-heading").count(), 0);
+  await page.click("#media-rating-clear");
+  assert.deepEqual((await names()).slice(0, 3), ["START.JPG", "END.JPG", "DATE_ONLY.JPG"]);
+  assert.equal(await page.locator(".media-date-heading").count(), 0);
+  await page.selectOption("#media-sort-select", "camera");
+  assert.deepEqual(snapshot(), before, "Rating operations add no listing/info/write requests");
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
+    await page.locator("html").evaluate(element => { element.style.fontSize = "32px"; });
+    await page.locator("#media-rating-button").focus();
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#media-rating-dialog[open]");
+    assert.equal(await page.locator("#media-rating-filter-select").evaluate(element => document.activeElement === element), true);
+    const visited = new Set();
+    for (let step = 0; step < 16; step += 1) {
+      await page.keyboard.press("Tab");
+      const focus = await page.evaluate(() => ({
+        id: document.activeElement?.id,
+        background: document.activeElement && document.activeElement !== document.body &&
+          !document.querySelector("#media-rating-dialog").contains(document.activeElement),
+      }));
+      assert.equal(Boolean(focus.background), false, "Native dialog must not focus background controls");
+      visited.add(focus.id);
+    }
+    for (const id of ["media-rating-filter-select", "media-rating-close", "media-rating-dialog-clear", "media-rating-cancel", "media-rating-apply"]) {
+      assert.equal(visited.has(id), true, `Keyboard reaches ${id}`);
+      const control = page.locator(`#${id}`);
+      await control.scrollIntoViewIfNeeded();
+      await control.click({ trial: true });
+      const bounds = await control.boundingBox();
+      assert.ok(bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width + 1 &&
+        bounds.y + bounds.height <= viewport.height + 1, `${id} fits after scrolling`);
+    }
+    await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-media-rating-${language}-${viewport.width}x${viewport.height}-text200.png`) });
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#media-rating-dialog").open);
+    assert.equal(await page.locator("#media-rating-button").evaluate(element => document.activeElement === element), true);
+    await page.locator("html").evaluate(element => element.style.removeProperty("font-size"));
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  assert.equal(await page.locator(".media-card").count(), 60, "Escape does not change filters");
+}
+
 async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
   for (const language of ["en", "zh-TW"]) {
     const reset = await fetch(`${simulatorOrigin}/ccapi/test/reset`, { method: "POST" });
@@ -430,6 +564,8 @@ async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
       assert.equal(await page.locator(".media-card").count(), 60);
       assert.match(await page.locator("#media-summary").innerText(), language === "en" ? /Latest 60.*more on card/ : /最新 60.*尚有更多/);
       await page.selectOption("#media-sort-select", "camera");
+      await verifyLoadedRatingJourney(page, language, snapshot);
+      await verifyLoadedFolderJourney(page, language, snapshot);
       const beforeDate = snapshot();
       await applyDateRange(page, "2026-10-07", "2026-10-07");
       await expectNames([...sameDayPhotos.slice(0, 4), "VIDEO.MP4", ...sameDayPhotos.slice(4)]);
@@ -485,7 +621,7 @@ async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
       await page.waitForFunction(() => !document.querySelector("#media-date-dialog").open);
 
       // Viewer navigation enumerates exactly the filtered photo sequence.
-      await page.locator('.media-card [data-media-id="DATE_ONLY.JPG"]').click();
+      await page.locator('.media-card button.media-card-preview[data-media-id="DATE_ONLY.JPG"]').click();
       for (let index = 0; index < sameDayPhotos.length; index += 1) {
         await page.waitForFunction((name) => document.querySelector("#media-preview-title")?.textContent === name, sameDayPhotos[index]);
         assert.match(await page.locator("#media-preview-meta").innerText(), language === "en"
@@ -518,7 +654,8 @@ async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
       assert.equal(await page.locator(".media-card").count(), 0);
       assert.match(await page.locator("#media-date-summary").innerText(), language === "en" ? /0 of 85.*2 loaded items have unknown dates/ : /85 項中符合 0 項.*2 項日期不明/);
       assert.match(await page.locator("#media-list").innerText(), language === "en" ? /No loaded media matches/ : /沒有符合篩選/);
-      assert.match(await page.locator("#media-summary").innerText(), language === "en" ? /refresh failed.*85 previous/ : /重新整理失敗.*85/);
+      assert.equal(await page.locator("#media-summary").innerText(), language === "en"
+        ? "Media refresh failed - keeping 85 item(s)" : "媒體重新整理失敗 - 保留 85 個");
       assert.deepEqual(snapshot(), failedReads, "Applying a zero-match range preserves the failed-refresh warning without retries");
       await verifyDateDialogLayout(page, language);
 
@@ -604,6 +741,479 @@ async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
         if (!scenarioError) throw new AggregateError(cleanupErrors, `Date journey cleanup failed: ${language}`);
         console.error(`Date journey cleanup also failed: ${language}`, cleanupErrors);
       }
+    }
+  }
+}
+
+async function verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOrigin) {
+  const videoBytes = fs.readFileSync(path.join(
+    REPOSITORY_ROOT, "ios", "OpenEOSControl", "Tests", "Fixtures", "valid-h264-baseline.mp4",
+  ));
+  const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  const videoHash = sha256(videoBytes);
+  assert.equal(videoBytes.length, 1813);
+  assert.equal(videoHash, "2a8036931d1d15c7c9d1e7d4412e6796dc0faa8517871cdc64c2800f8a776627");
+  const oldVideo = "EARLIER_RECORDING.MP4";
+  const newVideo = "NEWLY_VISIBLE_RECORDING.MP4";
+  const firstPhoto = "POST_STOP_PHOTO.JPG";
+  const frontPhoto = "NEWER_VISIBLE_PHOTO.JPG";
+  const uploadFixture = async (name, bytes, contentType) => {
+    const response = await fetch(`${simulatorOrigin}/ccapi/media?filename=${encodeURIComponent(name)}`, {
+      method: "POST",
+      headers: { "Content-Type": contentType, "Content-Length": String(bytes.length) },
+      body: bytes,
+    });
+    assert.equal(response.status, 201, `Synthetic fixture upload failed: ${name}`);
+    const item = await response.json();
+    assert.equal(item.id, name);
+    assert.equal(item.name, name);
+    assert.equal(item.kind, contentType === "video/mp4" ? "video" : "image");
+    assert.equal(item.size_bytes, bytes.length);
+  };
+
+  for (const language of ["en", "zh-TW"]) {
+    const reset = await fetch(`${simulatorOrigin}/ccapi/test/reset`, { method: "POST" });
+    assert.equal(reset.ok, true);
+    const photoResponse = await fetch(`${simulatorOrigin}/ccapi/ver100/contents/card1/100CANON/SIM_0002.PNG`);
+    assert.equal(photoResponse.ok, true);
+    assert.match(photoResponse.headers.get("content-type"), /^image\/jpeg/);
+    const photoBytes = Buffer.from(await photoResponse.arrayBuffer());
+    // REC/STOP in the existing simulator changes status only. Inject actual media
+    // through its existing upload API; do not claim STOP created these files.
+    await uploadFixture(oldVideo, videoBytes, "video/mp4");
+    const context = await browser.newContext({
+      locale: language === "en" ? "en-US" : "zh-TW",
+      viewport: { width: 1440, height: 900 },
+      acceptDownloads: true,
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(15_000);
+    const requests = [];
+    const errors = [];
+    let scenarioError = null;
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (!url.pathname.startsWith("/v1/session")) return;
+      requests.push({ method: request.method(), pathname: url.pathname, limit: url.searchParams.get("limit") });
+    });
+    const notReady = language === "en" ? "New video is not visible yet" : "尚未找到新可見影片";
+    const found = language === "en" ? "A newly visible video was found" : "已找到新可見影片";
+    const waitForNotReady = () => page.waitForFunction((text) => {
+      const retry = document.querySelector("#latest-media-retry");
+      return document.querySelector("#latest-media-review-status")?.textContent.includes(text) &&
+        retry && !retry.hidden && !retry.disabled;
+    }, notReady);
+    try {
+      await page.goto(bridgeOrigin, { waitUntil: "networkidle" });
+      await page.click("#ccapi-mode-button");
+      await page.fill("#ccapi-url-input", simulatorOrigin);
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      await page.locator("#control-view .language-select").selectOption(language);
+      await page.waitForFunction((name) => document.querySelector("#latest-media-label")?.textContent === name, oldVideo);
+      await page.click("#video-mode-button");
+      await waitForSimulatorState(simulatorOrigin, (state) => state.movie_mode === "on", "recording journey movie mode");
+      await page.click("#shutter-button");
+      await waitForSimulatorState(simulatorOrigin,
+        (state) => state.recording && state.record_start_count === 1, "recording journey start");
+      const beforeStop = requests.length;
+      await page.click("#shutter-button");
+      await waitForSimulatorState(simulatorOrigin,
+        (state) => !state.recording && state.record_stop_count === 1, "recording journey confirmed stop");
+      await waitForNotReady();
+      assert.equal(await page.locator("#latest-media-label").innerText(), oldVideo,
+        "A known old video cannot satisfy the stop review");
+      const stopRequests = requests.slice(beforeStop);
+      const stopIndex = stopRequests.findIndex((request) => request.pathname.endsWith("/recording/stop"));
+      const listIndex = stopRequests.findIndex((request) => request.pathname.endsWith("/media"));
+      assert.ok(stopIndex >= 0 && listIndex > stopIndex, "STOP must precede the review's bounded listing reads");
+      assert.ok(stopRequests.filter((request) => request.pathname.endsWith("/media"))
+        .every((request) => request.method === "GET" && request.limit === "8"));
+      const stopped = await readSimulatorState(simulatorOrigin);
+      assert.equal(stopped.media_ids.includes(newVideo), false, "The fixture does not manufacture a recording output");
+      assert.equal(stopped.capture_count, 0);
+      fs.mkdirSync(RESULTS_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-recording-review-not-ready-${language}.png`) });
+
+      // A new photo alone must leave video review pending, without another REC.
+      await uploadFixture(firstPhoto, photoBytes, "image/jpeg");
+      const beforePhotoRetry = requests.length;
+      await page.click("#latest-media-retry");
+      await waitForNotReady();
+      assert.equal(await page.locator("#latest-media-label").innerText(), oldVideo);
+      assert.ok(requests.slice(beforePhotoRetry).length > 0);
+      assert.ok(requests.slice(beforePhotoRetry).every((request) => request.method === "GET"),
+        "Photo-only retry may read media but must not send a camera mutation");
+
+      await uploadFixture(newVideo, videoBytes, "video/mp4");
+      await uploadFixture(frontPhoto, photoBytes, "image/jpeg");
+      const newContents = await fetch(`${simulatorOrigin}/ccapi/ver100/contents`);
+      assert.equal(newContents.ok, true);
+      const listedPaths = (await newContents.json()).path;
+      assert.ok(listedPaths[0].endsWith(frontPhoto) && listedPaths[1].endsWith(newVideo),
+        "The camera order deliberately places a newly visible photo before the new video");
+      const beforeVideoRetry = requests.length;
+      await page.click("#latest-media-retry");
+      await page.waitForFunction(({ name, status }) =>
+        document.querySelector("#latest-media-label")?.textContent === name &&
+        document.querySelector("#latest-media-review-status")?.textContent.includes(status) &&
+        document.querySelector("#latest-media-retry")?.hidden,
+      { name: newVideo, status: found });
+      assert.ok(requests.slice(beforeVideoRetry).every((request) => request.method === "GET"),
+        "Finding the new video is read-only, even with a newer photo in front");
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-recording-review-available-${language}.png`) });
+      await page.click("#latest-media-button");
+      await page.waitForFunction((name) => {
+        const video = document.querySelector("#media-preview-video");
+        return document.querySelector("#media-preview-dialog")?.open &&
+          document.querySelector("#media-preview-title")?.textContent === name &&
+          video && !video.hidden && video.readyState >= 2 && video.videoWidth === 160 &&
+          video.videoHeight === 90 && !video.error;
+      }, newVideo);
+      assert.equal(await page.locator("#media-preview-image").isHidden(), true);
+      assert.equal(await page.locator("#media-preview-unavailable").isHidden(), true);
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-recording-review-video-${language}.png`) });
+
+      // Canon listings omit size. Use the normal explicit Details read to learn
+      // the small file size before choosing the normal browser-download path.
+      // No picker override, synthetic writable, playback response, or App state is substituted.
+      const [infoResponse] = await Promise.all([
+        page.waitForResponse((response) => response.request().method() === "GET" &&
+          /\/v1\/session\/[^/]+\/media\/[^/]+\/info$/.test(new URL(response.url()).pathname)),
+        page.click("#media-preview-details"),
+      ]);
+      assert.equal(infoResponse.ok(), true);
+      const videoInfo = await infoResponse.json();
+      assert.equal(videoInfo.name, newVideo);
+      assert.equal(videoInfo.sizeBytes, videoBytes.length);
+      await page.waitForSelector("#media-details-dialog[open] #media-details-loading[hidden]", { state: "attached" });
+      assert.match(await page.locator("#media-details-summary").innerText(), /video\/mp4/);
+      const beforeDownload = requests.length;
+      const [download] = await Promise.all([
+        page.waitForEvent("download"),
+        page.click("#media-details-download"),
+      ]);
+      assert.equal(await download.failure(), null);
+      assert.equal(download.suggestedFilename(), newVideo);
+      const downloadedBytes = fs.readFileSync(await download.path());
+      assert.deepEqual(downloadedBytes, videoBytes, "The browser must receive the original MP4, not a thumbnail or display image");
+      assert.equal(sha256(downloadedBytes), videoHash);
+      assert.ok(requests.slice(beforeDownload).some((request) => request.method === "GET" &&
+        /\/media\/[^/]+$/.test(request.pathname)), "Download must use the real original-media endpoint");
+      const delivered = await readSimulatorState(simulatorOrigin);
+      assert.equal(delivered.record_start_count, 1);
+      assert.equal(delivered.record_stop_count, 1);
+      assert.equal(delivered.capture_count, 0);
+      assert.deepEqual(delivered.canonical.shutter_af_requests, []);
+      assert.deepEqual(requests.filter((request) => /\/recording\/(?:start|stop)$/.test(request.pathname))
+        .map((request) => request.pathname.split("/").at(-1)), ["start", "stop"]);
+      assert.equal(requests.some((request) => request.method !== "GET" && request.pathname.includes("/capture/")), false);
+      assert.deepEqual(errors, []);
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-recording-review-original-${language}.png`) });
+      console.log(`PASS: synthetic PC recording stop, read-only video review, and exact original download: ${language}`);
+    } catch (error) {
+      scenarioError = error;
+      throw error;
+    } finally {
+      const cleanupErrors = [];
+      try {
+        if (await page.locator("dialog[open]").count()) await page.keyboard.press("Escape");
+        if (await page.locator("#control-view:not([hidden])").count()) {
+          await page.click("#disconnect-button");
+          await page.waitForSelector("#connection-view:not([hidden])");
+        }
+      } catch (error) { cleanupErrors.push(error); }
+      try { await context.close(); } catch (error) { cleanupErrors.push(error); }
+      if (cleanupErrors.length) {
+        if (!scenarioError) throw new AggregateError(cleanupErrors, `Recording journey cleanup failed: ${language}`);
+        console.error(`Recording journey cleanup also failed: ${language}`, cleanupErrors);
+      }
+    }
+  }
+}
+
+async function verifyConnectionRecoveryJourneys(browser, origin, simulatorOrigin) {
+  for (const language of ["en", "zh-TW"]) {
+    const context = await browser.newContext({ locale: language === "en" ? "en-US" : "zh-TW",
+      viewport: { width: 1100, height: 850 } });
+    const page = await context.newPage();
+    page.setDefaultTimeout(12_000);
+    const pageErrors = [], writes = [], scanGates = new Map();
+    let enginesAvailable = false, scans = 0, connections = 0;
+    const text = language === "en" ? {
+      unavailable: /No USB camera engine/, empty: /Scan finished with no cameras/, scanFailed: /Scan failed/,
+      token: /Bridge rejected its token/, cancelled: /Scan cancelled/, invalid: /Enter a camera origin/,
+      cameraAuth: /camera rejected CCAPI authentication/, missing: /discovery endpoints were not found/,
+      unknown: /exact cause is unknown/, generic: /without a verified recovery reason/, tls: /TLS connection/,
+      bridgeNetwork: /could not reach the Bridge/,
+    } : {
+      unavailable: /沒有可用的 USB 相機引擎/, empty: /掃描已完成，但未找到相機/, scanFailed: /掃描失敗/,
+      token: /Bridge 拒絕了 token/, cancelled: /已取消掃描/, invalid: /請填入相機原始位址/,
+      cameraAuth: /相機拒絕了 CCAPI 驗證/, missing: /找不到相機的 CCAPI 探索端點/,
+      unknown: /確切原因不明/, generic: /目前沒有可確認的原因/, tls: /TLS 連線/,
+      bridgeNetwork: /無法連上 Bridge/,
+    };
+    await context.addInitScript(() => {
+      // Deliberately deliver retired scan responses even after AbortSignal fires.
+      // The production owner check, not the browser's network cancellation, must
+      // protect the replacement state. A task marker proves the body was consumed.
+      const original = window.fetch;
+      window.__scanBodiesConsumed = 0;
+      window.fetch = async (input, options) => {
+        const scan = new URL(String(input), location.href).pathname === "/v1/cameras";
+        const response = await original(input, scan ? { ...options, signal: undefined } : options);
+        if (scan) {
+          const json = response.json.bind(response);
+          response.json = async () => {
+            try { return await json(); }
+            finally { setTimeout(() => { window.__scanBodiesConsumed += 1; }, 0); }
+          };
+        }
+        return response;
+      };
+    });
+    page.on("pageerror", error => pageErrors.push(error.message));
+    page.on("request", request => {
+      if (request.method() !== "GET") writes.push({ method: request.method(), path: new URL(request.url()).pathname });
+    });
+    await page.route("**/health", route => route.fulfill({ json: {
+      authRequired: true, engines: { libgphoto2: { available: false },
+        edsdk: { available: enginesAvailable, version: "SYNTHETIC EDSDK" }, ccapi: { available: true } },
+    } }));
+    const camera = id => ({ id, model: `SYNTHETIC ${id}`, port: "USB", engine: "edsdk" });
+    await page.route("**/v1/cameras", async route => {
+      const attempt = ++scans;
+      let gate = null;
+      if ([4, 6].includes(attempt)) {
+        let resolve;
+        gate = new Promise(done => { resolve = done; });
+        scanGates.set(attempt, resolve);
+      }
+      await page.evaluate(count => { window.__scanRequests = count; }, attempt);
+      if (gate) await gate;
+      if ([2, 6].includes(attempt)) {
+        await route.fulfill({ status: 401, json: { error: { code: "SYNTHETIC", message: "Synthetic" } } });
+      } else {
+        await route.fulfill({ json: { cameras: attempt === 1 ? [] : [camera(attempt === 4 ? "OLD" : "NEW")] } });
+      }
+    });
+    await page.route("**/v1/session", async route => {
+      if (route.request().method() !== "POST") return route.continue();
+      const attempt = ++connections;
+      if (attempt === 8) return route.continue();
+      if (attempt === 6) return route.abort("failed");
+      const reason = ["AUTHENTICATION_REJECTED", "ENDPOINT_NOT_FOUND", { malformed: true },
+        "TLS_ERROR", "AUTHENTICATION_REJECTED", null, "TLS_ERROR"][attempt - 1];
+      await route.fulfill({ status: attempt === 4 ? 401 : attempt === 5 ? 503 : 502, json: { error: {
+        code: attempt === 5 ? "UNAUTHORIZED" : "CCAPI_DISCOVERY_FAILED", engine: "ccapi",
+        connectionReason: reason, message: "401 Unauthorized: synthetic body cannot establish authentication",
+      } } });
+    });
+    try {
+      await page.goto(origin, { waitUntil: "networkidle" });
+      await page.locator("#connection-view .language-select").selectOption(language);
+      assert.match(await page.locator("#connection-status").innerText(), text.unavailable);
+      assert.equal(scans, 0);
+      enginesAvailable = true;
+      await page.click("#health-retry-button");
+      await page.waitForFunction(() => document.querySelector("#engine-state").textContent.includes("SYNTHETIC EDSDK"));
+      assert.equal(scans, 0, "Check Bridge never silently retries a scan");
+      await page.click("#scan-button");
+      await page.waitForFunction(() => window.__scanBodiesConsumed === 1);
+      assert.match(await page.locator("#connection-status").innerText(), text.empty);
+      assert.equal(await page.locator("#connect-button").isDisabled(), true);
+      await page.click("#scan-button");
+      await page.waitForFunction(() => window.__scanBodiesConsumed === 2);
+      assert.match(await page.locator("#connection-status").innerText(), text.scanFailed);
+      assert.match(await page.locator("#connection-error").innerText(), text.token);
+      await page.click("#connection-fix-button");
+      assert.equal(await page.locator("#token-input").evaluate(input => input === document.activeElement), true);
+      await page.fill("#token-input", "SYNTHETIC-TOKEN");
+      await page.click("#scan-button");
+      await page.waitForSelector("#connect-button:not([disabled])");
+      assert.equal(await page.locator("#camera-select").inputValue(), "NEW");
+      await page.click("#scan-button");
+      await page.waitForSelector("#scan-cancel-button:not([hidden])");
+      await page.waitForFunction(() => window.__scanRequests === 4);
+      await page.click("#ccapi-mode-button");
+      await page.click("#usb-mode-button");
+      assert.equal(scans, 4, "Switching modes requires an explicit scan retry");
+      await page.click("#scan-button");
+      await page.waitForSelector("#connect-button:not([disabled])");
+      const consumedBeforeOld = await page.evaluate(() => window.__scanBodiesConsumed);
+      scanGates.get(4)();
+      await page.waitForFunction(before => window.__scanBodiesConsumed > before, consumedBeforeOld);
+      assert.equal(await page.locator("#camera-select").inputValue(), "NEW");
+      assert.equal(await page.locator("#connection-error").isHidden(), true);
+      await page.click("#scan-button");
+      await page.waitForSelector("#scan-cancel-button:not([hidden])");
+      await page.waitForFunction(() => window.__scanRequests === 6);
+      await page.click("#scan-cancel-button");
+      assert.match(await page.locator("#connection-status").innerText(), text.cancelled);
+      const consumedBeforeCancel = await page.evaluate(() => window.__scanBodiesConsumed);
+      scanGates.get(6)();
+      await page.waitForFunction(before => window.__scanBodiesConsumed > before, consumedBeforeCancel);
+      assert.match(await page.locator("#connection-status").innerText(), text.cancelled);
+      assert.equal(await page.locator("#connection-error").isHidden(), true);
+      assert.deepEqual(writes, [], "Setup, scans, cancellation and guidance send no camera writes");
+
+      await page.click("#ccapi-mode-button");
+      await page.fill("#ccapi-url-input", `${simulatorOrigin}/ccapi`);
+      assert.match(await page.locator("#ccapi-url-validation").innerText(), text.invalid);
+      assert.equal(await page.locator("#ccapi-url-input").getAttribute("aria-invalid"), "true");
+      assert.equal(await page.locator("#connect-button").isDisabled(), true);
+      await page.fill("#ccapi-url-input", simulatorOrigin);
+      assert.equal(await page.locator("#ccapi-url-validation").isHidden(), true);
+      for (const [index, expected] of [text.cameraAuth, text.missing, text.unknown, text.token,
+        text.generic, text.bridgeNetwork, text.tls].entries()) {
+        await page.click("#connect-button");
+        await page.waitForSelector("#connection-error:not([hidden])");
+        await page.waitForSelector("#connect-button:not([disabled])");
+        assert.equal(connections, index + 1);
+        assert.match(await page.locator("#connection-error").innerText(), expected);
+        assert.doesNotMatch(await page.locator("#connection-error").innerText(), /synthetic body/);
+        if (index === 0) {
+          await page.click("#connection-fix-button");
+          assert.equal(await page.locator("#camera-credentials").getAttribute("open"), "");
+          assert.equal(await page.locator("#ccapi-username-input").evaluate(input => input === document.activeElement), true);
+        }
+      }
+      assert.equal(writes.length, 7, "Only explicit Connect attempts send POST requests");
+      assert.equal(writes.every(write => write.method === "POST" && write.path === "/v1/session"), true);
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      assert.equal(connections, 8);
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+      assert.equal(writes.every(write => (write.method === "POST" && write.path === "/v1/session") ||
+        (write.method === "DELETE" && /^\/v1\/session\/[^/]+(?:\/events)?$/.test(write.path))), true,
+      "Recovery and connection lifecycle send no shutter, focus, Live View or setting commands");
+      assert.deepEqual(pageErrors, []);
+      console.log(`PC connection setup, scan ownership and recovery journey passed: ${language}`);
+    } finally {
+      for (const release of scanGates.values()) release();
+      await context.close();
+    }
+  }
+}
+
+async function verifyHeldAutofocusAndFocusFrames(browser, origin) {
+  // Real production DOM and application handlers; the camera contract alone is
+  // supplied by loopback route fixtures. This is not physical-camera evidence.
+  for (const advertised of [false, true]) {
+    const context = await browser.newContext({ locale: "en-US", viewport: { width: 1280, height: 900 } });
+    const page = await context.newPage();
+    const errors = [], commands = [];
+    let stopAttempts = 0, focusReads = 0, focusAspectRatio = 1;
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+    page.on("pageerror", error => errors.push(error.message));
+    await page.route(/\/capabilities$/, async route => {
+      const response = await route.fetch();
+      const capabilities = await response.json();
+      capabilities.supported = ["AUTOFOCUS", "LIVE_VIEW", "MEDIA_BROWSER"];
+      capabilities.settings = [];
+      if (advertised) {
+        capabilities.heldAutofocusSupported = true;
+        capabilities.focusInfoSupported = true;
+      } else {
+        delete capabilities.heldAutofocusSupported;
+        delete capabilities.focusInfoSupported;
+      }
+      await route.fulfill({ response, json: capabilities });
+    });
+    await page.route(/\/focus\/auto\/(start|stop)$/, async route => {
+      const owner = route.request().postDataJSON();
+      const command = new URL(route.request().url()).pathname.endsWith("/start") ? "start" : "stop";
+      commands.push({ command, ownerId: owner.ownerId });
+      assert.match(owner.ownerId, /^[A-Za-z0-9._:-]{1,128}$/);
+      if (command === "stop" && ++stopAttempts <= 2) {
+        await route.fulfill({ status: 502, json: { error: { code: "SHUTTER_RELEASE_UNCONFIRMED", message: "Synthetic release is unconfirmed" } } });
+      } else await route.fulfill({ json: { ownerId: owner.ownerId, active: command === "start", stopUnconfirmed: false } });
+    });
+    await page.route(/\/liveview\/(start|stop)$/, route => route.fulfill({ json: {
+      active: route.request().url().endsWith("/start"), liveViewStopUnconfirmed: false,
+      requestedFps: 4, source: "DESKTOP_BRIDGE_STREAM",
+    } }));
+    await page.route(/\/liveview\/frame$/, route => route.fulfill({ contentType: "image/png", body: png }));
+    await page.route(/\/liveview\/focus-info$/, route => {
+      focusReads++;
+      return route.fulfill({ json: { magnification: 1, imageAspectRatio: focusAspectRatio,
+        frames: [{ left: 0.25, top: 0.25, right: 0.75, bottom: 0.75, status: "FOCUSED", kind: "FACE" }],
+      } });
+    });
+    try {
+      await page.goto(origin, { waitUntil: "networkidle" });
+      await page.waitForSelector("#connect-button:not([disabled])");
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      assert.equal(await page.locator("#held-autofocus-section").isVisible(), advertised);
+      if (advertised) {
+        await page.locator("#held-autofocus-start").focus();
+        await page.keyboard.press("Enter");
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-status").textContent.includes("AF is held"));
+        assert.equal(await page.locator("#held-autofocus-start").isDisabled(), true);
+        assert.equal(await page.locator("#held-autofocus-stop").isEnabled(), true);
+        await page.locator("#held-autofocus-stop").focus();
+        await page.keyboard.press("Space");
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-status").textContent.includes("release is unconfirmed"));
+        // Leaving the live panel makes one bounded automatic recovery attempt.
+        // Stop remains globally visible and keyboard accessible while it settles.
+        await page.click('.tab[data-view="diagnostics"]');
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-status").textContent.includes("release is unconfirmed"));
+        assert.equal(await page.locator("#held-autofocus-stop").isVisible(), true);
+        assert.equal(await page.locator("#held-autofocus-stop").isEnabled(), true);
+        await page.locator("#held-autofocus-stop").focus();
+        await page.keyboard.press("Enter");
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-stop").disabled);
+        assert.equal(commands.length, 4);
+        assert.deepEqual(commands.map(command => command.command), ["start", "stop", "stop", "stop"]);
+        assert.equal(new Set(commands.map(command => command.ownerId)).size, 1);
+        await page.click('.tab[data-view="live"]');
+        // A new held command can be explicitly started and stopped after recovery.
+        await page.click("#held-autofocus-start");
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-status").textContent.includes("AF is held"));
+        await page.click("#held-autofocus-stop");
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-stop").disabled);
+        assert.notEqual(commands[4].ownerId, commands[0].ownerId);
+      }
+      await page.click("#rail-live-button");
+      await page.waitForSelector("#live-image:not([hidden])");
+      if (advertised) {
+        await page.waitForSelector("#camera-focus-overlay:not([hidden]) .status-focused.kind-face");
+        const geometry = await page.evaluate(() => {
+          const image = document.querySelector("#live-image").getBoundingClientRect();
+          const overlay = document.querySelector("#camera-focus-overlay").getBoundingClientRect();
+          const frame = document.querySelector(".camera-focus-frame").getBoundingClientRect();
+          return { difference: Math.max(Math.abs(image.left - overlay.left), Math.abs(image.top - overlay.top),
+            Math.abs(image.width - overlay.width), Math.abs(image.height - overlay.height)),
+          widthRatio: frame.width / image.width, heightRatio: frame.height / image.height };
+        });
+        assert.ok(geometry.difference < 1, JSON.stringify(geometry));
+        assert.ok(Math.abs(geometry.widthRatio - 0.5) < 0.01);
+        assert.ok(Math.abs(geometry.heightRatio - 0.5) < 0.01);
+        fs.mkdirSync(RESULTS_DIR, { recursive: true });
+        await page.screenshot({ path: path.join(RESULTS_DIR, "desktop-camera-focus-frames.png"), fullPage: true });
+        focusAspectRatio = 1.5;
+        await page.waitForSelector("#camera-focus-overlay[hidden]", { state: "attached" });
+        // Resize clears immediately, and invalid metadata must not reappear.
+        await page.setViewportSize({ width: 390, height: 844 });
+        assert.equal(await page.locator("#camera-focus-overlay").isVisible(), false);
+        await page.click("#rail-live-button");
+        await page.waitForSelector("#live-image[hidden]", { state: "attached" });
+        assert.equal(await page.locator("#camera-focus-overlay").isVisible(), false);
+        assert.equal(await page.locator("#camera-focus-legend").isVisible(), false);
+      } else {
+        await page.waitForFunction(() => parseFloat(document.querySelector("#frame-indicator").textContent) > 0);
+        assert.equal(focusReads, 0, "Older Bridge without optional capability receives no telemetry request");
+        assert.equal(commands.length, 0);
+        assert.equal(await page.locator("#camera-focus-overlay").isVisible(), false);
+      }
+      assert.deepEqual(errors, []);
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+    } finally {
+      await context.close();
     }
   }
 }
@@ -771,6 +1381,8 @@ async function run() {
       (state) => state.canonical.af_start_count === 1 && state.canonical.af_stop_count === 1,
       "balanced Canon AF start and stop",
     );
+    await page.waitForFunction(() => document.querySelector("#operation-state")?.textContent ===
+      "Focus command accepted; focus is not confirmed");
     await page.click("#half-press-button");
     await waitForSimulatorState(
       simulatorOrigin,
@@ -884,6 +1496,8 @@ async function run() {
         state.canonical.focus_position?.y >= 1500 && state.canonical.focus_position?.y <= 1700,
       "geometry-backed Canon Tap AF",
     );
+    await page.waitForFunction(() => document.querySelector("#operation-state")?.textContent === "Focus point accepted");
+    assert.equal(await page.locator("#focus-reticle").getAttribute("class"), "focus-reticle accepted");
 
     await page.selectOption("#tap-action-select", "whiteBalance");
     await page.mouse.click(
@@ -1434,9 +2048,12 @@ async function run() {
     assert.deepEqual(await page.evaluate(() => window.__objectUrlRevocationViolations), []);
     assert.deepEqual(pageErrors, []);
     await context.close();
+    await verifyConnectionRecoveryJourneys(browser, bridgeOrigin, simulatorOrigin);
     await verifyCapabilityResponseOwnership(browser, bridgeOrigin);
     await verifyMediaDeleteResponseOwnership(browser, bridgeOrigin);
     await verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin);
+    await verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOrigin);
+    await verifyHeldAutofocusAndFocusFrames(browser, bridgeOrigin);
   } finally {
     if (browser) await browser.close();
     await stopProcess(bridge?.process);

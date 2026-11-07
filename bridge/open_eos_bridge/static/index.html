@@ -11,7 +11,7 @@
 <body>
   <div id="app">
     <section id="shutter-disconnect-warning" class="shutter-disconnect-warning" role="alert" hidden>
-      <p data-i18n="previousShutterWarning">Shutter release in the previous connection was not confirmed. Check the camera and stop any exposure before shooting again.</p>
+      <p data-i18n="previousShutterWarning">Recording, shutter, or autofocus may still be active after the previous connection. Check the camera and stop any active control before using it again.</p>
       <button id="shutter-disconnect-confirm" class="button secondary" type="button" data-i18n="confirmCameraChecked">I've checked the camera</button>
     </section>
     <section id="connection-view" class="connection-shell">
@@ -32,6 +32,8 @@
         </label>
       </header>
 
+      <button class="button secondary" type="button" data-open-media-history data-i18n="mediaHistoryOpen">Saving history</button>
+      <p class="supporting" data-media-history-warning hidden role="status"></p>
       <main class="connection-main">
         <div class="connection-tool">
           <div class="section-heading">
@@ -42,11 +44,16 @@
             <span id="health-dot" class="status-dot warning" aria-hidden="true"></span>
           </div>
 
+          <p class="supporting connection-help" data-i18n="connectionBridgeHelp">This page uses the Bridge running on your computer to reach the camera. Keep that Bridge running.</p>
+          <button id="health-retry-button" class="button secondary" type="button" data-i18n="connectionCheckBridge">Check Bridge again</button>
+
           <label class="field">
             <span data-i18n="bearerToken">Bearer token</span>
             <input id="token-input" type="password" autocomplete="off" spellcheck="false"
-                   data-i18n-placeholder="tokenOptional" placeholder="Optional on loopback">
+                   aria-describedby="token-help" data-i18n-placeholder="tokenOptional" placeholder="Optional on loopback">
           </label>
+
+          <p id="token-help" class="supporting" data-i18n="connectionTokenHelp">Use the token configured for this computer’s Bridge, if required.</p>
 
           <div id="connection-mode" class="connection-mode" role="group" aria-label="Connection type" data-i18n-aria="connectionType">
             <button id="usb-mode-button" class="active" type="button" data-connection-mode="usb">
@@ -60,6 +67,7 @@
           </div>
 
           <div id="usb-connection-fields">
+            <p class="supporting connection-help" data-i18n="connectionUsbHelp">Turn on the camera, connect a USB data cable, and close other camera-control apps. USB needs an available libgphoto2 or configured Canon EDSDK engine on this computer.</p>
             <label class="field">
               <span data-i18n="camera">Camera</span>
               <select id="camera-select" disabled>
@@ -69,13 +77,17 @@
           </div>
 
           <div id="ccapi-connection-fields" hidden>
+            <p class="supporting connection-help" data-i18n="connectionCcapiHelp">Enable CCAPI on a compatible camera and connect this computer to a network that can reach it. Use the address and port shown by the camera. Camera Connect pairing alone does not enable CCAPI.</p>
             <label class="field">
               <span data-i18n="cameraUrl">Camera URL</span>
               <input id="ccapi-url-input" type="url" inputmode="url" autocomplete="url" spellcheck="false"
-                     data-i18n-placeholder="cameraUrlPlaceholder" placeholder="http://192.168.1.2:8080">
+                     aria-describedby="ccapi-url-help ccapi-url-validation" data-i18n-placeholder="cameraUrlPlaceholder" placeholder="http://192.168.1.2:8080">
             </label>
-            <details class="credential-fields">
+            <p id="ccapi-url-help" class="supporting" data-i18n="connectionOriginHelp">Use only http:// or https://, the camera address, and its port. Do not add /ccapi, credentials, a query, or a fragment.</p>
+            <p id="ccapi-url-validation" class="inline-error" role="status" hidden></p>
+            <details id="camera-credentials" class="credential-fields">
               <summary data-i18n="cameraCredentials">Camera credentials</summary>
+              <p class="supporting connection-help" data-i18n="connectionCredentialHelp">Enter the camera’s CCAPI username and password only if the camera requires them. These are separate from the Bridge token.</p>
               <label class="field">
                 <span data-i18n="username">Username</span>
                 <input id="ccapi-username-input" type="text" autocomplete="username" spellcheck="false">
@@ -87,6 +99,7 @@
             </details>
           </div>
 
+          <p id="connection-status" class="supporting connection-help" role="status" aria-live="polite"></p>
           <div class="connection-actions">
             <button id="scan-button" class="button secondary" type="button">
               <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span>
@@ -97,7 +110,9 @@
               <span data-i18n="connect">Connect</span>
             </button>
           </div>
+          <button id="scan-cancel-button" class="button secondary" type="button" data-i18n="connectionCancelScan" hidden>Cancel scan</button>
           <p id="connection-error" class="inline-error" role="alert" hidden></p>
+          <button id="connection-fix-button" class="button secondary" type="button" hidden></button>
         </div>
       </main>
     </section>
@@ -147,6 +162,17 @@
         </div>
       </header>
 
+      <section id="held-autofocus-section" class="held-autofocus-controls" aria-labelledby="held-autofocus-heading" hidden>
+        <div>
+          <strong id="held-autofocus-heading" data-i18n="heldAutofocus">Held autofocus</strong>
+          <p id="held-autofocus-status" class="supporting" role="status" aria-live="polite"></p>
+        </div>
+        <div class="held-autofocus-actions">
+          <button id="held-autofocus-start" class="button secondary" type="button" aria-describedby="held-autofocus-status" data-i18n="heldAutofocusStart">Start held AF</button>
+          <button id="held-autofocus-stop" class="button secondary" type="button" aria-describedby="held-autofocus-status" data-i18n="heldAutofocusStop" disabled>Stop held AF</button>
+        </div>
+      </section>
+
       <main id="live-panel" class="live-workspace view-panel">
         <section class="viewfinder-column">
           <div id="viewfinder" class="viewfinder">
@@ -185,10 +211,12 @@
               data-i18n-aria="cameraAudioUnmute" aria-pressed="false" hidden>
               <span class="icon" data-icon="volume-x" aria-hidden="true"></span>
             </button>
+            <div id="camera-focus-overlay" class="camera-focus-overlay" aria-hidden="true" hidden></div>
             <div id="focus-reticle" class="focus-reticle" aria-hidden="true" hidden></div>
             <div id="capture-flash" class="capture-flash" aria-hidden="true"></div>
           </div>
 
+          <p id="camera-focus-legend" class="camera-focus-legend supporting" data-i18n="cameraFocusLegend" hidden>Camera AF: green = focused · amber = focusing · red dashed = unfocused · white dashed = standby/unknown</p>
           <div id="exposure-strip" class="exposure-strip" aria-label="Exposure controls" data-i18n-aria="exposureControls"></div>
         </section>
 
@@ -310,6 +338,7 @@
             <button id="media-upload-button" class="icon-button" type="button" data-i18n-aria="uploadMedia">
               <span class="icon" data-icon="upload" aria-hidden="true"></span>
             </button>
+            <button id="media-listing-cancel" class="button secondary" type="button" data-i18n="mediaCancelLoading" hidden>Cancel loading</button>
             <button id="media-refresh-button" class="button secondary" type="button">
               <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span><span data-i18n="refresh">Refresh</span>
             </button>
@@ -332,8 +361,14 @@
               <option value="oldest" data-i18n="mediaOldest">Oldest first</option>
               <option value="name" data-i18n="mediaName">File name</option>
               <option value="camera" data-i18n="mediaCameraOrder">Camera order</option>
+              <option value="rating-highest" data-i18n="mediaRatingHighest">Highest rating first</option>
+              <option value="rating-lowest" data-i18n="mediaRatingLowest">Lowest rating first</option>
             </select>
           </label>
+          <button id="media-folder-button" class="button secondary" type="button" aria-haspopup="dialog" aria-controls="media-folder-dialog" aria-pressed="false" data-i18n="mediaFolderFilter">Camera folder filter</button>
+          <button id="media-folder-clear" class="button secondary" type="button" data-i18n="mediaFolderClear" hidden>Clear folder filter</button>
+          <button id="media-rating-button" class="button secondary" type="button" aria-haspopup="dialog" aria-controls="media-rating-dialog" aria-pressed="false" data-i18n="mediaRatingFilter">Rating filter</button>
+          <button id="media-rating-clear" class="button secondary" type="button" data-i18n="mediaRatingClear" hidden>Clear rating filter</button>
           <button id="media-date-button" class="button secondary" type="button" aria-haspopup="dialog" aria-controls="media-date-dialog" aria-pressed="false" data-i18n="mediaDateRange">Media date range</button>
           <button id="media-date-clear" class="button secondary" type="button" data-i18n="mediaDateClear" hidden>Clear date range</button>
           <nav id="media-pagination" class="media-pagination" data-i18n-aria="mediaPages" hidden>
@@ -346,7 +381,53 @@
             </button>
           </nav>
         </div>
+        <p id="media-folder-summary" class="supporting media-date-summary" role="status" hidden></p>
+        <p id="media-rating-summary" class="supporting media-date-summary" role="status" hidden></p>
         <p id="media-date-summary" class="supporting media-date-summary" role="status" hidden></p>
+        <section id="media-selection" class="media-selection" aria-describedby="media-selection-help">
+          <p id="media-selection-summary" class="supporting" role="status"></p>
+          <div class="media-selection-actions">
+            <button id="media-select-filtered" class="button secondary" type="button" data-i18n="mediaSelectFiltered">Select all loaded matches</button>
+            <button id="media-selection-clear" class="button secondary" type="button" data-i18n="mediaSelectionClear">Clear selection</button>
+            <button class="button secondary" type="button" data-open-media-history data-i18n="mediaHistoryOpen">Saving history</button>
+            <button id="media-batch-start" class="button primary" type="button" data-i18n="mediaBatchStart">Save selected originals to folder…</button>
+          </div>
+          <p id="media-selection-help" class="supporting" data-i18n="mediaSelectionHelp">Selects loaded matches across pages, not unseen files on the card. Selection is kept when filters or scope change. Hidden and no-longer-loaded selections are included in the batch.</p>
+          <p id="media-batch-unavailable" class="supporting" data-i18n="mediaBatchUnavailable" hidden>Batch saving needs a browser with folder access. You can still download originals individually.</p>
+        </section>
+        <p class="supporting" data-media-history-warning hidden role="status"></p>
+        <section id="media-auto-panel" class="media-auto-panel" aria-labelledby="media-auto-import-title" aria-describedby="media-auto-import-purpose media-auto-import-notice">
+          <div class="media-batch-heading">
+            <h3 id="media-auto-import-title" data-i18n="mediaAutoImportTitle">Foreground JPEG auto-import</h3>
+            <div class="media-selection-actions">
+              <button id="media-auto-start" class="button secondary" type="button" data-i18n="mediaAutoImportStart">Enable JPEG import to folder…</button>
+              <button id="media-auto-stop" class="button secondary" type="button" data-i18n="mediaAutoImportStop" hidden>Stop JPEG import</button>
+            </div>
+          </div>
+          <p id="media-auto-import-purpose" class="supporting" data-i18n="mediaAutoImportPurpose"></p>
+          <p id="media-auto-status" role="status"></p>
+          <p id="media-auto-import-destination" class="supporting"></p>
+          <p id="media-auto-import-summary" role="status"></p>
+          <p id="media-auto-import-reason" class="supporting" role="status" hidden></p>
+          <p id="media-auto-import-unavailable" class="supporting" data-i18n="mediaAutoImportUnavailable" hidden></p>
+          <details>
+            <summary data-i18n="mediaAutoImportHelp">Limits and file verification</summary>
+            <p class="supporting" data-i18n="mediaAutoImportLimits"></p>
+            <p class="supporting" data-i18n="mediaAutoImportEvidence"></p>
+          </details>
+          <p id="media-auto-import-notice" class="supporting" data-i18n="mediaAutoImportNotice"></p>
+          <ol id="media-auto-list" class="media-batch-list"></ol>
+        </section>
+        <section id="media-batch-panel" class="media-batch-panel" aria-labelledby="media-batch-title" hidden>
+          <div class="media-batch-heading">
+            <h3 id="media-batch-title" data-i18n="mediaBatchTitle">Original file batch</h3>
+            <button id="media-batch-cancel" class="button secondary" type="button" data-i18n="mediaBatchCancel">Cancel remaining files</button>
+          </div>
+          <p id="media-batch-destination" class="supporting"></p>
+          <p id="media-batch-summary" role="status"></p>
+          <p id="media-batch-notice" class="supporting"></p>
+          <ol id="media-batch-list" class="media-batch-list"></ol>
+        </section>
         <section id="media-transfer" class="media-transfer" aria-live="polite" hidden>
           <span class="media-transfer-icon icon" data-icon="download" aria-hidden="true"></span>
           <div class="media-transfer-copy">
@@ -581,6 +662,25 @@
     </div>
   </dialog>
 
+  <dialog id="media-history-dialog" class="setting-dialog media-history-dialog" aria-labelledby="media-history-title" aria-describedby="media-history-help">
+    <div class="dialog-heading">
+      <h2 id="media-history-title" data-i18n="mediaHistoryTitle">Saving history</h2>
+      <button id="media-history-close" class="button secondary" type="button" data-i18n="close">Close</button>
+    </div>
+    <p id="media-history-help" class="supporting" data-i18n="mediaHistoryHelp"></p>
+    <p id="media-history-status" role="status"></p>
+    <ol id="media-history-list" class="media-batch-list"></ol>
+    <p class="supporting" data-i18n="mediaContinuationHelp"></p>
+    <label><input id="media-continuation-acknowledge" type="checkbox"><span data-i18n="mediaContinuationAcknowledge"></span></label>
+    <button id="media-continuation-start" class="button primary" type="button" disabled data-i18n="mediaContinuationStart"></button>
+    <button id="media-history-clear" class="button secondary" type="button" data-i18n="mediaHistoryClear">Clear history…</button>
+    <div id="media-history-confirm" hidden>
+      <p data-i18n="mediaHistoryClearQuestion"></p>
+      <button id="media-history-confirm-no" class="button secondary" type="button" data-i18n="mediaHistoryClearCancel">Keep records</button>
+      <button id="media-history-confirm-yes" class="button danger" type="button" data-i18n="mediaHistoryClearConfirm">Clear records</button>
+    </div>
+  </dialog>
+
   <dialog id="media-date-dialog" class="setting-dialog media-date-dialog" aria-labelledby="media-date-title" aria-describedby="media-date-help media-date-zone">
     <form id="media-date-form" novalidate>
       <div class="dialog-heading">
@@ -602,15 +702,70 @@
     </form>
   </dialog>
 
+  <dialog id="media-folder-dialog" class="setting-dialog media-date-dialog" aria-labelledby="media-folder-title" aria-describedby="media-folder-help">
+    <form id="media-folder-form">
+      <div class="dialog-heading">
+        <h2 id="media-folder-title" data-i18n="mediaFolderFilter">Camera folder filter</h2>
+        <button id="media-folder-close" class="icon-button" type="button" data-i18n-aria="close"><span class="icon" data-icon="x" aria-hidden="true"></span></button>
+      </div>
+      <div class="media-date-fields">
+        <p id="media-folder-help" class="supporting" data-i18n="mediaFolderHelp">Uses only folder information already supplied by the camera backend. No directory or metadata requests are added.</p>
+        <label><span data-i18n="mediaFolderFilter">Camera folder filter</span>
+          <select id="media-folder-filter-select" autofocus></select>
+        </label>
+      </div>
+      <div class="media-date-actions">
+        <button id="media-folder-dialog-clear" class="button secondary" type="button" data-i18n="mediaFolderClear">Clear folder filter</button>
+        <button id="media-folder-cancel" class="button secondary" type="button" data-i18n="mediaDateCancel">Cancel</button>
+        <button id="media-folder-apply" class="button primary" type="submit" data-i18n="mediaDateApply">Apply</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="media-rating-dialog" class="setting-dialog media-date-dialog" aria-labelledby="media-rating-title" aria-describedby="media-rating-help">
+    <form id="media-rating-form">
+      <div class="dialog-heading">
+        <h2 id="media-rating-title" data-i18n="mediaRatingFilter">Rating filter</h2>
+        <button id="media-rating-close" class="icon-button" type="button" data-i18n-aria="close"><span class="icon" data-icon="x" aria-hidden="true"></span></button>
+      </div>
+      <div class="media-date-fields">
+        <p id="media-rating-help" class="supporting" data-i18n="mediaRatingHelp">Uses loaded ratings only. Unknown is different from unrated (0). No additional camera metadata is requested; Recent or incomplete lists do not cover the whole card.</p>
+        <label><span data-i18n="mediaRatingFilter">Rating filter</span>
+          <select id="media-rating-filter-select" autofocus>
+            <option value="all" data-i18n="mediaRatingAll">All ratings</option>
+            <option value="unrated" data-i18n="mediaRatingUnrated">Unrated (known 0)</option>
+            <option value="1-plus" data-i18n="mediaRatingOne">1 star and above</option>
+            <option value="2-plus" data-i18n="mediaRatingTwo">2 stars and above</option>
+            <option value="3-plus" data-i18n="mediaRatingThree">3 stars and above</option>
+            <option value="4-plus" data-i18n="mediaRatingFour">4 stars and above</option>
+            <option value="5" data-i18n="mediaRatingFive">5 stars</option>
+            <option value="unknown" data-i18n="mediaRatingUnknown">Unknown rating</option>
+          </select>
+        </label>
+      </div>
+      <div class="media-date-actions">
+        <button id="media-rating-dialog-clear" class="button secondary" type="button" data-i18n="mediaRatingClear">Clear rating filter</button>
+        <button id="media-rating-cancel" class="button secondary" type="button" data-i18n="mediaDateCancel">Cancel</button>
+        <button id="media-rating-apply" class="button primary" type="submit" data-i18n="mediaDateApply">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <script src="/app/icons.js"></script>
   <script src="/app/diagnostics.js"></script>
   <script src="/app/monitoring.js"></script>
+  <script src="/app/camera-focus.js"></script>
   <script src="/app/lut.js"></script>
   <script src="/app/local-video.js"></script>
   <script src="/app/rtp-audio.js"></script>
   <script src="/app/media-transfer.js"></script>
   <script src="/app/media-library.js"></script>
+  <script src="/app/media-listing.js"></script>
+  <script src="/app/media-batch.js"></script>
+  <script src="/app/media-batch-destination.js"></script>
+  <script src="/app/media-transfer-history.js"></script>
+  <script src="/app/media-auto-import.js"></script>
+  <script src="/app/connection-guidance.js"></script>
   <script src="/app/app.js"></script>
 </body>
 </html>
